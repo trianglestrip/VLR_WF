@@ -86,46 +86,49 @@ git checkout -b wavefront-renderer
 **预计时间**: 3 周  
 **状态**: ⏳ 未开始
 
-#### 1.1 创建数据结构定义 (3 天)
-- [ ] 创建 `libVLR/shared/wavefront_types.h`
-  - [ ] 定义 `WavefrontPathState` 结构体 (144 bytes)
+#### 1.1 创建数据结构定义 (3 天) ✅ **已完成**
+- [x] 创建 `libVLR/shared/wavefront_types.h`
+  - [x] 定义 `WavefrontPathState` 结构体 (144 bytes)
     - 光线信息（origin, direction）
     - 光谱信息（throughput, contribution, wls）
     - RNG 状态
     - 路径历史（prevDirPDF, prevSampledType, pathLength）
     - 像素坐标
     - 状态标志
-  - [ ] 定义 `WavefrontHitInfo` 结构体 (32 bytes)
+  - [x] 定义 `WavefrontHitInfo` 结构体 (32 bytes)
     - 命中几何信息
     - 参数化坐标
     - 命中标志
-  - [ ] 定义 `WavefrontWorkQueue` 结构体
+  - [x] 定义 `WavefrontWorkQueue` 结构体
     - 路径索引数组指针
     - 原子计数器指针
     - enqueue/dequeue 方法
-  - [ ] 定义 `WavefrontLaunchParameters` 结构体
+  - [x] 定义 `WavefrontLaunchParameters` 结构体
     - 继承公共 Pipeline 参数
     - Wavefront 特定缓冲区
     - 工作队列
-  - [ ] 定义 `MaterialCategory` 枚举
-  - [ ] 定义 `WFTracePayload` 和签名
-- [ ] **验收**: 编译通过，结构体大小符合预期
+  - [x] 定义 `MaterialCategory` 枚举
+  - [x] 定义 `WFTracePayload` 和签名
+- [x] 创建 `libVLR/include/vlr/basic_types.h` - 基础数学类型
+- [x] 创建 `libVLR/shared/wavefront_types_test.cu` - 编译验证
+- [x] **验收**: 编译通过，结构体大小符合预期 ✅
 
-#### 1.2 创建公共函数库 (2 天)
-- [ ] 创建 `libVLR/shared/wavefront_common.h`
-  - [ ] 实现 `classifyMaterial()` - 材质分类
-  - [ ] 实现 `computeMISWeight()` - MIS 权重计算
-  - [ ] 实现 `computeGeometryTerm()` - 几何项计算
-  - [ ] 实现 `shouldTerminatePath()` - RR 判断
-  - [ ] 实现 `computeSurfacePoint()` - 表面点计算
-  - [ ] 实现 `processEnvironmentHit()` - 环境光处理
-- [ ] **验收**: 所有函数编译通过，逻辑正确
+#### 1.2 创建公共函数库 (2 天) ✅ **已完成**
+- [x] 创建 `libVLR/shared/wavefront_common.h`
+  - [x] 实现 `classifyMaterial()` - 材质分类
+  - [x] 实现 `computeMISWeight()` - MIS 权重计算
+  - [x] 实现 `computeGeometryTerm()` - 几何项计算
+  - [x] 实现 `shouldTerminatePath()` - RR 判断
+  - [x] 实现 `computeSurfacePoint()` - 表面点计算
+  - [x] 实现 `processEnvironmentHit()` - 环境光处理
+  - [x] 实现其他辅助函数（initializePathState、generateCameraRay等）
+- [x] **验收**: 所有函数编译通过，逻辑正确 ✅
 
-#### 1.3 更新公共类型定义 (1 天)
-- [ ] 修改 `libVLR/include/vlr/public_types.h`
-  - [ ] 在 `VLRRenderer` 枚举中添加 `VLRRenderer_WavefrontPathTracing`
-  - [ ] 添加 Wavefront 配置结构体（可选）
-- [ ] **验收**: 编译通过，枚举值正确
+#### 1.3 更新公共类型定义 (1 天) ✅ **已完成**
+- [x] 修改 `libVLR/include/vlr/public_types.h`
+  - [x] 在 `VLRRenderer` 枚举中添加 `VLRRenderer_WavefrontPathTracing`
+  - [x] 添加 `WavefrontConfig` 配置结构体
+- [x] **验收**: 编译通过，枚举值正确 ✅
 
 #### 1.4 创建 Context 扩展 (3 天) ✅ **已完成**
 - [x] 修改 `libVLR/context.h`
