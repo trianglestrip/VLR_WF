@@ -11,6 +11,7 @@
 #pragma once
 
 #include "kernel_common.h"
+#include "material_types.h"
 #include <cstdio>
 
 namespace vlr {
@@ -218,18 +219,6 @@ struct WavefrontWorkQueue {
 };
 
 
-/// 材质分类：用于路径排序和分组
-enum MaterialCategory : uint32_t {
-    MaterialCategory_Diffuse = 0,      // 漫反射材质（Lambert）
-    MaterialCategory_Glossy,           // 光泽反射材质（GGX）
-    MaterialCategory_Specular,         // 完美镜面反射
-    MaterialCategory_Transmissive,     // 透射材质（玻璃等）
-    MaterialCategory_Emissive,         // 发光材质
-    MaterialCategory_Mixed,            // 混合材质
-    NumMaterialCategories
-};
-
-
 /// 材质队列集：按材质类型分类的工作队列
 struct WavefrontMaterialQueues {
     WavefrontWorkQueue queues[NumMaterialCategories];
@@ -276,6 +265,10 @@ struct WavefrontLaunchParameters {
     // 场景数据
     const GeometryInstance* geomInstBuffer;
     const Instance* instBuffer;
+    // 顶点数据（用于三角形网格 decodeHitPoint，可为 nullptr 时几何解码不可用）
+    const Point3D* vertexPositions;
+    const Normal3D* vertexNormals;
+    const TexCoord2D* vertexTexCoords;
     uint64_t topGroup;  // OptixTraversableHandle（OptiX 可用时定义）
     const SceneBounds* sceneBounds;
     const uint32_t* instIndices;

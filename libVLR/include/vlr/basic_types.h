@@ -189,6 +189,8 @@ struct ReferenceFrame {
 
 constexpr uint32_t NumSpectralSamples = 4;
 
+struct WavelengthSamples;  // 前向声明，用于 toDiscretizedSpectrum
+
 struct SampledSpectrum {
     float values[NumSpectralSamples];
     
@@ -282,8 +284,21 @@ struct SampledSpectrum {
     float importance(uint32_t selectedLambdaIndex) const {
         return values[selectedLambdaIndex];
     }
-};
 
+    /// 检查所有光谱分量是否为有限值（非 NaN、非 Inf）
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    bool allFinite() const {
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            if (!std::isfinite(values[i]))
+                return false;
+        }
+        return true;
+    }
+
+    /// 将采样光谱转换为 RGB（DiscretizedSpectrum），定义见 WavelengthSamples 之后
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    DiscretizedSpectrum toDiscretizedSpectrum(const WavelengthSamples& wls) const;
+};
 
 struct DiscretizedSpectrum {
     float r, g, b;
@@ -313,9 +328,34 @@ struct WavelengthSamples {
     uint32_t selectedLambdaIndex() const {
         return selectedLambda;
     }
+    
+    /// 使用等间隔偏移创建波长采样（4 个光谱采样）
+    /// u1: 波长偏移 [0,1)，u2: 选择索引 [0,1)，selectWLPDF 输出波长选择 PDF
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    static WavelengthSamples createWithEqualOffsets(float u1, float u2, float* selectWLPDF) {
+        constexpr float lambdaMin = 360.0f;
+        constexpr float lambdaMax = 830.0f;
+        constexpr float lambdaSpan = lambdaMax - lambdaMin;
+        
+        WavelengthSamples wls;
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            wls.lambdas[i] = lambdaMin + (i + u1) * (lambdaSpan / NumSpectralSamples);
+        }
+        wls.selectedLambda = static_cast<uint32_t>(u2 * NumSpectralSamples) % NumSpectralSamples;
+        wls._padding = 0;
+        *selectWLPDF = 1.0f / NumSpectralSamples;
+        return wls;
+    }
 };
 
 static_assert(sizeof(WavelengthSamples) == 24, "WavelengthSamples 必须为 24 字节");
+
+// toDiscretizedSpectrum 实现在此（需要 WavelengthSamples 完整定义）
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+DiscretizedSpectrum SampledSpectrum::toDiscretizedSpectrum(const WavelengthSamples& wls) const {
+    float luminance = values[wls.selectedLambdaIndex() % NumSpectralSamples];
+    return DiscretizedSpectrum(luminance, luminance, luminance);
+}
 
 
 // ============================================================================
