@@ -246,9 +246,9 @@ private:
     cudaStream_t m_stream;
     
     // ========================================================================
-    // 场景资源（占位符）
+    // 场景资源（占位符，无外部场景时使用的默认数据）
     // ========================================================================
-    struct Scene {
+    struct SceneData {
         // 几何体数据
         std::vector<shared::GeometryInstance> geometryInstances;
         std::vector<shared::Instance> instances;
@@ -266,8 +266,8 @@ private:
         shared::SceneBounds bounds;
     };
     
-    Scene m_scene;
-    const Scene* m_sceneSource;  // 外部场景源（setScene 设置）
+    SceneData m_scene;
+    const ::vlr::Scene* m_sceneSource;  // 外部场景源（setScene 设置）
     
     // ========================================================================
     // 私有方法

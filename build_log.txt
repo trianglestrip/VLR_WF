@@ -1,0 +1,118 @@
+﻿閫傜敤浜?.NET Framework MSBuild 鐗堟湰 17.14.40+3e7442088
+
+  Compiling CUDA source file ..\..\libVLR\GPU_kernels\wavefront_sample_lights.cu...
+  
+  F:\project\VLR_WF\build2\libVLR>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\nvcc.exe"  --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.38.33130\bin\HostX64\x64" -x cu -rdc=true  -IF:\project\VLR_WF\libVLR -IF:\project\VLR_WF\libVLR\include -IF:\project\VLR_WF\libVLR\shared -I"C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include"     --keep-dir VLR\x64\Debug  -maxrregcount=0    --machine 64 --compile -cudart static -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob0" -g  -D_WINDOWS -DVLR_Device -DVLR_USE_OPTIX -D"CMAKE_INTDIR=\"Debug\"" -DVLR_EXPORTS -D_WINDLL -D_MBCS -DWIN32 -D_WINDOWS -DVLR_USE_OPTIX -D"CMAKE_INTDIR=\"Debug\"" -DVLR_EXPORTS -Xcompiler "/EHsc /W1 /nologo /Od /FS /Zi /RTC1 /MDd /GR" -Xcompiler "/FdVLR.dir\Debug\vc143.pdb" -o VLR.dir\Debug\wavefront_sample_lights.obj "F:\project\VLR_WF\libVLR\GPU_kernels\wavefront_sample_lights.cu" 
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(13758): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cuda_runtime_api.h(14276): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\wavefront_sample_lights.cu(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/kernel_common.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\shared\../include/vlr/basic_types.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_types.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\shared\material_types.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\shared\texture_types.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/light_common.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\shared\light_types.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/bsdf_common.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/bsdf_common.h(745): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/geometry_common.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\shared\geometry_types.h(1): warning C4819: 璇ユ枃浠跺寘鍚笉鑳藉湪褰撳墠浠ｇ爜椤?936)涓〃绀虹殑瀛楃銆傝灏嗚鏂囦欢淇濆瓨涓?Unicode 鏍煎紡浠ラ槻姝㈡暟鎹涪澶?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(173): error : the object has type qualifiers that are not compatible with the member function "vlr::KernelRNG::getFloat0cTo1o" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+              object type is: const vlr::KernelRNG
+        return pathState.rng.getFloat0cTo1o() >= continueProb;
+               ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(194): error : expression preceding parentheses of apparent call must have (pointer-to-) function type [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+        decodeHitPoint(
+        ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(270): error : expression must have class type but it has type "const uint32_t" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+                float uvPDF = geomInst.asInfSphere.importanceMap.evaluatePDF(
+                              ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(274): error : expression must have class type but it has type "const uint32_t" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+                float instProb = inst.lightGeomInstDistribution.integral() / wlp.lightInstDist.integral();
+                                 ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(275): error : expression must have class type but it has type "const uint32_t" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+                float geomInstProb = geomInst.importance / inst.lightGeomInstDistribution.integral();
+                                                           ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(320): error : expression must have class type but it has type "const uint32_t" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+            float instProb = inst.lightGeomInstDistribution.integral() / wlp.lightInstDist.integral();
+                             ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(321): error : expression must have class type but it has type "const uint32_t" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+            float geomInstProb = geomInst.importance / inst.lightGeomInstDistribution.integral();
+                                                       ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(379): error : expression preceding parentheses of apparent call must have (pointer-to-) function type [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+        sampleLensPos(pathState.rng.getFloat0cTo1o(), pathState.rng.getFloat0cTo1o(), &lensPosSample);
+        ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(400): error : expression preceding parentheses of apparent call must have (pointer-to-) function type [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+        SampledSpectrum We = evaluateIDF(idfSample, pathState.wls);
+                             ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(430): error : expression must have class type but it has type "const uint32_t" [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+        uint32_t geomInstIndexInInst = inst.lightGeomInstDistribution.sample(uGeomInst, &geomInstProb);
+                                       ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(441): error : expression preceding parentheses of apparent call must have (pointer-to-) function type [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+        sampleLightPos(uPos0, uPos1, &lightPosSample);
+        ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(444): error : no operator "*" matches these operands [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+              operand types are: const vlr::ReferenceFrame * vlr::SurfacePoint
+        lightSample->lightSurfPt = inst.transform * lightPosSample.surfPt;
+                                                  ^
+  F:\project\VLR_WF\libVLR\shared\../include/vlr/basic_types.h(137): note #3326-D: function "vlr::operator*" does not match because argument #1 does not match parameter
+    Vector3D operator*(float s, const Vector3D& v) {
+             ^
+  F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(444): note #3328-D: built-in operator*(<promoted arithmetic>, <promoted arithmetic>) does not match because argument #1 does not match parameter
+        lightSample->lightSurfPt = inst.transform * lightPosSample.surfPt;
+                                                  ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(455): error : no operator "/=" matches these operands [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+              operand types are: vlr::Vector3D /= float
+        shadowRayDir /= dist;
+                     ^
+  F:\project\VLR_WF\libVLR\GPU_kernels\../shared/wavefront_common.h(455): note #3328-D: built-in operator/=(<arithmetic>, <promoted arithmetic>) does not match because argument #1 does not match parameter
+        shadowRayDir /= dist;
+                     ^
+  
+F:\project\VLR_WF\libVLR\GPU_kernels\../shared/light_common.h(198): error : expression preceding parentheses of apparent call must have (pointer-to-) function type [F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]
+            sampleLightPos(u0, u1, &lightPosSample);
+            ^
+  
+  14 errors detected in the compilation of "F:/project/VLR_WF/libVLR/GPU_kernels/wavefront_sample_lights.cu".
+  wavefront_sample_lights.cu
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations\CUDA 13.1.targets(803,9): error MSB3721: 鍛戒护鈥?C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\nvcc.exe"  --use-local-env -ccbin "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.38.33130\bin\HostX64\x64" -x cu -rdc=true  -IF:\project\VLR_WF\libVLR -IF:\project\VLR_WF\libVLR\include -IF:\project\VLR_WF\libVLR\shared -I"C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include"     --keep-dir VLR\x64\Debug  -maxrregcount=0    --machine 64 --compile -cudart static -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob0" -g  -D_WINDOWS -DVLR_Device -DVLR_USE_OPTIX -D"CMAKE_INTDIR=\"Debug\"" -DVLR_EXPORTS -D_WINDLL -D_MBCS -DWIN32 -D_WINDOWS -DVLR_USE_OPTIX -D"CMAKE_INTDIR=\"Debug\"" -DVLR_EXPORTS -Xcompiler "/EHsc /W1 /nologo /Od /FS /Zi /RTC1 /MDd /GR" -Xcompiler "/FdVLR.dir\Debug\vc143.pdb" -o VLR.dir\Debug\wavefront_sample_lights.obj "F:\project\VLR_WF\libVLR\GPU_kernels\wavefront_sample_lights.cu"鈥濆凡閫€鍑猴紝杩斿洖浠ｇ爜涓?2銆?[F:\project\VLR_WF\build2\libVLR\VLR.vcxproj]

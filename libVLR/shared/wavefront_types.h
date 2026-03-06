@@ -12,10 +12,32 @@
 
 #include "kernel_common.h"
 #include "material_types.h"
+#include "texture_types.h"
+#include <cmath>
 #include <cstdio>
 
 namespace vlr {
 namespace shared {
+
+// ============================================================================
+// 0. MIS 工具函数（Power Heuristic）
+// ============================================================================
+
+#if defined(VLR_Device) || defined(__CUDACC__)
+/// Power Heuristic MIS: w = pdf1^2 / (pdf1^2 + pdf2^2)
+CUDA_DEVICE_FUNCTION CUDA_INLINE float powerHeuristicMIS(float pdf1, float pdf2) {
+#ifdef __CUDACC__
+    if (__isinf(pdf1) || __isinf(pdf2))
+        return 1.0f;
+#else
+    if (std::isinf(pdf1) || std::isinf(pdf2))
+        return 1.0f;
+#endif
+    float a = pdf1 * pdf1;
+    float b = pdf2 * pdf2;
+    return (a + b > 1e-12f) ? (a / (a + b)) : 1.0f;
+}
+#endif
 
 // ============================================================================
 // 1. 核心数据结构
@@ -252,6 +274,10 @@ struct WavefrontLaunchParameters {
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_zbar;
     float DiscretizedSpectrum_integralCMF;
     
+    // 纹理数据（法线贴图等）
+    const Texture2DDescriptor* textureDescriptorBuffer;  ///< 纹理描述符数组
+    const uint32_t* materialNormalMapIndices;            ///< 每材质的法线贴图纹理索引（InvalidTextureIndex 表示无）
+
     // 材质和节点数据
     const NodeProcedureSet* nodeProcedureSetBuffer;
     const SmallNodeDescriptor* smallNodeDescriptorBuffer;

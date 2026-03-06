@@ -14,6 +14,7 @@
 #include "../shared/geometry_types.h"
 #include "../shared/bsdf_common.h"
 #include "../shared/material_types.h"
+#include "../shared/texture_common.h"
 #include "../include/vlr/basic_types.h"
 
 #include <cuda_runtime.h>
@@ -160,15 +161,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
 }
 
 
-/// Power Heuristic MIS 权重（当 wavefront_common 不可用时使用）
-CUDA_DEVICE_FUNCTION CUDA_INLINE float powerHeuristicMIS(float pdf1, float pdf2) {
-    if (std::isinf(pdf1) || std::isinf(pdf2))
-        return 1.0f;
-    float a = pdf1 * pdf1;
-    float b = pdf2 * pdf2;
-    return (a + b > 1e-12f) ? (a / (a + b)) : 1.0f;
-}
-
 }  // anonymous namespace
 
 
@@ -233,6 +225,16 @@ extern "C" __global__ void wavefrontProcessHits(
             vertexData);
 
         computeSurfacePointBasic(input, ctx, &surfPt, &hypAreaPDF);
+
+        // 应用法线贴图（若有纹理和材质绑定）
+        if (wlp.textureDescriptorBuffer != nullptr && wlp.materialNormalMapIndices != nullptr) {
+            const uint32_t matIdx = wlp.geomInstBuffer[hitInfo.geomInstIndex].materialIndex;
+            const uint32_t normalMapTexIdx = wlp.materialNormalMapIndices[matIdx];
+            TextureSampler normSampler = getNormalMapSampler(
+                wlp.textureDescriptorBuffer, normalMapTexIdx, TextureFilter_Linear);
+            const TextureSampler* normPtr = normSampler.isValid() ? &normSampler : nullptr;
+            applyBumpMapping(Normal3D(0, 0, 1), &surfPt, normPtr);
+        }
     } else {
         // 无顶点数据时：使用简化几何信息
         const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
@@ -290,7 +292,7 @@ extern "C" __global__ void wavefrontProcessHits(
     if (pathState.pathLength >= WavefrontConfig::RRStartDepth) {
         float importance = pathState.throughput.importance(pathState.wls.selectedLambdaIndex());
         float continueProb = (pathState.initImportance > 1e-8f)
-            ? std::min(importance / pathState.initImportance, 1.0f)
+            ? ::vlr::vlr_min(importance / pathState.initImportance, 1.0f)
             : 1.0f;
 
         if (continueProb < WavefrontConfig::RRThreshold) {

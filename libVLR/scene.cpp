@@ -18,6 +18,11 @@
 #include <algorithm>
 #include <cmath>
 
+#ifdef _WIN32
+#undef min
+#undef max
+#endif
+
 #define OPTIX_CHECK(call) ::vlr::optixu::checkError(call, #call, __FILE__, __LINE__)
 #define CUDA_CHECK(call) ::vlr::cudau::checkError(call, #call, __FILE__, __LINE__)
 
@@ -299,6 +304,7 @@ void Scene::setCamera(const CameraParams& params) {
     m_camera.aspect = params.aspect;
     m_camera.lensRadius = params.lensRadius;
     m_camera.focusDistance = params.focusDistance;
+    m_camera.cameraType = params.cameraType;
     m_camera.progEvaluateIDF = -1;
 }
 
@@ -354,7 +360,10 @@ void Scene::buildGeometryAccelerationStructures() {
         CUDA_CHECK(cudaMalloc(&d_temp, gasBufferSizes.tempSizeInBytes));
         CUDA_CHECK(cudaMalloc(&d_output, gasBufferSizes.outputSizeInBytes));
         OptixTraversableHandle gasHandle = 0;
-        OPTIX_CHECK(optixAccelBuild(m_optixContext, m_stream, &accelOptions, &triangleInput, 1, d_temp, gasBufferSizes.tempSizeInBytes, d_output, gasBufferSizes.outputSizeInBytes, &gasHandle, nullptr, 0));
+        OPTIX_CHECK(optixAccelBuild(m_optixContext, m_stream, &accelOptions, &triangleInput, 1,
+            reinterpret_cast<CUdeviceptr>(d_temp), gasBufferSizes.tempSizeInBytes,
+            reinterpret_cast<CUdeviceptr>(d_output), gasBufferSizes.outputSizeInBytes,
+            &gasHandle, nullptr, 0));
         cudaFree(reinterpret_cast<void*>(d_vertices));
         cudaFree(reinterpret_cast<void*>(d_indices));
         cudaFree(d_temp);
@@ -372,7 +381,7 @@ void Scene::buildInstanceAccelerationStructure() {
     optixInstances.reserve(m_instances.size());
     for (size_t i = 0; i < m_instances.size(); ++i) {
         const InstanceRecord& rec = m_instanceRecords[i];
-        uint32_t gasIdx = std::min(rec.meshId, static_cast<uint32_t>(m_gasHandles.size() - 1));
+        uint32_t gasIdx = (std::min)(rec.meshId, static_cast<uint32_t>(m_gasHandles.size() - 1));
         OptixInstance oi = {};
         oi.instanceId = static_cast<uint32_t>(i);
         oi.sbtOffset = 0;
@@ -404,7 +413,10 @@ void Scene::buildInstanceAccelerationStructure() {
     CUDA_CHECK(cudaMalloc(&m_accelOutputBuffer, iasBufferSizes.outputSizeInBytes));
     m_accelTempSize = iasBufferSizes.tempSizeInBytes;
     m_accelOutputSize = iasBufferSizes.outputSizeInBytes;
-    OPTIX_CHECK(optixAccelBuild(m_optixContext, m_stream, &iasOptions, &iasInput, 1, m_accelTempBuffer, m_accelTempSize, m_accelOutputBuffer, m_accelOutputSize, &m_topGroup, nullptr, 0));
+    OPTIX_CHECK(optixAccelBuild(m_optixContext, m_stream, &iasOptions, &iasInput, 1,
+        reinterpret_cast<CUdeviceptr>(m_accelTempBuffer), m_accelTempSize,
+        reinterpret_cast<CUdeviceptr>(m_accelOutputBuffer), m_accelOutputSize,
+        &m_topGroup, nullptr, 0));
     cudaFree(reinterpret_cast<void*>(d_instances));
 }
 
@@ -426,12 +438,15 @@ void Scene::computeSceneBounds() {
         const Instance& inst = m_instances[i];
         for (const auto& p : mesh.positions) {
             Point3D wp = inst.transform.toWorld(p);
-            m_sceneBounds.minPoint.x = std::min(m_sceneBounds.minPoint.x, wp.x);
-            m_sceneBounds.minPoint.y = std::min(m_sceneBounds.minPoint.y, wp.y);
-            m_sceneBounds.minPoint.z = std::min(m_sceneBounds.minPoint.z, wp.z);
-            m_sceneBounds.maxPoint.x = std::max(m_sceneBounds.maxPoint.x, wp.x);
-            m_sceneBounds.maxPoint.y = std::max(m_sceneBounds.maxPoint.y, wp.y);
-            m_sceneBounds.maxPoint.z = std::max(m_sceneBounds.maxPoint.z, wp.z);
+            wp.x += instRec.transform.position.x;
+            wp.y += instRec.transform.position.y;
+            wp.z += instRec.transform.position.z;
+            m_sceneBounds.minPoint.x = (std::min)(m_sceneBounds.minPoint.x, wp.x);
+            m_sceneBounds.minPoint.y = (std::min)(m_sceneBounds.minPoint.y, wp.y);
+            m_sceneBounds.minPoint.z = (std::min)(m_sceneBounds.minPoint.z, wp.z);
+            m_sceneBounds.maxPoint.x = (std::max)(m_sceneBounds.maxPoint.x, wp.x);
+            m_sceneBounds.maxPoint.y = (std::max)(m_sceneBounds.maxPoint.y, wp.y);
+            m_sceneBounds.maxPoint.z = (std::max)(m_sceneBounds.maxPoint.z, wp.z);
         }
     }
 }
@@ -474,7 +489,7 @@ void Scene::updateToGPU() {
     m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTriangles.size());
     m_triangleBuffer->copyToDevice(allTriangles.data(), allTriangles.size(), m_stream);
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
-        uint32_t offset = geomInstTriangleOffsets[std::min(g, geomInstTriangleOffsets.size() - 1)];
+        uint32_t offset = geomInstTriangleOffsets[(std::min)(g, geomInstTriangleOffsets.size() - 1)];
         m_geometryInstances[g].asTriMesh.triangleBuffer = m_triangleBuffer->getDevicePointer() + offset;
     }
     size_t totalGeomIndices = 0;

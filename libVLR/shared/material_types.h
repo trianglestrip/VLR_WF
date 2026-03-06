@@ -39,11 +39,15 @@ enum MaterialCategory : uint32_t {
 
 /// BSDF 类型：标识材质使用的反射/透射模型
 enum BSDFType : uint32_t {
-    BSDFType_Lambert = 0,       ///< Lambert 漫反射
-    BSDFType_GGX,               ///< GGX 微表面镜面反射
-    BSDFType_Specular,          ///< 完美镜面反射
-    BSDFType_SpecularTransmission,  ///< 完美镜面透射
-    BSDFType_FresnelBlend,      ///< Fresnel 混合（未来扩展）
+    BSDFType_Lambert = 0,              ///< Lambert 漫反射
+    BSDFType_GGX,                      ///< GGX 微表面镜面反射
+    BSDFType_Specular,                 ///< 完美镜面反射
+    BSDFType_SpecularTransmission,      ///< 完美镜面透射（支持色散）
+    BSDFType_GGXTransmission,           ///< 粗糙透射（GGX 微表面透射）
+    BSDFType_FresnelBlend,             ///< Fresnel 混合 Lambertian
+    BSDFType_UE4BRDF,                  ///< UE4 风格 BRDF（金属工作流）
+    BSDFType_FrostbiteBRDF,            ///< Frostbite 风格 BRDF
+    BSDFType_MixedBSDF,                ///< 混合 BSDF（多层材质）
     NumBSDFTypes
 };
 
@@ -53,18 +57,28 @@ enum BSDFType : uint32_t {
 // ============================================================================
 
 /// 材质描述符数据布局常量
-/// SurfaceMaterialDescriptor::data[] 的索引约定
+/// SurfaceMaterialDescriptor::data[] 以 uint32_t 存储，按 float 解释（getMaterialDataAsFloats）
 namespace MaterialDataLayout {
-    constexpr int BSDFType = 0;            ///< data[0]: BSDF 类型 (uint32_t  reinterpret)
-    constexpr int AlbedoR = 1;              ///< data[1]: 反照率/反射率 R
-    constexpr int AlbedoG = 2;              ///< data[2]: 反照率/反射率 G
-    constexpr int AlbedoB = 3;              ///< data[3]: 反照率/反射率 B
+    constexpr int BSDFType = 0;             ///< data[0]: BSDF 类型 (uint32_t reinterpret)
+    constexpr int AlbedoR = 1;              ///< data[1]: 反照率/基础色 R
+    constexpr int AlbedoG = 2;             ///< data[2]: 反照率/基础色 G
+    constexpr int AlbedoB = 3;             ///< data[3]: 反照率/基础色 B
     constexpr int Roughness = 4;            ///< data[4]: 粗糙度 (GGX, 0~1)
-    constexpr int Metallic = 5;              ///< data[5]: 金属度 (未来扩展)
-    constexpr int IOR = 6;                  ///< data[6]: 折射率 (透射材质)
+    constexpr int Metallic = 5;             ///< data[5]: 金属度 (UE4/Frostbite)
+    constexpr int IOR = 6;                  ///< data[6]: 折射率 (透射材质，电介质)
     constexpr int EmissionR = 7;            ///< data[7]: 发光强度 R
     constexpr int EmissionG = 8;            ///< data[8]: 发光强度 G
-    constexpr int EmissionB = 9;             ///< data[9]: 发光强度 B
+    constexpr int EmissionB = 9;            ///< data[9]: 发光强度 B
+    constexpr int DispersionStrength = 10;  ///< data[10]: 色散强度 (透射) / 导体 EtaR
+    constexpr int EtaR = 10;
+    constexpr int EtaG = 11;                ///< data[11]: 导体 eta G
+    constexpr int EtaB = 12;                ///< data[12]: 导体 eta B
+    constexpr int KappaR = 13;              ///< data[13]: 导体消光系数 k R
+    constexpr int KappaG = 14;              ///< data[14]: 导体消光系数 k G
+    constexpr int KappaB = 15;              ///< data[15]: 导体消光系数 k B
+    // FresnelBlend: Roughness=镜面粗糙度, Albedo=漫反射
+    // GGXTransmission: IOR + Roughness
+    // MixedBSDF: Metallic=混合权重
 }
 
 
@@ -128,6 +142,89 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getSpecularReflectance(
         reflectance->values[i] = (r + g + b) / 3.0f;
 }
 
+/// 从材质描述符获取透射材质参数（IOR + 色散）
+/// dispersionStrength: 色散强度，0=无色散，>0 时 n(λ) 随波长变化（Cauchy 近似）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getTransmissionParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    float* ior,
+    float* dispersionStrength) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    *ior = d[MaterialDataLayout::IOR];
+    *ior = (*ior < 1.0f) ? 1.0f : *ior;
+    *dispersionStrength = d[MaterialDataLayout::DispersionStrength];
+}
+
+/// 从材质描述符获取导体 Fresnel 参数（eta, k 复折射率）
+/// 用于完整 Fresnel 导体计算
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getConductorParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* eta,
+    SampledSpectrum* kappa) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    // 简化：使用 RGB 或灰度
+    float er = d[MaterialDataLayout::EtaR];
+    float eg = d[MaterialDataLayout::EtaG];
+    float eb = d[MaterialDataLayout::EtaB];
+    float kr = d[MaterialDataLayout::KappaR];
+    float kg = d[MaterialDataLayout::KappaG];
+    float kb = d[MaterialDataLayout::KappaB];
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        eta->values[i] = (er + eg + eb) / 3.0f;
+        kappa->values[i] = (kr + kg + kb) / 3.0f;
+    }
+}
+
+/// 从材质描述符获取 FresnelBlend 参数
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getFresnelBlendParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* diffuseReflectance,
+    SampledSpectrum* specularReflectance,
+    float* roughness) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float r = d[MaterialDataLayout::AlbedoR];
+    float g = d[MaterialDataLayout::AlbedoG];
+    float b = d[MaterialDataLayout::AlbedoB];
+    for (int i = 0; i < NumSpectralSamples; ++i)
+        diffuseReflectance->values[i] = (r + g + b) / 3.0f;
+    *specularReflectance = *diffuseReflectance;  // 可扩展为独立参数
+    *roughness = ::vlr::vlr_max(d[MaterialDataLayout::Roughness], 0.001f);
+}
+
+/// 从材质描述符获取 UE4/Frostbite BRDF 参数
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getUE4Params(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* baseColor,
+    float* metallic,
+    float* roughness) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float r = d[MaterialDataLayout::AlbedoR];
+    float g = d[MaterialDataLayout::AlbedoG];
+    float b = d[MaterialDataLayout::AlbedoB];
+    for (int i = 0; i < NumSpectralSamples; ++i)
+        baseColor->values[i] = (r + g + b) / 3.0f;
+    *metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Metallic]));
+    *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
+}
+
+/// 从材质描述符获取 Mixed BSDF 混合权重
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getMixedParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* albedo0,
+    SampledSpectrum* albedo1,
+    float* blendWeight,
+    float* roughness) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float r = d[MaterialDataLayout::AlbedoR];
+    float g = d[MaterialDataLayout::AlbedoG];
+    float b = d[MaterialDataLayout::AlbedoB];
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        albedo0->values[i] = (r + g + b) / 3.0f;
+        albedo1->values[i] = albedo0->values[i];  // 可扩展
+    }
+    *blendWeight = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Metallic]));
+    *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
+}
+
 /// 从材质描述符获取发光强度
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getEmissiveRadiance(
     const SurfaceMaterialDescriptor& matDesc,
@@ -152,17 +249,20 @@ struct BSDFContext {
     const SurfacePoint* surfPt;                ///< 表面点
     const WavelengthSamples* wls;               ///< 波长采样
     Normal3D geomNormalLocal;                  ///< 几何法线（局部坐标）
+    bool singleWlSelected;                    ///< 色散材质是否已选择单波长
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFContext() = default;
+    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFContext() : singleWlSelected(false) {}
 
     CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFContext(
         const SurfaceMaterialDescriptor& desc,
         const SurfacePoint& sp,
-        const WavelengthSamples& wavelengthSamples)
+        const WavelengthSamples& wavelengthSamples,
+        bool singleWl = false)
         : matDesc(&desc)
         , surfPt(&sp)
         , wls(&wavelengthSamples)
         , geomNormalLocal(sp.shadingFrame.toLocal(sp.geometricNormal))
+        , singleWlSelected(singleWl)
     {}
 };
 
@@ -225,12 +325,19 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     BSDFType type) {
     switch (type) {
     case BSDFType_Lambert:
+    case BSDFType_FresnelBlend:
         return MaterialCategory_Diffuse;
     case BSDFType_GGX:
+    case BSDFType_UE4BRDF:
+    case BSDFType_FrostbiteBRDF:
         return MaterialCategory_Glossy;
     case BSDFType_Specular:
     case BSDFType_SpecularTransmission:
         return MaterialCategory_Specular;
+    case BSDFType_GGXTransmission:
+        return MaterialCategory_Transmissive;
+    case BSDFType_MixedBSDF:
+        return MaterialCategory_Mixed;
     default:
         return MaterialCategory_Diffuse;
     }
@@ -240,7 +347,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool materialHasNonDelta(
     const SurfaceMaterialDescriptor& matDesc) {
     BSDFType type = getBSDFType(matDesc);
-    return type == BSDFType_Lambert || type == BSDFType_GGX;
+    return type == BSDFType_Lambert || type == BSDFType_GGX
+        || type == BSDFType_FresnelBlend || type == BSDFType_UE4BRDF
+        || type == BSDFType_FrostbiteBRDF || type == BSDFType_GGXTransmission
+        || type == BSDFType_MixedBSDF;
 }
 
 /// 检查材质是否为 Delta（完美镜面）
@@ -251,17 +361,23 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool materialIsDelta(
 }
 
 /// 将 BSDF 类型映射为 DirectionType（用于 MIS、路径历史等）
-/// 需与 kernel_common.h 中的 DirectionType 配合使用
 CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType type) {
     switch (type) {
     case BSDFType_Lambert:
+    case BSDFType_FresnelBlend:
         return DirectionType::Reflection();
     case BSDFType_GGX:
+    case BSDFType_UE4BRDF:
+    case BSDFType_FrostbiteBRDF:
         return DirectionType::HighFreq() | DirectionType::Reflection();
     case BSDFType_Specular:
         return DirectionType::Delta0D() | DirectionType::Reflection();
     case BSDFType_SpecularTransmission:
         return DirectionType::Delta0D() | DirectionType::Transmission();
+    case BSDFType_GGXTransmission:
+        return DirectionType::HighFreq() | DirectionType::Transmission();
+    case BSDFType_MixedBSDF:
+        return DirectionType::HighFreq() | DirectionType::Reflection();
     default:
         return DirectionType();
     }
@@ -270,7 +386,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType 
 /// 检查 BSDF 类型是否为色散材质（透射且与波长相关）
 /// 色散材质需在首次采样后选择单一波长
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDispersiveBSDFType(BSDFType type) {
-    return type == BSDFType_SpecularTransmission;
+    return type == BSDFType_SpecularTransmission || type == BSDFType_GGXTransmission;
+}
+
+/// 色散材质单波长选择逻辑：根据随机数或当前索引选择单一波长
+/// 当 singleWlSelected 后，路径仅使用 selectedLambda 对应波长
+CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t selectSingleWavelengthForDispersion(
+    const WavelengthSamples* wls, float u) {
+    if (!wls) return 0;
+    return static_cast<uint32_t>(u * NumSpectralSamples) % NumSpectralSamples;
 }
 
 /// 检查材质是否有发光

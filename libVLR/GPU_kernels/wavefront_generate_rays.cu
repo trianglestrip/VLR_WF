@@ -133,12 +133,17 @@ extern "C" __global__ void wavefrontGenerateRays(
     // ========================================================================
     // 4. IDF 评估
     // ========================================================================
-    // 透视针孔相机的 IDF 重要性：传感器响应简化为 1
+    // 透视/等距柱状相机的 IDF 重要性：传感器响应简化为 1
     // 若有 progEvaluateIDF 可调用，此处为占位实现
     SampledSpectrum We = SampledSpectrum::One();
     
-    // 吞吐量 = We / (areaPDF * dirPDF)，针孔 areaPDF = 1
+    // 吞吐量 = We / (areaPDF * dirPDF)
+    // 针孔相机：areaPDF = 1（单点）；薄透镜：areaPDF = 1/(π*r²)（圆盘均匀采样）
     float areaPDF = 1.0f;
+    if (camera.cameraType == CameraType_Perspective && camera.lensRadius > 0.0f) {
+        float lensArea = VLR_M_PI * camera.lensRadius * camera.lensRadius;
+        areaPDF = 1.0f / lensArea;
+    }
     SampledSpectrum throughput = We / (areaPDF * dirPDF);
     
     // ========================================================================

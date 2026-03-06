@@ -279,7 +279,9 @@ inline void printDeviceProperties(int deviceId = 0) {
     printf("Max Threads Per Block: %d\n", prop.maxThreadsPerBlock);
     printf("Max Threads Per Multiprocessor: %d\n", prop.maxThreadsPerMultiProcessor);
     printf("Warp Size: %d\n", prop.warpSize);
-    printf("Memory Clock Rate: %.2f GHz\n", prop.memoryClockRate / 1e6);
+    int memClockKHz = 0;
+    cudaDeviceGetAttribute(&memClockKHz, cudaDevAttrMemoryClockRate, deviceId);
+    printf("Memory Clock Rate: %.2f GHz\n", (memClockKHz > 0) ? (memClockKHz / 1e6f) : 0.0f);
     printf("Memory Bus Width: %d bits\n", prop.memoryBusWidth);
     printf("L2 Cache Size: %.2f MB\n", prop.l2CacheSize / (1024.0 * 1024.0));
 }

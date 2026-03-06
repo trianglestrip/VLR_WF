@@ -37,6 +37,14 @@ constexpr float VLR_M_2PI = 6.28318530717958647692f;
 constexpr float VLR_M_INV_PI = 0.31830988618379067154f;
 constexpr float VLR_M_INV_2PI = 0.15915494309189533577f;
 
+/// 设备端安全的 max/min（替代 std::max/min，避免 CUDA 设备代码中的链接问题）
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE float vlr_max(float a, float b) {
+    return (a > b) ? a : b;
+}
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE float vlr_min(float a, float b) {
+    return (a < b) ? a : b;
+}
+
 
 // ============================================================================
 // 向量类型
@@ -124,6 +132,12 @@ inline uint2 make_uint2(uint32_t x, uint32_t y) {
 // 向量运算
 // ============================================================================
 
+/// Scalar * Vector (commutative)
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+Vector3D operator*(float s, const Vector3D& v) {
+    return v * s;
+}
+
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 float dot(const Vector3D& a, const Vector3D& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -189,7 +203,8 @@ struct ReferenceFrame {
 
 constexpr uint32_t NumSpectralSamples = 4;
 
-struct WavelengthSamples;  // 前向声明，用于 toDiscretizedSpectrum
+struct WavelengthSamples;   // 前向声明，用于 toDiscretizedSpectrum
+struct DiscretizedSpectrum;  // 前向声明，用于 toDiscretizedSpectrum 返回类型
 
 struct SampledSpectrum {
     float values[NumSpectralSamples];
@@ -289,7 +304,12 @@ struct SampledSpectrum {
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     bool allFinite() const {
         for (int i = 0; i < NumSpectralSamples; ++i) {
+#ifdef __CUDACC__
+            float v = values[i];
+            if (__isnanf(v) || __isinf(v))
+#else
             if (!std::isfinite(values[i]))
+#endif
                 return false;
         }
         return true;
@@ -444,8 +464,15 @@ struct SurfacePoint {
 
 
 // ============================================================================
-// 相机描述符
+// 相机类型与描述符
 // ============================================================================
+
+/// 相机类型枚举（与 VLRCameraType 对应）
+enum CameraType : uint32_t {
+    CameraType_Perspective = 0,
+    CameraType_Equirectangular,
+    NumCameraTypes
+};
 
 struct CameraDescriptor {
     Point3D position;
@@ -454,6 +481,7 @@ struct CameraDescriptor {
     float aspect;
     float lensRadius;
     float focusDistance;
+    uint32_t cameraType;     ///< CameraType 枚举值
     int32_t progEvaluateIDF;
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -463,6 +491,7 @@ struct CameraDescriptor {
         , aspect(16.0f / 9.0f)
         , lensRadius(0.0f)
         , focusDistance(1.0f)
+        , cameraType(CameraType_Perspective)
         , progEvaluateIDF(-1)
     {}
 };

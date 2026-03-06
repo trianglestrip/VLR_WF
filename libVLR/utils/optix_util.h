@@ -12,6 +12,8 @@
 
 #include <optix.h>
 #include <optix_stubs.h>
+#include <cuda_runtime.h>
+#include "cuda_util.h"
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -91,7 +93,7 @@ public:
         char log[2048];
         size_t logSize = sizeof(log);
         
-        OPTIX_CHECK(optixModuleCreateFromPTX(
+        OPTIX_CHECK(optixModuleCreate(
             context,
             moduleCompileOptions,
             pipelineCompileOptions,
@@ -325,49 +327,6 @@ inline void launch(OptixPipeline pipeline,
     ));
 }
 
-
-// ============================================================================
-// 载荷签名辅助工具
-// ============================================================================
-
-template <typename... PayloadTypes>
-struct PayloadSignature {
-    static constexpr uint32_t numPayloads = sizeof...(PayloadTypes);
-    
-    static std::vector<uint32_t> getPayloadSemantics() {
-        return std::vector<uint32_t>(numPayloads, 0);
-    }
-};
-
-
-// ============================================================================
-// 块缓冲 2D（占位符）
-// ============================================================================
-
-template <typename T, int BlockSize = 0>
-struct BlockBuffer2D {
-    T* data;
-    uint32_t width;
-    uint32_t height;
-    uint32_t stride;
-    
-    void initialize(uint32_t w, uint32_t h) {
-        width = w;
-        height = h;
-        stride = w;
-        CUDA_CHECK(cudaMalloc(&data, w * h * sizeof(T)));
-    }
-    
-    void finalize() {
-        if (data) {
-            cudaFree(data);
-            data = nullptr;
-        }
-    }
-};
-
-template <typename T>
-using NativeBlockBuffer2D = BlockBuffer2D<T, 0>;
 
 }  // 命名空间 optixu
 }  // 命名空间 vlr

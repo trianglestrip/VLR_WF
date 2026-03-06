@@ -184,6 +184,7 @@ VLRResult vlrCreateMaterial(
     VLRScene scene,
     uint32_t materialType,
     const float* baseColor,
+    const float* emissionColor,
     VLRMaterial* outMaterial)
 {
     if (!scene || !outMaterial) return static_cast<VLRResult>(VLRResult_InvalidArgument);
@@ -194,8 +195,11 @@ VLRResult vlrCreateMaterial(
         float r = baseColor ? baseColor[0] : 0.7f;
         float g = baseColor ? baseColor[1] : 0.7f;
         float b = baseColor ? baseColor[2] : 0.7f;
+        float er = emissionColor ? emissionColor[0] : 0.0f;
+        float eg = emissionColor ? emissionColor[1] : 0.0f;
+        float eb = emissionColor ? emissionColor[2] : 0.0f;
         uint32_t materialIndex = sceneImpl->scene->createMaterial(
-            materialType, r, g, b, 0.5f, 0.0f, 0.0f, 0.0f);
+            materialType, r, g, b, 0.5f, er, eg, eb);
         VLRMaterialImpl* matImpl = new VLRMaterialImpl();
         matImpl->sceneImpl = sceneImpl;
         matImpl->materialIndex = materialIndex;
@@ -251,6 +255,24 @@ void vlrDestroyInstance(VLRInstance instance) {
     delete TO_INST(instance);
 }
 
+VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance) {
+    if (!scene || !instance) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        VLRInstanceImpl* instImpl = TO_INST(instance);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        if (instImpl->sceneImpl != sceneImpl) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        vlr::AreaLightParams params;
+        params.instIndex = instImpl->instanceIndex;
+        params.geomInstIndex = 0;
+        params.radiance = vlr::SampledSpectrum(1.0f);
+        sceneImpl->scene->addAreaLight(params);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrSetCamera(VLRScene scene, const VLRCameraParams* params) {
     if (!scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
     if (!params) return static_cast<VLRResult>(VLRResult_InvalidArgument);
@@ -271,6 +293,8 @@ VLRResult vlrSetCamera(VLRScene scene, const VLRCameraParams* params) {
         cp.aspect = params->aspect;
         cp.lensRadius = params->lensRadius;
         cp.focusDistance = params->focusDistance;
+        cp.focalLength = params->focalLength;
+        cp.cameraType = params->cameraType;
         sceneImpl->scene->setCamera(cp);
         return static_cast<VLRResult>(VLRResult_Success);
     } catch (...) {

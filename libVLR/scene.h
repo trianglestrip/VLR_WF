@@ -68,8 +68,10 @@ struct CameraParams {
     Vector3D up;
     float fovYDegrees;
     float aspect;
-    float lensRadius;
-    float focusDistance;
+    float lensRadius;       ///< 光圈半径（0=针孔）
+    float focusDistance;    ///< 焦平面距离
+    float focalLength;     ///< 焦距（0=从 FOV 推导）
+    uint32_t cameraType;   ///< CameraType 枚举值
 
     CameraParams()
         : position(0, 0, 5)
@@ -79,6 +81,8 @@ struct CameraParams {
         , aspect(16.0f / 9.0f)
         , lensRadius(0.0f)
         , focusDistance(1.0f)
+        , focalLength(0.0f)
+        , cameraType(0)     // CameraType_Perspective
     {}
 };
 

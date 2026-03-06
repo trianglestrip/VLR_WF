@@ -13,6 +13,7 @@
 #include "GPU_kernels/wavefront_launch.h"
 #include "utils/cuda_util.h"
 #include "utils/optix_util.h"
+#include <optix_function_table_definition.h>  // OptiX: 提供 g_optixFunctionTable 定义
 #include <cstring>
 #include <stdexcept>
 #include <fstream>
@@ -501,6 +502,8 @@ void Context::setupWavefrontLaunchParams() {
         lp.geomInstBuffer = m_sceneSource->getGeomInstBuffer();
         lp.instBuffer = m_sceneSource->getInstBuffer();
         lp.materialDescriptorBuffer = m_sceneSource->getMaterialBuffer();
+        lp.textureDescriptorBuffer = nullptr;       // 纹理描述符（法线贴图等），可由应用设置
+        lp.materialNormalMapIndices = nullptr;      // 材质法线贴图索引，可由应用设置
         lp.vertexPositions = m_sceneSource->getVertexPositions();
         lp.vertexNormals = m_sceneSource->getVertexNormals();
         lp.vertexTexCoords = m_sceneSource->getVertexTexCoords();
@@ -518,12 +521,14 @@ void Context::setupWavefrontLaunchParams() {
         lp.geomInstBuffer = nullptr;
         lp.instBuffer = nullptr;
         lp.materialDescriptorBuffer = nullptr;
+        lp.textureDescriptorBuffer = nullptr;
+        lp.materialNormalMapIndices = nullptr;
         lp.vertexPositions = nullptr;
         lp.vertexNormals = nullptr;
         lp.vertexTexCoords = nullptr;
         lp.topGroup = 0;
         lp.sceneBounds = nullptr;
-        lp.cameraDescriptor = m_scene.camera;
+        lp.cameraDescriptor = m_scene.camera;  // 使用默认 SceneData
     }
     
     // 设置图像参数

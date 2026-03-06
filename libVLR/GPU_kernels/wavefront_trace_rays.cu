@@ -121,11 +121,13 @@ extern "C" __global__ void RT_RG_NAME(wavefrontTraceRays)() {
     optixSetPayload_5(pd[5]);
     optixSetPayload_6(pd[6]);
 
-    // 发射光线：optixTrace(traversable, origin, direction, tmin, tmax, time, mask, flags, sbtOffset, sbtStride, missSbtIndex, payload...)
+    // OptiX 8 optixTrace: (handle, float3 origin, float3 direction, tmin, tmax, rayTime, mask, flags, sbtOffset, sbtStride, missSbtIndex, payload&...)
+    float3 rayOrigin = make_float3(pathState.origin.x, pathState.origin.y, pathState.origin.z);
+    float3 rayDirection = make_float3(pathState.direction.x, pathState.direction.y, pathState.direction.z);
     optixTrace(
         wlp.topGroup,
-        pathState.origin.x, pathState.origin.y, pathState.origin.z,
-        pathState.direction.x, pathState.direction.y, pathState.direction.z,
+        rayOrigin,
+        rayDirection,
         1e-5f,   // tmin：避免自相交
         FLT_MAX, // tmax
         0.0f,    // rayTime

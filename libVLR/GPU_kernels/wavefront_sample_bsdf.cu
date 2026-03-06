@@ -70,17 +70,18 @@ extern "C" __global__ void wavefrontSampleBSDF(
         Vector3D(-pathState.direction.x, -pathState.direction.y, -pathState.direction.z));
     Normal3D geomNormalLocal = surfPt.shadingFrame.toLocal(surfPt.geometricNormal);
 
-    BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls);
+    BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls, pathState.singleWlSelected());
     bsdfCtx.geomNormalLocal = geomNormalLocal;
 
     // ========================================================================
-    // 2. BSDF 采样（使用 sampleBSDF）
+    // 2. BSDF 采样（使用 sampleBSDFWithU2，部分 BSDF 需三随机数）
     // ========================================================================
     float u0 = pathState.rng.getFloat0cTo1o();
     float u1 = pathState.rng.getFloat0cTo1o();
+    float u2 = pathState.rng.getFloat0cTo1o();
 
     BSDFSampleResult result;
-    sampleBSDF(bsdfCtx, dirInLocal, u0, u1, &result);
+    sampleBSDFWithU2(bsdfCtx, dirInLocal, u0, u1, u2, &result);
 
     // 检查采样结果是否有效
     if (!result.isValid() || result.pdf <= 0.0f) {
@@ -117,8 +118,14 @@ extern "C" __global__ void wavefrontSampleBSDF(
 
     // 检查吞吐量有效性
     bool throughputValid = true;
-    for (int i = 0; i < NumSpectralSamples && throughputValid; ++i)
+    for (int i = 0; i < NumSpectralSamples && throughputValid; ++i) {
+#ifdef __CUDACC__
+        float v = pathState.throughput.values[i];
+        throughputValid = throughputValid && !__isnanf(v) && !__isinf(v);
+#else
         throughputValid = throughputValid && std::isfinite(pathState.throughput.values[i]);
+#endif
+    }
     if (!throughputValid) {
         pathState.setTerminated();
         return;

@@ -372,20 +372,204 @@ executeWavefrontRender() {
 警告：C4819 (编码警告，不影响功能)
 ```
 
-### 下一步
+---
 
-根据`docs/todo.md`，阶段1（基础架构）已全部完成，下一步是：
+## 2026-03-07 - 阶段 2: 核心 Kernel 实现 ✅
 
-**阶段 2.1: GenerateRays Kernel (3天)**
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_generate_rays.cu`
-- [ ] 实现RNG初始化
-- [ ] 实现波长采样
-- [ ] 实现相机采样
-- [ ] 实现IDF评估
-- [ ] 初始化PathState所有字段
+### 完成的任务
+
+#### 1. 7 个核心 Kernels
+
+| Kernel | 文件 | 功能 |
+|--------|------|------|
+| GenerateRays | `wavefront_generate_rays.cu` | RNG 初始化、波长采样、相机采样（透视 + 等距柱状）、IDF 评估、PathState 初始化、加入活跃队列 |
+| TraceRays | `wavefront_trace_rays.cu` | RayGen/Miss/ClosestHit/AnyHit 程序、阴影光线、WFTracePayload、光线发射 |
+| ProcessHits | `wavefront_process_hits.cu` | 表面点计算、BSDF/EDF 评估、隐式光源采样、路径终止、材质分类、Denoiser 缓冲区 |
+| SampleLights | `wavefront_sample_lights.cu` | 光源选择（区域光/点光/环境光）、位置采样、EDF 评估、可见性测试、MIS、几何项 |
+| SampleBSDF | `wavefront_sample_bsdf.cu` | BSDF 采样、色散材质、吞吐量更新、下一跳光线生成、队列加入 |
+| Accumulate | `wavefront_accumulate.cu` | 贡献累积、allFinite 校验、RNG 更新、Denoiser 缓冲区 |
+| Compact | `wavefront_compact.cu` | 队列交换、CUB Stream Compaction、路径排序（可选） |
+
+另：`wavefront_launch.cu` 负责 Kernel 编排与启动。
+
+#### 2. 材质系统
+
+- **`libVLR/shared/material_types.h`**
+  - `MaterialCategory` 枚举（漫反射、光滑、镜面、透射、发光、混合）
+  - `BSDFType` 枚举
+  - `MaterialDataLayout` 数据布局常量
+  - `SurfaceMaterialDescriptor` 接口与 `getBSDFType()` 等
+
+- **`libVLR/shared/bsdf_common.h`**
+  - Lambert、GGX、Specular、SpecularTransmission、GGXTransmission
+  - FresnelBlend、UE4BRDF、FrostbiteBRDF、MixedBSDF
+  - Schlick Fresnel、电介质/导体 Fresnel
+  - 评估、采样、PDF 计算
+
+#### 3. 几何系统
+
+- **`libVLR/shared/geometry_types.h`**
+  - `HitPointDecodeInput`、`SurfacePoint`
+  - `GeometryType`、`GeometryInstance`、`Instance`、`Triangle`
+
+- **`libVLR/shared/geometry_common.h`**
+  - 三角形表面点解码
+  - 法线插值、纹理坐标插值
+
+#### 4. 光源系统
+
+- **`libVLR/shared/light_types.h`**
+  - `LightType`：区域光、点光源、环境光
+  - `LightDescriptor`、`AreaLight`、点光源描述符
+  - `isDelta()`、`isInfinity()` 等辅助
+
+- **`libVLR/shared/light_common.h`**
+  - 光源选择、位置采样
+  - EDF 评估、可见性测试
+
+**阶段 2 里程碑**: ✅ 7 个核心 Kernel 与材质/几何/光源系统完成
 
 ---
 
-**状态**: ✅ 阶段 1.4-1.5 完成  
-**下一步**: 开始阶段 2.1 - GenerateRays Kernel  
-**预计时间**: 3天
+## 2026-03-07 - 阶段 3: Pipeline 集成 ✅
+
+### 完成的任务
+
+#### 1. Pipeline 集成
+
+- **`libVLR/context.cpp`**
+  - `initializeWavefrontPipeline()`：Pipeline 创建、PTX 加载、Program 创建、SBT 构建
+  - `allocateWavefrontBuffers()`：PathState、HitInfo、SurfacePoint、Queues 等缓冲区
+  - `resizeWavefrontBuffers()`：按分辨率动态调整
+  - `resetWavefrontQueues()`：队列重置
+  - `setupWavefrontLaunchParams()`：Launch 参数与 OptiX 绑定
+  - `executeWavefrontRender()`：主渲染循环（GenerateRays → TraceRays → ProcessHits → SampleLights → SampleBSDF → Compact → Accumulate）
+  - `renderWavefront()`：对外入口，连接 Context 与渲染循环
+
+- **`libVLR/context.cpp` 渲染器切换**
+  - `render()` 根据 `VLRRenderer_WavefrontPathTracing` 调用 `renderWavefront()`
+
+#### 2. Scene 管理
+
+- **`libVLR/scene.h`**
+  - `TriangleMeshData`：顶点、法线、纹理坐标、三角形索引
+  - `InstanceTransform`：位置、缩放、旋转
+  - `CameraParams`：位置、朝向、FOV、景深参数（lensRadius、focusDistance）
+  - Scene 类：网格、材质、实例、相机、区域光管理
+  - OptiX 加速结构构建
+
+- **`libVLR/scene.cpp`**
+  - `createTriangleMesh`、`createInstance`、`createMaterial`
+  - `addAreaLight`、`setCamera`
+  - GAS/BLAS 构建与更新
+
+#### 3. C API
+
+- **`libVLR/include/vlr/vlr.h`**
+  - `vlrCreateContext` / `vlrDestroyContext`
+  - `vlrCreateScene` / `vlrDestroyScene`
+  - `vlrCreateTriangleMesh` / `vlrDestroyTriangleMesh`
+  - `vlrCreateMaterial` / `vlrDestroyMaterial`
+  - `vlrCreateInstance` / `vlrDestroyInstance`
+  - `vlrAddAreaLight`、`vlrSetCamera`
+  - `vlrRender`（支持 Wavefront 渲染器）
+  - `vlrGetOutputBuffer`、`vlrGetVersion`
+
+- **`libVLR/vlr.cpp`**
+  - 上述 C API 实现，封装 Context 与 Scene
+
+- **`test/simple_render_test.cpp`**
+  - Cornell Box 场景
+  - 通过 C API 完成完整渲染流程
+  - 输出 PPM 图像
+
+**阶段 3 里程碑**: ✅ Pipeline 集成完成，可渲染 Cornell Box 等简单场景
+
+---
+
+## 2026-03-07 - 阶段 4: 功能完善 ✅
+
+### 完成的任务
+
+#### 1. 高级 BSDF
+
+- 支持 BSDF 类型：
+  - Lambert（Matte）
+  - GGX 微表面反射
+  - 完美镜面反射 / 透射（含色散）
+  - GGX 微表面透射
+  - Fresnel 混合 Lambertian
+  - UE4 BRDF、Frostbite BRDF
+  - MixedBSDF（多层混合）
+
+- 实现位置：`libVLR/shared/bsdf_common.h`
+
+#### 2. 景深与相机
+
+- **`VLRCameraParams`**（`libVLR/include/vlr/vlr.h`）
+  - `lensRadius`：光圈半径（0 为针孔）
+  - `focusDistance`：焦平面距离
+  - `focalLength`：焦距（0 表示从 FOV 推导）
+  - `cameraType`：透视 / 等距柱状
+
+- **`wavefront_generate_rays.cu`** 中的相机采样
+  - 透镜采样、焦平面、景深
+  - 透视、等距柱状投影
+
+#### 3. 纹理系统
+
+- **`libVLR/shared/texture_types.h`**
+  - `TextureFilterMode`：Nearest、Linear
+  - `TextureWrapMode`：Repeat、Clamp
+  - `TextureFormat`：RGBA8、RGB32F、RGBA32F
+  - `Texture2DDescriptor`：尺寸、格式、Mipmap
+
+- **`libVLR/shared/texture_common.h`**
+  - `sampleTexture2D`：最近邻 / 双线性
+  - `applyBumpMapping`：法线贴图
+  - UV 环绕、texel 坐标转换
+
+- 在 ProcessHits 中用于表面点颜色、法线、Alpha 采样
+
+#### 4. CMake 构建
+
+- **`CMakeLists.txt`**
+  - 项目：`VLR_Wavefront`
+  - C++17、CUDA
+  - `VLR_CUDA_ARCH`（75/80/86/89/90）
+  - `OPTIX_PATH` 配置
+  - `find_package(CUDAToolkit REQUIRED)`
+  - OptiX 检测
+  - `add_subdirectory(libVLR)`
+  - `simple_render_test` 可执行文件
+  - 构建后复制 VLR 库和 PTX 到输出目录
+
+- **`libVLR/CMakeLists.txt`**
+  - VLR 静态/动态库
+  - CUDA 源文件（wavefront_*.cu）
+  - PTX 生成（wavefront_trace_rays.ptx）
+  - OptiX 链接
+  - 包含目录设置
+
+**阶段 4 里程碑**: ✅ 高级 BSDF、景深、纹理、CMake 构建均已实现
+
+---
+
+### 下一步
+
+根据 `docs/todo.md`，阶段 2、3、4 已完成，下一步为：
+
+**阶段 5: 性能优化 (Week 13–14)**
+- [ ] 路径排序优化：CUB RadixSort 按材质分类
+- [ ] Stream Compaction 优化：CUB DeviceSelect
+- [ ] 内存访问优化：SoA 布局、内存合并
+- [ ] 材质特化 Kernel：漫反射、光滑、镜面特化
+
+**备选：项目完成**
+- 若功能已满足需求，可进入阶段 6（测试与验证）和阶段 8（文档与发布）
+
+---
+
+**状态**: ✅ 阶段 2、3、4 完成  
+**下一步**: 阶段 5（性能优化）或阶段 6（测试验证）  
+**预计时间**: 阶段 5 约 2 周

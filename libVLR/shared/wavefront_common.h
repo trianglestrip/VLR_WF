@@ -13,6 +13,9 @@
 
 #include "wavefront_types.h"
 #include "kernel_common.h"
+#include "geometry_common.h"
+#include "light_common.h"
+#include "../include/vlr/basic_types.h"
 
 namespace vlr {
 namespace shared {
@@ -157,8 +160,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool shouldTerminatePath(
 
 
 /// Check if path should terminate (simple version without RR adjustment)
+/// Note: pathState must be non-const because getFloat0cTo1o modifies RNG state
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool shouldTerminatePathSimple(
-    const WavefrontPathState& pathState,
+    WavefrontPathState& pathState,
     float rrThreshold = 0.05f) {
     
     if (pathState.pathLength < WavefrontConfig::RRStartDepth)
@@ -184,18 +188,33 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void computeSurfacePoint(
     const WavefrontHitInfo& hitInfo,
     const WavelengthSamples& wls,
     SurfacePoint* surfPt,
-    float* hypAreaPDF) {
+    float* hypAreaPDF,
+    const WavefrontLaunchParameters& wlp) {
     
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
     
-    // Call geometry decode program
-    ProgSigDecodeHitPoint decodeHitPoint(geomInst.progDecodeHitPoint);
-    decodeHitPoint(
-        hitInfo.instIndex,
-        hitInfo.geomInstIndex,
-        hitInfo.primIndex,
-        hitInfo.u, hitInfo.v,
-        surfPt);
+    if (wlp.vertexPositions != nullptr) {
+        HitPointDecodeInput input(hitInfo.instIndex, hitInfo.geomInstIndex,
+                                 hitInfo.primIndex, hitInfo.u, hitInfo.v);
+        TriangleMeshVertexData vertexData(wlp.vertexPositions,
+                                         wlp.vertexNormals,
+                                         wlp.vertexTexCoords);
+        GeometryDecodeContext ctx(
+            &wlp.geomInstBuffer[hitInfo.geomInstIndex],
+            &wlp.instBuffer[hitInfo.instIndex],
+            vertexData);
+        decodeHitPoint(input, ctx, surfPt);
+    } else if (geomInst.geomType == GeometryType_TriangleMesh &&
+               geomInst.asTriMesh.triangleBuffer != nullptr) {
+        const Triangle& tri = geomInst.asTriMesh.triangleBuffer[hitInfo.primIndex];
+        *hypAreaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
+        surfPt->atInfinity = false;
+        surfPt->position = Point3D(0, 0, 0);
+        surfPt->geometricNormal = Normal3D(0, 1, 0);
+        surfPt->shadingFrame = ReferenceFrame(Vector3D(1,0,0), surfPt->geometricNormal);
+        surfPt->texCoord = TexCoord2D(hitInfo.u, hitInfo.v);
+        return;
+    }
     
     // Apply normal mapping
     Normal3D localNormal = calcNode(geomInst.nodeNormal, Normal3D(0.0f, 0.0f, 1.0f), *surfPt, wls);
@@ -206,9 +225,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void computeSurfacePoint(
     modifyTangent(newTangent, surfPt);
     
     // Compute area PDF (for light sampling)
-    if (geomInst.geomType == GeometryType_TriangleMesh) {
+    if (geomInst.geomType == GeometryType_TriangleMesh &&
+        geomInst.asTriMesh.triangleBuffer != nullptr) {
         const Triangle& tri = geomInst.asTriMesh.triangleBuffer[hitInfo.primIndex];
-        *hypAreaPDF = 1.0f / tri.area;
+        *hypAreaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
     } else {
         *hypAreaPDF = 1.0f;
     }
@@ -223,7 +243,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void computeSurfacePoint(
 /// Evaluates environment map and accumulates contribution with MIS
 CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     WavefrontPathState& pathState,
-    const WavefrontHitInfo& hitInfo) {
+    const WavefrontHitInfo& hitInfo,
+    const WavefrontLaunchParameters& wlp) {
     
     const Instance& inst = wlp.instBuffer[wlp.envLightInstIndex];
     const GeometryInstance& geomInst = wlp.geomInstBuffer[inst.geomInstIndices[0]];
@@ -265,12 +286,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
         // MIS weight calculation
         float MISWeight = 1.0f;
         if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
-            float uvPDF = geomInst.asInfSphere.importanceMap.evaluatePDF(
-                phi / (2 * VLR_M_PI), theta / VLR_M_PI);
-            float hypAreaPDF = uvPDF / (2 * VLR_M_PI * VLR_M_PI * sin(theta));
+            // Uniform sphere: uvPDF = 1/(2*pi^2), hypAreaPDF = 1/(2*pi^2*sin(theta))
+            float sinThetaSafe = (sin(theta) > 1e-6f) ? sin(theta) : 1e-6f;
+            float hypAreaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
             
-            float instProb = inst.lightGeomInstDistribution.integral() / wlp.lightInstDist.integral();
-            float geomInstProb = geomInst.importance / inst.lightGeomInstDistribution.integral();
+            float lightInstIntegral = wlp.lightInstDist.integral();
+            float instProb = (lightInstIntegral > 1e-8f)
+                ? (1.0f / lightInstIntegral) : 1.0f;
+            float geomInstProb = (geomInst.importance > 1e-8f)
+                ? geomInst.importance : 1.0f;
             
             float bsdfPDF = pathState.prevDirPDF;
             float lightPDF = instProb * geomInstProb * hypAreaPDF / abs(dirOutLocal.z);
@@ -294,7 +318,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     WavefrontPathState& pathState,
     const SurfacePoint& surfPt,
     const GeometryInstance& geomInst,
-    float hypAreaPDF) {
+    float hypAreaPDF,
+    const WavefrontLaunchParameters& wlp) {
     
     // Evaluate EDF
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
@@ -312,10 +337,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     // MIS weight calculation
     float MISWeight = 1.0f;
     if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
-        // Compute light sampling PDF
+        // Compute light sampling PDF (simplified: use uniform distribution)
         const Instance& inst = wlp.instBuffer[geomInst.instIndex];
-        float instProb = inst.lightGeomInstDistribution.integral() / wlp.lightInstDist.integral();
-        float geomInstProb = geomInst.importance / inst.lightGeomInstDistribution.integral();
+        float lightInstIntegral = wlp.lightInstDist.integral();
+        float instProb = (lightInstIntegral > 1e-8f)
+            ? (1.0f / lightInstIntegral) : 1.0f;
+        float geomInstProb = (inst.numGeomInsts > 0 && geomInst.importance > 1e-8f)
+            ? (geomInst.importance / inst.numGeomInsts) : 1.0f;
         
         float cosTerm = abs(dirOutLocal.z);
         float lightPDF = instProb * geomInstProb * hypAreaPDF / cosTerm;
@@ -367,12 +395,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void generateCameraRay(
     WavefrontPathState& pathState,
     float screenX,
     float screenY,
-    const CameraDescriptor& camera) {
+    const CameraDescriptor& camera,
+    const WavefrontLaunchParameters& wlp) {
     
-    // Sample lens position
+    // Sample lens position (pinhole fallback when no lens program)
     LensPosSample lensPosSample;
-    ProgSigSampleLensPosition sampleLensPos(wlp.progSampleLensPosition);
-    sampleLensPos(pathState.rng.getFloat0cTo1o(), pathState.rng.getFloat0cTo1o(), &lensPosSample);
+    lensPosSample.position = Point3D(0, 0, 0);
+    lensPosSample.areaPDF = 1.0f;
+    if (wlp.progSampleLensPosition >= 0) {
+        // OptiX callable would go here; use pinhole for now
+    }
     
     // Compute image plane position
     float vh = 2.0f * std::tan(camera.fovY * 0.5f);
@@ -387,13 +419,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void generateCameraRay(
     pathState.origin = camera.position + lensPosSample.position;
     pathState.direction = rayDir;
     
-    // Evaluate IDF
+    // Evaluate IDF (fallback: uniform sensor response when no program)
     IDFSample idfSample;
     idfSample.dirLocal = camera.orientation.toLocal(rayDir);
     idfSample.positionLocal = lensPosSample.position;
-    
-    ProgSigEvaluateIDF evaluateIDF(camera.progEvaluateIDF);
-    SampledSpectrum We = evaluateIDF(idfSample, pathState.wls);
+    idfSample.dirPDF = 1.0f;
+    SampledSpectrum We = SampledSpectrum::One();
+    if (camera.progEvaluateIDF >= 0) {
+        // OptiX callable would go here
+    }
     
     // Initialize throughput
     pathState.throughput = We / (lensPosSample.areaPDF * idfSample.dirPDF);
@@ -410,7 +444,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void generateCameraRay(
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     WavefrontPathState& pathState,
     const SurfacePoint& shadingSurfPt,
-    WavefrontLightSample* lightSample) {
+    WavefrontLightSample* lightSample,
+    const WavefrontLaunchParameters& wlp) {
     
     // Sample light instance
     float uLight = pathState.rng.getFloat0cTo1o();
@@ -419,24 +454,53 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     
     const Instance& inst = wlp.instBuffer[instIndex];
     
-    // Sample geometry instance
+    // Sample geometry instance (uniform when no distribution)
     float uGeomInst = pathState.rng.getFloat0cTo1o();
-    float geomInstProb;
-    uint32_t geomInstIndexInInst = inst.lightGeomInstDistribution.sample(uGeomInst, &geomInstProb);
+    uint32_t geomInstIndexInInst = (inst.numGeomInsts > 0)
+        ? (static_cast<uint32_t>(uGeomInst * inst.numGeomInsts) % inst.numGeomInsts)
+        : 0;
+    float geomInstProb = (inst.numGeomInsts > 0)
+        ? (1.0f / inst.numGeomInsts) : 1.0f;
     uint32_t geomInstIndex = inst.geomInstIndices[geomInstIndexInInst];
     
     const GeometryInstance& geomInst = wlp.geomInstBuffer[geomInstIndex];
     
-    // Sample position on light
-    float uPos0 = pathState.rng.getFloat0cTo1o();
-    float uPos1 = pathState.rng.getFloat0cTo1o();
-    
+    // Sample position on light (triangle mesh fallback when no callable)
     LightPosSample lightPosSample;
-    ProgSigSampleLightPosition sampleLightPos(geomInst.progSampleLightPosition);
-    sampleLightPos(uPos0, uPos1, &lightPosSample);
+    if (geomInst.geomType == GeometryType_TriangleMesh &&
+        geomInst.asTriMesh.triangleBuffer != nullptr &&
+        wlp.vertexPositions != nullptr) {
+        // Uniform triangle sampling
+        const Triangle& tri = geomInst.asTriMesh.triangleBuffer[0];
+        float u = pathState.rng.getFloat0cTo1o();
+        float v = pathState.rng.getFloat0cTo1o();
+        if (u + v > 1.0f) { u = 1.0f - u; v = 1.0f - v; }
+        float w = 1.0f - u - v;
+        Point3D p0 = wlp.vertexPositions[tri.indices[0]];
+        Point3D p1 = wlp.vertexPositions[tri.indices[1]];
+        Point3D p2 = wlp.vertexPositions[tri.indices[2]];
+        Point3D posLocal = p0 * w + p1 * u + p2 * v;
+        lightPosSample.surfPt.position = inst.transform.toWorld(posLocal);
+        lightPosSample.surfPt.geometricNormal = normalize(
+            cross(p1 - p0, p2 - p0));
+        lightPosSample.surfPt.shadingFrame = ReferenceFrame(
+            Vector3D(1,0,0), lightPosSample.surfPt.geometricNormal);
+        lightPosSample.surfPt.texCoord = TexCoord2D(u, v);
+        lightPosSample.surfPt.atInfinity = false;
+        lightPosSample.areaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
+    } else {
+        // Fallback: use instance origin
+        lightPosSample.surfPt.position = inst.transform.toWorld(Point3D(0,0,0));
+        lightPosSample.surfPt.geometricNormal = Normal3D(0,1,0);
+        lightPosSample.surfPt.shadingFrame = ReferenceFrame(Vector3D(1,0,0),
+            lightPosSample.surfPt.geometricNormal);
+        lightPosSample.surfPt.texCoord = TexCoord2D(0, 0);
+        lightPosSample.surfPt.atInfinity = false;
+        lightPosSample.areaPDF = 1.0f;
+    }
     
-    // Transform to world space
-    lightSample->lightSurfPt = inst.transform * lightPosSample.surfPt;
+    // Transform to world space (inst.transform is ReferenceFrame)
+    transformSurfacePoint(inst.transform, lightPosSample.surfPt, &lightSample->lightSurfPt);
     
     // Compute light PDF
     lightSample->lightPDF = instProb * geomInstProb * lightPosSample.areaPDF;
@@ -447,7 +511,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     
     Vector3D shadowRayDir = lightSample->lightSurfPt.position - shadingSurfPt.position;
     float dist = length(shadowRayDir);
-    shadowRayDir /= dist;
+    shadowRayDir = (dist > 1e-8f) ? (shadowRayDir / dist) : Vector3D(0, 0, 1);
     
     Vector3D dirOutLocal = lightSample->lightSurfPt.shadingFrame.toLocal(-shadowRayDir);
     SampledSpectrum spEmittance = edf.evaluateEmittance();

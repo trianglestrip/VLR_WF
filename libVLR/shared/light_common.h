@@ -186,16 +186,44 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     
     case LightType_Area:
     default: {
-        // 区域光：调用几何的光源位置采样程序
+        // 区域光：三角形网格采样（当无 OptiX callable 时）
         LightPosSample lightPosSample;
-        ProgSigSampleLightPosition sampleLightPos(geomInst.progSampleLightPosition);
-        
-        if (geomInst.progSampleLightPosition < 0) {
-            // 无有效采样程序（如占位符几何）
+        if (geomInst.geomType == GeometryType_TriangleMesh &&
+            geomInst.asTriMesh.triangleBuffer != nullptr &&
+            wlp.vertexPositions != nullptr) {
+            // Uniform triangle sampling: sample first triangle as fallback
+            const Triangle& tri = geomInst.asTriMesh.triangleBuffer[0];
+            float u = u0, v = u1;
+            if (u + v > 1.0f) { u = 1.0f - u; v = 1.0f - v; }
+            float w = 1.0f - u - v;
+            Point3D p0 = wlp.vertexPositions[tri.indices[0]];
+            Point3D p1 = wlp.vertexPositions[tri.indices[1]];
+            Point3D p2 = wlp.vertexPositions[tri.indices[2]];
+            Point3D posLocal = Point3D(
+                p0.x * w + p1.x * u + p2.x * v,
+                p0.y * w + p1.y * u + p2.y * v,
+                p0.z * w + p1.z * u + p2.z * v);
+            lightPosSample.surfPt.position = posLocal;
+            Vector3D e1 = p1 - p0, e2 = p2 - p0;
+            lightPosSample.surfPt.geometricNormal = normalize(cross(e1, e2));
+            lightPosSample.surfPt.shadingFrame = ReferenceFrame(
+                Vector3D(1,0,0), lightPosSample.surfPt.geometricNormal);
+            lightPosSample.surfPt.texCoord = TexCoord2D(u, v);
+            lightPosSample.surfPt.atInfinity = false;
+            lightPosSample.areaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
+        } else if (geomInst.progSampleLightPosition >= 0) {
+            // OptiX callable would go here
             return false;
+        } else {
+            // 无有效采样：使用实例原点
+            lightPosSample.surfPt.position = Point3D(0, 0, 0);
+            lightPosSample.surfPt.geometricNormal = Normal3D(0, 1, 0);
+            lightPosSample.surfPt.shadingFrame = ReferenceFrame(
+                Vector3D(1,0,0), lightPosSample.surfPt.geometricNormal);
+            lightPosSample.surfPt.texCoord = TexCoord2D(0, 0);
+            lightPosSample.surfPt.atInfinity = false;
+            lightPosSample.areaPDF = 1.0f;
         }
-        
-        sampleLightPos(u0, u1, &lightPosSample);
         
         // 变换到世界空间
         transformSurfacePoint(inst.transform, lightPosSample.surfPt, &result->lightSurfPt);

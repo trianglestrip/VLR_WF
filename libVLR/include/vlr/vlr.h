@@ -13,14 +13,28 @@
 
 #include <stdint.h>
 
+// Windows DLL 导出/导入
+#ifdef _WIN32
+#  ifdef VLR_EXPORTS
+#    define VLR_API __declspec(dllexport)
+#  else
+#    define VLR_API __declspec(dllimport)
+#  endif
+#else
+#  define VLR_API __attribute__((visibility("default")))
+#endif
+
 #ifdef __cplusplus
 #include "public_types.h"
 extern "C" {
 #endif
 
 // C 兼容：结果码与渲染器类型
-#ifndef __cplusplus
+#ifdef __cplusplus
 typedef int32_t VLRResult;
+#else
+typedef int32_t VLRResult;
+#endif
 typedef uint32_t VLRRenderer;
 #define VLRResult_Success 0
 #define VLRResult_InvalidArgument (-1)
@@ -33,26 +47,31 @@ typedef uint32_t VLRRenderer;
 #define VLRRenderer_LightTracing 1
 #define VLRRenderer_BidirectionalPathTracing 2
 #define VLRRenderer_WavefrontPathTracing 3
-#endif
 
 // ============================================================================
-// 前置声明：不透明句柄
+// 前置声明：不透明句柄（使用不同结构体名避免 C++ 歧义）
 // ============================================================================
+
+struct VLRContextImpl;
+struct VLRSceneImpl;
+struct VLRTriangleMeshImpl;
+struct VLRMaterialImpl;
+struct VLRInstanceImpl;
 
 /// 上下文句柄：管理渲染资源与管线
-typedef struct VLRContext* VLRContext;
+typedef struct VLRContextImpl* VLRContext;
 
 /// 场景句柄：管理几何体、材质、实例、相机
-typedef struct VLRScene* VLRScene;
+typedef struct VLRSceneImpl* VLRScene;
 
 /// 网格句柄：三角形网格几何体
-typedef struct VLRTriangleMesh* VLRTriangleMesh;
+typedef struct VLRTriangleMeshImpl* VLRTriangleMesh;
 
 /// 材质句柄：表面材质
-typedef struct VLRMaterial* VLRMaterial;
+typedef struct VLRMaterialImpl* VLRMaterial;
 
 /// 实例句柄：场景中的几何实例（网格+变换）
-typedef struct VLRInstance* VLRInstance;
+typedef struct VLRInstanceImpl* VLRInstance;
 
 
 // ============================================================================
@@ -66,8 +85,10 @@ typedef struct VLRCameraParams {
     float up[3];            ///< 上方向 (单位向量)
     float fovY;             ///< 垂直视场角（弧度）
     float aspect;           ///< 宽高比
-    float lensRadius;       ///< 透镜半径（景深，0 表示针孔）
-    float focusDistance;    ///< 焦距
+    float lensRadius;       ///< 光圈半径（景深，0 表示针孔）
+    float focusDistance;    ///< 焦平面距离
+    float focalLength;      ///< 焦距（0 表示从 FOV 推导）
+    uint32_t cameraType;    ///< VLRCameraType：0=透视，1=等距柱状
 } VLRCameraParams;
 
 
@@ -80,21 +101,21 @@ typedef struct VLRCameraParams {
 /// @param enableLogging 是否启用 OptiX 日志
 /// @param outContext 输出上下文句柄
 /// @return VLRResult_Success 或错误码
-VLRResult vlrCreateContext(void* cudaStream, int enableLogging, VLRContext* outContext);
+VLR_API VLRResult vlrCreateContext(void* cudaStream, int enableLogging, VLRContext* outContext);
 
 /// 销毁渲染上下文
 /// @param context 上下文句柄（可为 NULL，无操作）
-void vlrDestroyContext(VLRContext context);
+VLR_API void vlrDestroyContext(VLRContext context);
 
 /// 创建场景
 /// @param context 所属上下文
 /// @param outScene 输出场景句柄
 /// @return VLRResult_Success 或错误码
-VLRResult vlrCreateScene(VLRContext context, VLRScene* outScene);
+VLR_API VLRResult vlrCreateScene(VLRContext context, VLRScene* outScene);
 
 /// 销毁场景
 /// @param scene 场景句柄（可为 NULL，无操作）
-void vlrDestroyScene(VLRScene scene);
+VLR_API void vlrDestroyScene(VLRScene scene);
 
 /// 创建三角形网格
 /// @param scene 所属场景
@@ -105,7 +126,7 @@ void vlrDestroyScene(VLRScene scene);
 /// @param material 材质句柄（需先通过 vlrCreateMaterial 创建）
 /// @param outMesh 输出网格句柄
 /// @return VLRResult_Success 或错误码
-VLRResult vlrCreateTriangleMesh(
+VLR_API VLRResult vlrCreateTriangleMesh(
     VLRScene scene,
     const float* vertices,
     uint32_t numVertices,
@@ -116,23 +137,25 @@ VLRResult vlrCreateTriangleMesh(
 
 /// 销毁三角形网格
 /// @param mesh 网格句柄（可为 NULL，无操作）
-void vlrDestroyTriangleMesh(VLRTriangleMesh mesh);
+VLR_API void vlrDestroyTriangleMesh(VLRTriangleMesh mesh);
 
 /// 创建材质
 /// @param scene 所属场景
-/// @param materialType 材质类型（VLRMaterialType）
+/// @param materialType 材质类型（VLRMaterialType，0=Matte 漫反射）
 /// @param baseColor 基础颜色 RGB [0..1]（3 个 float，可为 NULL 使用默认灰）
+/// @param emissionColor 发光颜色 RGB [0..1]（3 个 float，可为 NULL 表示不发光）
 /// @param outMaterial 输出材质句柄
 /// @return VLRResult_Success 或错误码
-VLRResult vlrCreateMaterial(
+VLR_API VLRResult vlrCreateMaterial(
     VLRScene scene,
     uint32_t materialType,
     const float* baseColor,
+    const float* emissionColor,
     VLRMaterial* outMaterial);
 
 /// 销毁材质
 /// @param material 材质句柄（可为 NULL，无操作）
-void vlrDestroyMaterial(VLRMaterial material);
+VLR_API void vlrDestroyMaterial(VLRMaterial material);
 
 /// 创建实例（将网格放入场景）
 /// @param scene 所属场景
@@ -143,7 +166,7 @@ void vlrDestroyMaterial(VLRMaterial material);
 /// @param rotationAngle 旋转角度（弧度）
 /// @param outInstance 输出实例句柄
 /// @return VLRResult_Success 或错误码
-VLRResult vlrCreateInstance(
+VLR_API VLRResult vlrCreateInstance(
     VLRScene scene,
     VLRTriangleMesh mesh,
     const float position[3],
@@ -154,13 +177,19 @@ VLRResult vlrCreateInstance(
 
 /// 销毁实例
 /// @param instance 实例句柄（可为 NULL，无操作）
-void vlrDestroyInstance(VLRInstance instance);
+VLR_API void vlrDestroyInstance(VLRInstance instance);
+
+/// 添加区域光
+/// @param scene 所属场景
+/// @param instance 发光几何的实例句柄（其材质需设置 emissionColor）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance);
 
 /// 设置场景相机
 /// @param scene 场景句柄
 /// @param params 相机参数
 /// @return VLRResult_Success 或错误码
-VLRResult vlrSetCamera(VLRScene scene, const VLRCameraParams* params);
+VLR_API VLRResult vlrSetCamera(VLRScene scene, const VLRCameraParams* params);
 
 /// 执行渲染
 /// @param context 上下文句柄
@@ -170,7 +199,7 @@ VLRResult vlrSetCamera(VLRScene scene, const VLRCameraParams* params);
 /// @param numSamples 每像素采样数
 /// @param renderer 渲染器类型（VLRRenderer）
 /// @return VLRResult_Success 或错误码
-VLRResult vlrRender(
+VLR_API VLRResult vlrRender(
     VLRContext context,
     VLRScene scene,
     uint32_t width,
@@ -183,7 +212,7 @@ VLRResult vlrRender(
 /// @return 设备端累积缓冲区指针（SpectrumStorage 数组，需用户 cudaMemcpy 到主机）
 ///         或 NULL（未初始化/渲染后）
 /// @note 缓冲区大小为 width*height*sizeof(SpectrumStorage)，在 vlrRender 之后有效
-void* vlrGetOutputBuffer(VLRContext context);
+VLR_API void* vlrGetOutputBuffer(VLRContext context);
 
 
 // ============================================================================
@@ -191,7 +220,7 @@ void* vlrGetOutputBuffer(VLRContext context);
 // ============================================================================
 
 /// 获取 VLR 版本信息
-void vlrGetVersion(uint32_t* major, uint32_t* minor, uint32_t* patch);
+VLR_API void vlrGetVersion(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
 #ifdef __cplusplus
 }

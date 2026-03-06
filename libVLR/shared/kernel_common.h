@@ -46,6 +46,7 @@ using ::vlr::DirectionType;
 using ::vlr::KernelRNG;
 using ::vlr::SurfacePoint;
 using ::vlr::CameraDescriptor;
+using ::vlr::CameraType;
 using ::vlr::GeometryType;
 using ::vlr::Triangle;
 using ::vlr::GeometryInstance;

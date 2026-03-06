@@ -20,6 +20,10 @@
 #include "../shared/material_types.h"
 
 #include <cuda_runtime.h>
+// Disable __half/__nv_bfloat16 in CUB to avoid "incomplete type" errors with rdc (CUDA 13.1).
+// This file only uses DeviceSelect::Flagged and DeviceRadixSort::SortPairs with uint32_t.
+#define CCCL_DISABLE_FP16_SUPPORT
+#define CCCL_DISABLE_BF16_SUPPORT
 #include <cub/cub.cuh>
 
 #include <algorithm>
@@ -316,5 +320,3 @@ size_t sortPathsByMaterialTempStorageBytes(uint32_t numPaths) {
 
 } // namespace shared
 } // namespace vlr
-<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>
-WebSearch
