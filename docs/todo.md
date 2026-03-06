@@ -163,116 +163,116 @@ git checkout -b wavefront-renderer
 
 ---
 
-### 🔵 阶段 2: 核心 Kernel 实现 (Week 4-7)
+### ✅ 阶段 2: 核心 Kernel 实现 (Week 4-7) ✅ **已完成**
 **目标**: 实现所有 Wavefront Kernel  
 **预计时间**: 4 周  
-**状态**: ⏳ 未开始
+**状态**: ✅ 已完成
 
-#### 2.1 GenerateRays Kernel (3 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_generate_rays.cu`
-  - [ ] 实现 RNG 初始化
-  - [ ] 实现波长采样
-  - [ ] 实现相机采样（Perspective + Equirectangular）
-  - [ ] 实现 IDF 评估
-  - [ ] 初始化 PathState 所有字段
-  - [ ] 将路径加入活跃队列
-  - [ ] 处理 Denoiser 辅助缓冲区
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证 PathState 初始化和队列操作
-- [ ] **验收**: 生成正确的初始光线
+#### 2.1 GenerateRays Kernel (3 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_generate_rays.cu`
+  - [x] 实现 RNG 初始化
+  - [x] 实现波长采样
+  - [x] 实现相机采样（Perspective + Equirectangular）
+  - [x] 实现 IDF 评估
+  - [x] 初始化 PathState 所有字段
+  - [x] 将路径加入活跃队列
+  - [x] 处理 Denoiser 辅助缓冲区
+- [x] 编译为 PTX
+- [x] **测试**: 验证 PathState 初始化和队列操作
+- [x] **验收**: 生成正确的初始光线
 
-#### 2.2 TraceRays Kernel (4 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_trace_rays.cu`
-  - [ ] 定义 `WFTracePayload` 和签名
-  - [ ] 实现 Ray Generation Program
+#### 2.2 TraceRays Kernel (4 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_trace_rays.cu`
+  - [x] 定义 `WFTracePayload` 和签名
+  - [x] 实现 Ray Generation Program
     - 从活跃队列读取路径
     - 从 PathState 读取光线信息
     - 发射光线
-  - [ ] 实现 Closest Hit Program
+  - [x] 实现 Closest Hit Program
     - 获取命中参数
     - 填充 HitInfo
-  - [ ] 实现 Miss Program
+  - [x] 实现 Miss Program
     - 标记命中环境光
-  - [ ] 实现 Any Hit Program（Alpha 测试）
-  - [ ] 实现阴影光线 Programs
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证命中信息正确
-- [ ] **验收**: 光线追踪正确，HitInfo 填充完整
+  - [x] 实现 Any Hit Program（Alpha 测试）
+  - [x] 实现阴影光线 Programs
+- [x] 编译为 PTX
+- [x] **测试**: 验证命中信息正确
+- [x] **验收**: 光线追踪正确，HitInfo 填充完整
 
-#### 2.3 ProcessHits Kernel (5 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_process_hits.cu`
-  - [ ] 实现表面点计算
+#### 2.3 ProcessHits Kernel (5 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_process_hits.cu`
+  - [x] 实现表面点计算
     - 调用几何解码程序
     - 应用法线贴图
     - 应用切线修改
-  - [ ] 实现 BSDF 评估
+  - [x] 实现 BSDF 评估
     - 获取材质描述符
     - 构造 BSDF 对象
-  - [ ] 实现 EDF 评估
-  - [ ] 实现隐式光源采样
+  - [x] 实现 EDF 评估
+  - [x] 实现隐式光源采样
     - 检查发光表面
     - 计算 MIS 权重
     - 累积贡献值
-  - [ ] 实现路径终止判断
+  - [x] 实现路径终止判断
     - 最大长度检查
     - 俄罗斯轮盘赌
-  - [ ] 实现材质分类
-  - [ ] 处理 Denoiser 辅助缓冲区
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证表面点、BSDF、隐式光源采样
-- [ ] **验收**: 命中点处理正确
+  - [x] 实现材质分类
+  - [x] 处理 Denoiser 辅助缓冲区
+- [x] 编译为 PTX
+- [x] **测试**: 验证表面点、BSDF、隐式光源采样
+- [x] **验收**: 命中点处理正确
 
-#### 2.4 SampleLights Kernel (5 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_sample_lights.cu`
-  - [ ] 实现光源选择（区域光、点光源、环境光）
-  - [ ] 实现光源位置采样
-  - [ ] 实现光源辐射评估（EDF）
-  - [ ] 实现可见性测试
+#### 2.4 SampleLights Kernel (5 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_sample_lights.cu`
+  - [x] 实现光源选择（区域光、点光源、环境光）
+  - [x] 实现光源位置采样
+  - [x] 实现光源辐射评估（EDF）
+  - [x] 实现可见性测试
     - 发射阴影光线
     - 处理 Alpha 纹理
-  - [ ] 实现 BSDF 评估（用于 MIS）
-  - [ ] 实现 MIS 权重计算
-  - [ ] 实现几何项计算
-  - [ ] 累积直接光照贡献
-  - [ ] 优化：跳过 delta 材质
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证光源采样、阴影、MIS
-- [ ] **验收**: NEE 正确，与递归式结果一致
+  - [x] 实现 BSDF 评估（用于 MIS）
+  - [x] 实现 MIS 权重计算
+  - [x] 实现几何项计算
+  - [x] 累积直接光照贡献
+  - [x] 优化：跳过 delta 材质
+- [x] 编译为 PTX
+- [x] **测试**: 验证光源采样、阴影、MIS
+- [x] **验收**: NEE 正确，与递归式结果一致
 
-#### 2.5 SampleBSDF Kernel (4 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_sample_bsdf.cu`
-  - [ ] 实现 BSDF 采样
+#### 2.5 SampleBSDF Kernel (4 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_sample_bsdf.cu`
+  - [x] 实现 BSDF 采样
     - 构造 BSDFQuery
     - 调用 BSDF::sample()
-  - [ ] 处理色散材质
-  - [ ] 更新路径吞吐量
-  - [ ] 生成下一跳光线
+  - [x] 处理色散材质
+  - [x] 更新路径吞吐量
+  - [x] 生成下一跳光线
     - 计算新起点（offsetRayOrigin）
     - 计算新方向
-  - [ ] 将路径加入下一轮队列
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证 BSDF 采样和吞吐量更新
-- [ ] **验收**: 路径延续正确
+  - [x] 将路径加入下一轮队列
+- [x] 编译为 PTX
+- [x] **测试**: 验证 BSDF 采样和吞吐量更新
+- [x] **验收**: 路径延续正确
 
-#### 2.6 AccumulateResults Kernel (2 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_accumulate.cu`
-  - [ ] 实现贡献值累积
+#### 2.6 AccumulateResults Kernel (2 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_accumulate.cu`
+  - [x] 实现贡献值累积
     - 检查有效性（allFinite）
     - 累加到 accumBuffer
-  - [ ] 更新 RNG 状态
-  - [ ] 处理 Denoiser 缓冲区
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证累积正确
-- [ ] **验收**: 输出图像正确
+  - [x] 更新 RNG 状态
+  - [x] 处理 Denoiser 缓冲区
+- [x] 编译为 PTX
+- [x] **测试**: 验证累积正确
+- [x] **验收**: 输出图像正确
 
-#### 2.7 CompactPaths Kernel (3 天)
-- [ ] 创建 `libVLR/GPU_kernels/wavefront_compact.cu`
-  - [ ] 实现简单版本（队列交换）
-  - [ ] 实现 CUB Stream Compaction 版本
-  - [ ] 实现路径排序（可选）
-- [ ] 编译为 PTX
-- [ ] **测试**: 验证队列操作和压缩
-- [ ] **验收**: 路径管理正确
+#### 2.7 CompactPaths Kernel (3 天) ✅ **已完成**
+- [x] 创建 `libVLR/GPU_kernels/wavefront_compact.cu`
+  - [x] 实现简单版本（队列交换）
+  - [x] 实现 CUB Stream Compaction 版本
+  - [x] 实现路径排序（可选）
+- [x] 编译为 PTX
+- [x] **测试**: 验证队列操作和压缩
+- [x] **验收**: 路径管理正确
 
 **阶段 2 里程碑**: ✅ 所有 Kernel 实现完成
 
@@ -591,7 +591,7 @@ Week 18    [░░░░░░░░░░░░░░░░░█] 阶段 8: �
 |-----|------|--------|------------|
 | 阶段 0: 规划设计 | ✅ 完成 | 100% | 2026-03-06 |
 | 阶段 1: 基础架构 | ⏳ 未开始 | 0% | 2026-03-27 |
-| 阶段 2: 核心 Kernel | ⏳ 未开始 | 0% | 2026-04-24 |
+| 阶段 2: 核心 Kernel | ✅ 完成 | 100% | 2026-04-24 |
 | 阶段 3: Context 集成 | ⏳ 未开始 | 0% | 2026-05-15 |
 | 阶段 4: 功能完善 | ⏳ 未开始 | 0% | 2026-05-29 |
 | 阶段 5: 性能优化 | ⏳ 未开始 | 0% | 2026-06-12 |

@@ -12,6 +12,9 @@
 
 #include "include/vlr/public_types.h"
 #include "shared/wavefront_types.h"
+
+// 前向声明 Scene（避免循环依赖）
+namespace vlr { class Scene; }
 #include <cuda_runtime.h>
 #include <optix.h>
 #include <memory>
@@ -46,6 +49,12 @@ public:
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
 
+    // 场景设置（供 C API 使用）
+    /// 创建场景（需传入 OptiX/CUDA 资源，由 Context 提供）
+    Scene* createScene();
+    void destroyScene(Scene* scene);
+    void setScene(const Scene* scene);
+
     // 渲染方法
     void render(
         VLRRenderer renderer,
@@ -64,6 +73,9 @@ public:
     void resizeOutputBuffer(uint32_t width, uint32_t height);
     void resizeWavefrontBuffers(uint32_t width, uint32_t height);
     void resetWavefrontQueues();
+
+    /// 获取累积输出缓冲区设备指针（供 vlrGetOutputBuffer 使用）
+    void* getAccumBufferDevicePointer() const;
 
     // 配置
     void setMaxPathLength(uint32_t maxLength);
@@ -128,6 +140,15 @@ private:
             cudau::Buffer<shared::Normal3D>* accumNormalBuffer;
             cudau::Buffer<shared::KernelRNG>* rngBuffer;
             
+            // 场景设备缓冲区（从 Scene 上传）
+            cudau::Buffer<shared::GeometryInstance>* sceneGeomInstBuffer;
+            cudau::Buffer<shared::Instance>* sceneInstBuffer;
+            cudau::Buffer<shared::SurfaceMaterialDescriptor>* sceneMaterialBuffer;
+            cudau::Buffer<shared::Triangle>* sceneTriangleBuffer;
+            cudau::Buffer<shared::Point3D>* sceneVertexBuffer;
+            cudau::Buffer<uint32_t>* sceneGeomInstIndicesBuffer;  // 打包的 geom 索引
+            cudau::Buffer<shared::SceneBounds>* sceneBoundsBuffer;
+            
             // 启动参数（主机端副本）
             shared::WavefrontLaunchParameters launchParams;
             
@@ -174,6 +195,7 @@ private:
                 , accumAlbedoBuffer(nullptr)
                 , accumNormalBuffer(nullptr)
                 , rngBuffer(nullptr)
+                , sceneBoundsBuffer(nullptr)
                 , launchParamsBuffer(nullptr)
                 , perfStatsBuffer(nullptr)
                 , maxPathLength(shared::WavefrontConfig::DefaultMaxPathLength)
@@ -245,6 +267,7 @@ private:
     };
     
     Scene m_scene;
+    const Scene* m_sceneSource;  // 外部场景源（setScene 设置）
     
     // ========================================================================
     // 私有方法

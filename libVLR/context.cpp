@@ -9,12 +9,56 @@
 // ============================================================================
 
 #include "context.h"
+#include "scene.h"
+#include "GPU_kernels/wavefront_launch.h"
 #include "utils/cuda_util.h"
 #include "utils/optix_util.h"
 #include <cstring>
 #include <stdexcept>
+#include <fstream>
+#include <sstream>
+#include <vector>
 
 namespace vlr {
+
+// ============================================================================
+// PTX 文件加载辅助
+// ============================================================================
+
+namespace {
+
+/// 从 libVLR/GPU_kernels/ 目录加载 PTX 文件内容
+/// 尝试多个路径以支持不同构建/运行目录布局
+std::vector<char> loadPTXFile(const char* filename) {
+    // 候选路径：支持从项目根目录或 libVLR 目录运行
+    const char* searchPaths[] = {
+        "libVLR/GPU_kernels/",
+        "GPU_kernels/",
+        "../libVLR/GPU_kernels/",
+        "../../libVLR/GPU_kernels/",
+    };
+    
+    for (const char* basePath : searchPaths) {
+        std::string path = std::string(basePath) + filename;
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (file.is_open()) {
+            std::streamsize size = file.tellg();
+            file.seekg(0, std::ios::beg);
+            std::vector<char> buffer(static_cast<size_t>(size) + 1);
+            if (file.read(buffer.data(), size)) {
+                buffer[static_cast<size_t>(size)] = '\0';
+                return buffer;
+            }
+            file.close();
+        }
+    }
+    
+    throw std::runtime_error(
+        std::string("无法加载 PTX 文件: ") + filename +
+        "。请确保文件位于 libVLR/GPU_kernels/ 目录，并已运行 compile_wavefront_ptx.bat 生成 PTX。");
+}
+
+}  // 匿名命名空间
 
 // ============================================================================
 // 构造函数与析构函数
@@ -23,6 +67,7 @@ namespace vlr {
 Context::Context(cudaStream_t cudaStream, bool enableLogging)
     : m_stream(cudaStream)
     , m_cudaContext(nullptr)
+    , m_sceneSource(nullptr)
 {
     // 初始化 CUDA 上下文
     m_cudaContext = new cudau::Context();
@@ -92,14 +137,192 @@ void Context::initializeWavefrontPipeline() {
 
 
 void Context::createWavefrontPrograms() {
-    // 将在 PTX 文件可用时实现
-    // 目前为占位符
+    auto& wf = m_optix.wavefrontPathTracing;
+    
+    char logBuffer[2048];
+    size_t logSize = sizeof(logBuffer);
+    
+    auto createProgramGroup = [&](const OptixProgramGroupDesc& desc) -> OptixProgramGroup {
+        OptixProgramGroupOptions options = {};
+        OptixProgramGroup pg = nullptr;
+        OptixResult res = optixProgramGroupCreate(
+            m_optix.context,
+            &desc,
+            1,
+            &options,
+            logBuffer,
+            &logSize,
+            &pg
+        );
+        if (res != OPTIX_SUCCESS) {
+            throw std::runtime_error(
+                std::string("程序组创建失败: ") + optixGetErrorName(res) +
+                "\n日志:\n" + std::string(logBuffer, logSize));
+        }
+        if (logSize > 1) {
+            printf("[OptiX] 程序组日志:\n%.*s\n", static_cast<int>(logSize), logBuffer);
+        }
+        return pg;
+    };
+    
+    // ========================================================================
+    // 1. Ray Generation Program - wavefrontTraceRays
+    // 从活跃队列读取路径，发射光线进行求交
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
+        desc.raygen.module = wf.module;
+        desc.raygen.entryFunctionName = "__raygen__wavefrontTraceRays";
+        wf.raygenProgram = createProgramGroup(desc);
+    }
+    
+    // ========================================================================
+    // 2. Miss Program - wavefrontMiss
+    // 主光线未击中几何体时（命中环境光/天空）
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
+        desc.miss.module = wf.module;
+        desc.miss.entryFunctionName = "__miss__wavefrontMiss";
+        wf.missProgram = createProgramGroup(desc);
+    }
+    
+    // ========================================================================
+    // 3. Hit Group - Closest Hit（默认，无 Alpha 测试）
+    // wavefrontClosestHit 填充命中信息到 hitInfoBuffer
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+        desc.hitgroup.moduleCH = wf.module;
+        desc.hitgroup.entryFunctionNameCH = "__closesthit__wavefrontClosestHit";
+        desc.hitgroup.moduleAH = nullptr;
+        desc.hitgroup.entryFunctionNameAH = nullptr;
+        desc.hitgroup.moduleIS = nullptr;
+        desc.hitgroup.entryFunctionNameIS = nullptr;  // 使用内置三角形求交
+        wf.hitGroupProgram = createProgramGroup(desc);
+    }
+    
+    // ========================================================================
+    // 4. Shadow Miss Program - wavefrontShadowMiss
+    // 阴影光线未击中，光源可见
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
+        desc.miss.module = wf.module;
+        desc.miss.entryFunctionName = "__miss__wavefrontShadowMiss";
+        wf.shadowMissProgram = createProgramGroup(desc);
+    }
+    
+    // ========================================================================
+    // 5. Shadow Hit Group - wavefrontShadowAnyHit
+    // 阴影光线击中几何体，光源被遮挡，立即终止
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+        desc.hitgroup.moduleCH = nullptr;
+        desc.hitgroup.entryFunctionNameCH = nullptr;
+        desc.hitgroup.moduleAH = wf.module;
+        desc.hitgroup.entryFunctionNameAH = "__anyhit__wavefrontShadowAnyHit";
+        desc.hitgroup.moduleIS = nullptr;
+        desc.hitgroup.entryFunctionNameIS = nullptr;
+        wf.shadowHitGroupProgram = createProgramGroup(desc);
+    }
+    
+    printf("Wavefront 程序组创建完成（RayGen、Miss、HitGroup、ShadowMiss、ShadowHitGroup）\n");
 }
 
 
 void Context::createWavefrontSBT() {
-    // 将在创建程序时实现
-    // 目前为占位符
+    auto& wf = m_optix.wavefrontPathTracing;
+    
+    // ========================================================================
+    // 使用 optixu::createSBTRecord 创建 SBT 记录
+    // SBT 布局：RayGen(1) | Miss(2: Closest + Shadow) | HitGroup(2: Closest + Shadow)
+    // ========================================================================
+    
+    // 1. RayGen 记录（无附加数据）
+    wf.raygenRecord = optixu::createSBTRecord(wf.raygenProgram);
+    
+    // 2. Miss 记录 - 需要 2 条（RayType 0: wavefrontMiss, RayType 1: wavefrontShadowMiss）
+    wf.missRecord = optixu::createSBTRecord(wf.missProgram);
+    wf.shadowMissRecord = optixu::createSBTRecord(wf.shadowMissProgram);
+    
+    // 3. HitGroup 记录 - 需要 2 条（RayType 0: closest hit, RayType 1: shadow any hit）
+    // 同一几何体的不同光线类型使用相邻的 SBT 记录，stride = 2
+    wf.hitgroupRecord = optixu::createSBTRecord(wf.hitGroupProgram);
+    wf.shadowHitgroupRecord = optixu::createSBTRecord(wf.shadowHitGroupProgram);
+    
+    // ========================================================================
+    // 填充 OptixShaderBindingTable 结构
+    // ========================================================================
+    memset(&wf.sbt, 0, sizeof(wf.sbt));
+    
+    // RayGen 区
+    wf.sbt.raygenRecord = reinterpret_cast<CUdeviceptr>(wf.raygenRecord);
+    
+    // Miss 区：2 条记录，stride = OPTIX_SBT_RECORD_HEADER_SIZE（无附加数据时）
+    // 将两条 miss 记录紧密排列
+    size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE;
+    wf.sbt.missRecordBase = reinterpret_cast<CUdeviceptr>(wf.missRecord);
+    wf.sbt.missRecordStrideInBytes = static_cast<uint32_t>(missRecordSize);
+    wf.sbt.missRecordCount = 2;  // Closest + Shadow
+    
+    // 注意：Miss 区需要连续内存存放 [wavefrontMiss, wavefrontShadowMiss]
+    // 当前分别分配，需确保布局正确。OptiX 要求 missRecordBase 指向的缓冲区
+    // 包含 numRayTypes 条记录。我们分配一个连续的 miss 缓冲区。
+    {
+        // 分配连续的 2 条 Miss 记录
+        size_t totalMissSize = 2 * missRecordSize;
+        void* missBuffer = nullptr;
+        CUDA_CHECK(cudaMalloc(&missBuffer, totalMissSize));
+        
+        // 打包两条记录的 header
+        OPTIX_CHECK(optixSbtRecordPackHeader(wf.missProgram, missBuffer));
+        OPTIX_CHECK(optixSbtRecordPackHeader(
+            wf.shadowMissProgram,
+            static_cast<char*>(missBuffer) + missRecordSize));
+        
+        // 释放单独分配的，使用连续缓冲区
+        cudaFree(wf.missRecord);
+        cudaFree(wf.shadowMissRecord);
+        wf.missRecord = missBuffer;
+        wf.shadowMissRecord = nullptr;  // 已合并到 missRecord
+        
+        wf.sbt.missRecordBase = reinterpret_cast<CUdeviceptr>(wf.missRecord);
+        wf.sbt.missRecordStrideInBytes = static_cast<uint32_t>(missRecordSize);
+        wf.sbt.missRecordCount = 2;
+    }
+    
+    // HitGroup 区：2 条记录（stride = 2 用于多光线类型）
+    // 同一几何体：Record 0 = Closest Hit, Record 1 = Shadow Any Hit
+    size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE;
+    {
+        // 分配连续的 2 条 HitGroup 记录
+        size_t totalHitgroupSize = 2 * hitgroupRecordSize;
+        void* hitgroupBuffer = nullptr;
+        CUDA_CHECK(cudaMalloc(&hitgroupBuffer, totalHitgroupSize));
+        
+        OPTIX_CHECK(optixSbtRecordPackHeader(wf.hitGroupProgram, hitgroupBuffer));
+        OPTIX_CHECK(optixSbtRecordPackHeader(
+            wf.shadowHitGroupProgram,
+            static_cast<char*>(hitgroupBuffer) + hitgroupRecordSize));
+        
+        cudaFree(wf.hitgroupRecord);
+        cudaFree(wf.shadowHitgroupRecord);
+        wf.hitgroupRecord = hitgroupBuffer;
+        wf.shadowHitgroupRecord = nullptr;
+        
+        wf.sbt.hitgroupRecordBase = reinterpret_cast<CUdeviceptr>(wf.hitgroupRecord);
+        wf.sbt.hitgroupRecordStrideInBytes = static_cast<uint32_t>(hitgroupRecordSize);
+        wf.sbt.hitgroupRecordCount = 2;
+    }
+    
+    printf("Wavefront SBT 创建完成（RayGen、Miss×2、HitGroup×2）\n");
 }
 
 
@@ -265,11 +488,43 @@ void Context::setupWavefrontLaunchParams() {
         }
     }
     
-    // 设置输出缓冲区（占位符 - 将来自 BlockBuffer2D）
-    // lp.rngBuffer = ...;
-    // lp.accumBuffer = ...;
+    // 设置输出缓冲区
+    lp.rngBuffer = optixu::NativeBlockBuffer2D<shared::KernelRNG>();
+    lp.rngBuffer.data = wf.rngBuffer ? wf.rngBuffer->getDevicePointer() : nullptr;
+    lp.accumBuffer = optixu::BlockBuffer2D<shared::SpectrumStorage, 0>();
+    lp.accumBuffer.data = wf.accumBuffer ? wf.accumBuffer->getDevicePointer() : nullptr;
     lp.accumAlbedoBuffer = wf.accumAlbedoBuffer ? wf.accumAlbedoBuffer->getDevicePointer() : nullptr;
     lp.accumNormalBuffer = wf.accumNormalBuffer ? wf.accumNormalBuffer->getDevicePointer() : nullptr;
+    
+    // 设置场景数据（来自 Scene 或默认空）
+    if (m_sceneSource) {
+        lp.geomInstBuffer = m_sceneSource->getGeomInstBuffer();
+        lp.instBuffer = m_sceneSource->getInstBuffer();
+        lp.materialDescriptorBuffer = m_sceneSource->getMaterialBuffer();
+        lp.vertexPositions = m_sceneSource->getVertexPositions();
+        lp.vertexNormals = m_sceneSource->getVertexNormals();
+        lp.vertexTexCoords = m_sceneSource->getVertexTexCoords();
+        lp.topGroup = m_sceneSource->getTopGroup();
+        lp.cameraDescriptor = m_sceneSource->getCamera();
+        // SceneBounds 需设备指针，上传到小缓冲区
+        if (!wf.sceneBoundsBuffer) {
+            wf.sceneBoundsBuffer = new cudau::Buffer<shared::SceneBounds>();
+        }
+        shared::SceneBounds bounds = m_sceneSource->getSceneBounds();
+        wf.sceneBoundsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 1);
+        wf.sceneBoundsBuffer->copyToDevice(&bounds, 1, m_stream);
+        lp.sceneBounds = wf.sceneBoundsBuffer->getDevicePointer();
+    } else {
+        lp.geomInstBuffer = nullptr;
+        lp.instBuffer = nullptr;
+        lp.materialDescriptorBuffer = nullptr;
+        lp.vertexPositions = nullptr;
+        lp.vertexNormals = nullptr;
+        lp.vertexTexCoords = nullptr;
+        lp.topGroup = 0;
+        lp.sceneBounds = nullptr;
+        lp.cameraDescriptor = m_scene.camera;
+    }
     
     // 设置图像参数
     lp.imageSize = make_uint2(wf.currentWidth, wf.currentHeight);
@@ -389,6 +644,8 @@ void Context::cleanupWavefrontResources() {
     delete wf.accumNormalBuffer;
     delete wf.rngBuffer;
     delete wf.perfStatsBuffer;
+    delete wf.sceneBoundsBuffer;
+    wf.sceneBoundsBuffer = nullptr;
     
     for (int i = 0; i < shared::NumMaterialCategories; ++i) {
         delete wf.materialQueueIndices[i];
@@ -402,6 +659,23 @@ void Context::cleanupWavefrontResources() {
     }
     
     wf.isInitialized = false;
+}
+
+
+// ============================================================================
+// 场景设置
+// ============================================================================
+
+Scene* Context::createScene() {
+    return new Scene(m_optix.context, m_stream, m_cudaContext);
+}
+
+void Context::destroyScene(Scene* scene) {
+    delete scene;
+}
+
+void Context::setScene(const Scene* scene) {
+    m_sceneSource = scene;
 }
 
 
@@ -440,6 +714,14 @@ void Context::renderWavefront(
     void* outputBuffer)
 {
     auto& wf = m_optix.wavefrontPathTracing;
+    
+    // 若有外部场景则构建加速结构并上传到设备
+    if (m_sceneSource) {
+        const_cast<Scene*>(m_sceneSource)->buildAccelerationStructure();
+        const_cast<Scene*>(m_sceneSource)->updateToGPU();
+        m_scene.camera = m_sceneSource->getCamera();
+        m_scene.bounds = m_sceneSource->getSceneBounds();
+    }
     
     // 确保缓冲区已分配
     if (wf.currentWidth != width || wf.currentHeight != height) {
@@ -524,32 +806,95 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
 
 
 // ============================================================================
-// 内核启动方法（占位符）
+// 内核启动方法
 // ============================================================================
 
 void Context::launchGenerateRays(uint32_t numPaths) {
-    // 在内核可用时实现
-    // 目前为占位符
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+
+    // 根据图像尺寸计算 grid/block，调用 wavefrontGenerateRays CUDA kernel
+    uint32_t width = wf.currentWidth;
+    uint32_t height = wf.currentHeight;
+    if (width == 0 || height == 0) return;
+
+    shared::WavefrontLaunchParameters* d_params =
+        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+    launchGenerateRaysKernel(d_params, width, height, m_stream);
 }
 
 void Context::launchTraceRays(uint32_t numActivePaths) {
-    // 在内核可用时实现
+    auto& wf = m_optix.wavefrontPathTracing;
+
+    // 使用 optixLaunch 启动 OptiX Ray Generation 程序，传入 SBT 和 launchParams
+    if (!wf.pipeline) {
+        throw std::runtime_error("launchTraceRays: OptiX pipeline 未初始化，请先调用 createWavefrontPrograms");
+    }
+    if (!wf.launchParamsBuffer) return;
+    if (numActivePaths == 0) return;
+
+    // 将当前深度等参数更新到设备
+    setupWavefrontLaunchParams();
+
+    vlr::optixu::launch(
+        wf.pipeline,
+        m_stream,
+        wf.launchParamsBuffer,
+        sizeof(shared::WavefrontLaunchParameters),
+        &wf.sbt,
+        numActivePaths,  // 每个线程处理一条活跃路径
+        1,
+        1
+    );
 }
 
 void Context::launchProcessHits(uint32_t numActivePaths) {
-    // 在内核可用时实现
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+    if (numActivePaths == 0) return;
+
+    // 调用 wavefrontProcessHits CUDA kernel
+    shared::WavefrontLaunchParameters* d_params =
+        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+    launchProcessHitsKernel(d_params, numActivePaths, m_stream);
 }
 
 void Context::launchSampleLights(uint32_t numActivePaths) {
-    // 在内核可用时实现
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+    if (numActivePaths == 0) return;
+
+    // 调用 wavefrontSampleLights CUDA kernel
+    shared::WavefrontLaunchParameters* d_params =
+        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+    launchSampleLightsKernel(d_params, numActivePaths, m_stream);
 }
 
 void Context::launchSampleBSDF(uint32_t numActivePaths) {
-    // 在内核可用时实现
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+    if (numActivePaths == 0) return;
+
+    // 调用 wavefrontSampleBSDF CUDA kernel
+    shared::WavefrontLaunchParameters* d_params =
+        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+    launchSampleBSDFKernel(d_params, numActivePaths, m_stream);
 }
 
 void Context::launchAccumulate(uint32_t numPaths) {
-    // 在内核可用时实现
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+    if (numPaths == 0) return;
+
+    // 调用 wavefrontAccumulateResults CUDA kernel
+    shared::WavefrontLaunchParameters* d_params =
+        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+    launchAccumulateKernel(d_params, numPaths, m_stream);
 }
 
 
@@ -591,6 +936,14 @@ void Context::resetPerformanceStats() {
 
 void Context::resizeOutputBuffer(uint32_t width, uint32_t height) {
     resizeWavefrontBuffers(width, height);
+}
+
+void* Context::getAccumBufferDevicePointer() const {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (wf.accumBuffer && wf.accumBuffer->size() > 0) {
+        return wf.accumBuffer->getDevicePointer();
+    }
+    return nullptr;
 }
 
 
