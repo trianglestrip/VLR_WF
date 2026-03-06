@@ -204,15 +204,19 @@ nvcc -std=c++17 -arch=sm_75 -I../../libVLR/include wavefront_types_test.cu -o wa
 **阶段 1.3: 更新公共类型定义 (1天)** - 已完成
 - ✅ `public_types.h` 已更新，添加了Wavefront渲染器枚举
 
-**阶段 1.4: 创建Context扩展 (3天)** - 待开始
-- [ ] 修改 `libVLR/context.h`
-- [ ] 添加WavefrontPathTracing结构体
-- [ ] 声明renderWavefront()方法
+**阶段 1.4: 创建Context扩展 (3天)** - ✅ 已完成
+- [x] 修改 `libVLR/context.h`
+- [x] 添加WavefrontPathTracing结构体
+- [x] 声明renderWavefront()方法
+- [x] 创建CUDA工具类 `libVLR/utils/cuda_util.h`
+- [x] 创建OptiX工具类 `libVLR/utils/optix_util.h`
 
-**阶段 1.5: 实现Context初始化 (4天)** - 待开始
-- [ ] 修改 `libVLR/context.cpp`
-- [ ] 实现构造函数中的Wavefront Pipeline初始化
-- [ ] 实现缓冲区管理方法
+**阶段 1.5: 实现Context初始化 (4天)** - ✅ 已完成
+- [x] 修改 `libVLR/context.cpp`
+- [x] 实现构造函数中的Wavefront Pipeline初始化
+- [x] 实现缓冲区管理方法
+- [x] 实现renderWavefront()主渲染循环
+- [x] 实现内核启动方法占位符
 
 ### 备注
 
@@ -242,6 +246,146 @@ nvcc -std=c++17 -arch=sm_75 -I../../libVLR/include wavefront_types_test.cu -o wa
 
 ---
 
-**状态**: ✅ 阶段 1.1 完成  
-**下一步**: 开始阶段 1.4 - 创建Context扩展  
+## 阶段 1.4-1.5 实现记录 (2026-03-07)
+
+### 完成任务
+
+#### 1. Context 头文件 (`libVLR/context.h`)
+- ✅ 定义完整的 `Context` 类结构
+- ✅ 添加 `WavefrontPathTracing` 嵌套结构体
+  - Pipeline、Module、Programs
+  - 所有缓冲区指针（PathState、HitInfo、Queues等）
+  - 配置参数和初始化状态
+- ✅ 声明所有公共和私有方法
+- ✅ 编译验证通过
+
+#### 2. Context 实现 (`libVLR/context.cpp`)
+- ✅ 实现构造函数和析构函数
+- ✅ 实现 `initializeWavefrontPipeline()` - Pipeline初始化
+- ✅ 实现 `allocateWavefrontBuffers()` - 缓冲区分配
+- ✅ 实现 `resizeWavefrontBuffers()` - 缓冲区调整
+- ✅ 实现 `resetWavefrontQueues()` - 队列重置
+- ✅ 实现 `setupWavefrontLaunchParams()` - 启动参数设置
+- ✅ 实现 `cleanupWavefrontResources()` - 资源清理
+- ✅ 实现 `renderWavefront()` - 主渲染入口
+- ✅ 实现 `executeWavefrontRender()` - Wavefront主循环
+- ✅ 添加内核启动方法占位符（6个方法）
+
+#### 3. CUDA 工具类 (`libVLR/utils/cuda_util.h`)
+- ✅ 实现 `cudau::Context` - CUDA上下文管理
+- ✅ 实现 `cudau::Buffer<T>` - 通用缓冲区类
+  - 支持Device、Host、HostPinned、Managed四种类型
+  - 实现initialize、finalize、resize、clear等方法
+  - 实现数据传输方法
+- ✅ 实现错误检查宏 `CUDA_CHECK`
+- ✅ 实现内核启动辅助函数
+- ✅ 实现设备属性打印函数
+
+#### 4. OptiX 工具类 (`libVLR/utils/optix_util.h`)
+- ✅ 实现 `optixu::Context` - OptiX上下文管理
+- ✅ 实现 `optixu::Module` - PTX模块封装
+- ✅ 实现 `optixu::Pipeline` - Pipeline封装
+- ✅ 实现 `optixu::ProgramGroup` - 程序组封装
+  - createRayGen、createMiss、createHitGroup静态工厂方法
+- ✅ 实现SBT记录创建辅助函数
+- ✅ 实现OptiX启动辅助函数
+- ✅ 实现错误检查宏 `OPTIX_CHECK`
+
+#### 5. 类型补充
+- ✅ 在 `basic_types.h` 中添加 `uint2` 类型定义（非CUDA编译时）
+- ✅ 修复 `atomicAdd` 和 `atomicSub` 的主机端实现
+- ✅ 修复 `WavefrontWorkQueue::enqueue()` 的条件编译
+
+#### 6. 编译验证
+- ✅ 创建 `context_test.cpp` 测试文件
+- ✅ 编译成功，无错误
+- ✅ 警告C4819（编码警告）不影响功能
+
+#### 7. 文档和规则更新
+- ✅ 更新 `.cursor/rules/environment.md` - 添加cl.exe路径查找方法
+- ✅ 创建 `.cursor/rules/workflow-preferences.md` - 记录工作流偏好
+- ✅ 所有新文件注释改为中文
+
+### 技术细节
+
+#### Context 架构设计
+```cpp
+Context
+├── OptiX (OptiX资源)
+│   ├── WavefrontPathTracing (Wavefront渲染器)
+│   │   ├── Pipeline和Programs
+│   │   ├── 缓冲区（PathState、HitInfo、Queues）
+│   │   ├── LaunchParameters
+│   │   └── 配置和统计
+│   ├── PathTracing (占位符)
+│   ├── LightTracing (占位符)
+│   └── BidirectionalPathTracing (占位符)
+├── CUDA (CUDA资源)
+└── Scene (场景资源)
+```
+
+#### 缓冲区管理策略
+- **动态分配**：根据渲染分辨率动态调整缓冲区大小
+- **延迟初始化**：Pipeline和Programs在首次渲染时初始化
+- **资源复用**：相同分辨率时复用现有缓冲区
+- **自动清理**：析构函数中自动释放所有资源
+
+#### Wavefront 主循环实现
+```cpp
+executeWavefrontRender() {
+    1. 生成初始光线 (GenerateRays)
+    2. for (depth = 0; depth < maxPathLength; depth++) {
+         a. 追踪光线 (TraceRays)
+         b. 处理命中点 (ProcessHits)
+         c. 采样光源 (SampleLights)
+         d. 采样BSDF (SampleBSDF)
+         e. 交换队列
+       }
+    3. 累积结果 (Accumulate)
+}
+```
+
+### 文件清单
+
+新增文件：
+- `libVLR/context.h` (264行) - Context类定义
+- `libVLR/context.cpp` (387行) - Context实现
+- `libVLR/utils/cuda_util.h` (236行) - CUDA工具类
+- `libVLR/utils/optix_util.h` (329行) - OptiX工具类
+- `libVLR/context_test.cpp` (38行) - 编译测试
+- `libVLR/compile_test.bat` (4行) - 编译脚本
+- `.cursor/rules/workflow-preferences.md` (99行) - 工作流偏好
+
+修改文件：
+- `libVLR/include/vlr/basic_types.h` - 添加uint2类型和atomicAdd/Sub
+- `libVLR/shared/wavefront_types.h` - 修复enqueue()条件编译
+- `.cursor/rules/environment.md` - 添加cl.exe路径查找方法
+
+### 编译结果
+
+```bash
+# 编译命令
+.\compile_test.bat
+
+# 结果
+编译成功，生成 context_test.obj
+警告：C4819 (编码警告，不影响功能)
+```
+
+### 下一步
+
+根据`docs/todo.md`，阶段1（基础架构）已全部完成，下一步是：
+
+**阶段 2.1: GenerateRays Kernel (3天)**
+- [ ] 创建 `libVLR/GPU_kernels/wavefront_generate_rays.cu`
+- [ ] 实现RNG初始化
+- [ ] 实现波长采样
+- [ ] 实现相机采样
+- [ ] 实现IDF评估
+- [ ] 初始化PathState所有字段
+
+---
+
+**状态**: ✅ 阶段 1.4-1.5 完成  
+**下一步**: 开始阶段 2.1 - GenerateRays Kernel  
 **预计时间**: 3天

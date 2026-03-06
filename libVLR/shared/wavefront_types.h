@@ -1,11 +1,11 @@
 // ============================================================================
-// VLR Wavefront Path Tracing - Core Data Structures
+// VLR 波前路径追踪 - 核心数据结构
 // 
-// This file defines all core data structures for the Wavefront rendering mode.
+// 本文件定义了波前渲染模式的所有核心数据结构。
 // 
-// Author: VLR Development Team
-// Created: 2026-03-07
-// Environment: CUDA 13.1, OptiX 8.0.0, VS2022
+// 作者：VLR 开发团队
+// 创建日期：2026-03-07
+// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
 #pragma once
@@ -17,51 +17,51 @@ namespace vlr {
 namespace shared {
 
 // ============================================================================
-// 1. Core Data Structures
+// 1. 核心数据结构
 // ============================================================================
 
-/// Path State: Stores complete information for a single ray path
-/// This is the core data structure of the Wavefront architecture
-/// Size: 144 bytes (optimized for memory alignment and cache efficiency)
+/// 路径状态：存储单条光线路径的完整信息
+/// 这是波前架构的核心数据结构
+/// 大小：144 字节（针对内存对齐和缓存效率优化）
 struct alignas(16) WavefrontPathState {
-    // === Ray Information (32 bytes) ===
-    Point3D origin;                    // Ray origin (12 bytes)
-    Vector3D direction;                // Ray direction (12 bytes)
-    float _padding1[2];                // Alignment padding (8 bytes)
+    // === 光线信息（32 字节）===
+    Point3D origin;                    // 光线起点（12 字节）
+    Vector3D direction;                // 光线方向（12 字节）
+    float _padding1[2];                // 对齐填充（8 字节）
     
-    // === Spectrum and Throughput (64 bytes) ===
-    SampledSpectrum throughput;        // Path throughput/weight (16 bytes)
-    SampledSpectrum contribution;      // Accumulated radiance contribution (16 bytes)
-    WavelengthSamples wls;             // Wavelength samples (24 bytes)
-    float initImportance;              // Initial importance (for RR) (4 bytes)
-    float selectWLPDF;                 // Wavelength selection PDF (4 bytes)
+    // === 光谱和吞吐量（64 字节）===
+    SampledSpectrum throughput;        // 路径吞吐量/权重（16 字节）
+    SampledSpectrum contribution;      // 累积辐射贡献（16 字节）
+    WavelengthSamples wls;             // 波长采样（24 字节）
+    float initImportance;              // 初始重要性（用于俄罗斯轮盘赌）（4 字节）
+    float selectWLPDF;                 // 波长选择概率密度（4 字节）
     
-    // === Random Number Generator (16 bytes) ===
-    KernelRNG rng;                     // RNG state (PCG32: 16 bytes)
+    // === 随机数生成器（16 字节）===
+    KernelRNG rng;                     // RNG 状态（PCG32：16 字节）
     
-    // === Path History (16 bytes) ===
-    float prevDirPDF;                  // Previous bounce direction PDF (4 bytes)
-    DirectionType prevSampledType;     // Previous bounce sampling type (4 bytes)
-    uint32_t pathLength;               // Current path length (4 bytes)
-    uint32_t _padding2;                // Alignment padding (4 bytes)
+    // === 路径历史（16 字节）===
+    float prevDirPDF;                  // 前一次反弹方向概率密度（4 字节）
+    DirectionType prevSampledType;     // 前一次反弹采样类型（4 字节）
+    uint32_t pathLength;               // 当前路径长度（4 字节）
+    uint32_t _padding2;                // 对齐填充（4 字节）
     
-    // === Pixel Coordinates (8 bytes) ===
-    uint32_t pixelX;                   // Pixel X coordinate (4 bytes)
-    uint32_t pixelY;                   // Pixel Y coordinate (4 bytes)
+    // === 像素坐标（8 字节）===
+    uint32_t pixelX;                   // 像素 X 坐标（4 字节）
+    uint32_t pixelY;                   // 像素 Y 坐标（4 字节）
     
-    // === State Flags (8 bytes) ===
-    uint32_t flags;                    // State flag bits (4 bytes)
-    uint32_t materialCategory;         // Material category (4 bytes)
+    // === 状态标志（8 字节）===
+    uint32_t flags;                    // 状态标志位（4 字节）
+    uint32_t materialCategory;         // 材质分类（4 字节）
     
-    // === Total Size: 144 bytes ===
+    // === 总大小：144 字节 ===
     
-    // Flags bit definitions:
-    // bit 0: isActive - Is path active
-    // bit 1: isTerminated - Is path terminated
-    // bit 2: maxLengthReached - Has reached max length
-    // bit 3: singleWlSelected - Has single wavelength selected
-    // bit 4: hitEmissive - Has hit emissive surface
-    // bit 5-7: Reserved
+    // 标志位定义：
+    // bit 0: isActive - 路径是否活跃
+    // bit 1: isTerminated - 路径是否终止
+    // bit 2: maxLengthReached - 是否达到最大长度
+    // bit 3: singleWlSelected - 是否已选择单一波长
+    // bit 4: hitEmissive - 是否击中发光表面
+    // bit 5-7: 保留
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool isActive() const {
         return flags & 0x1;
@@ -106,31 +106,31 @@ struct alignas(16) WavefrontPathState {
     }
 };
 
-static_assert(sizeof(WavefrontPathState) == 144, "PathState size must be 144 bytes");
+static_assert(sizeof(WavefrontPathState) == 144, "PathState 大小必须为 144 字节");
 
 
-/// Hit Information: Stores ray intersection results
-/// Size: 32 bytes (optimized for memory bandwidth)
+/// 击中信息：存储光线相交结果
+/// 大小：32 字节（针对内存带宽优化）
 struct alignas(16) WavefrontHitInfo {
-    // === Hit Geometry Information (16 bytes) ===
-    uint32_t instIndex;                // Instance index (4 bytes)
-    uint32_t geomInstIndex;            // Geometry instance index (4 bytes)
-    uint32_t primIndex;                // Primitive index (4 bytes)
-    uint32_t hitFlags;                 // Hit flag bits (4 bytes)
+    // === 击中几何信息（16 字节）===
+    uint32_t instIndex;                // 实例索引（4 字节）
+    uint32_t geomInstIndex;            // 几何实例索引（4 字节）
+    uint32_t primIndex;                // 图元索引（4 字节）
+    uint32_t hitFlags;                 // 击中标志位（4 字节）
     
-    // === Parametric Coordinates (16 bytes) ===
-    float u, v;                        // Barycentric or parametric coordinates (8 bytes)
-    float t;                           // Ray parameter t (4 bytes)
-    float _padding;                    // Alignment padding (4 bytes)
+    // === 参数坐标（16 字节）===
+    float u, v;                        // 重心坐标或参数坐标（8 字节）
+    float t;                           // 光线参数 t（4 字节）
+    float _padding;                    // 对齐填充（4 字节）
     
-    // === Total Size: 32 bytes ===
+    // === 总大小：32 字节 ===
     
-    // HitFlags bit definitions:
-    // bit 0: hasHit - Has hit any geometry
-    // bit 1: hitInfinity - Has hit infinity (environment)
-    // bit 2: hitEmissive - Has hit emissive surface
-    // bit 3: hitTransmissive - Has hit transmissive surface
-    // bit 4-7: Reserved
+    // 击中标志位定义：
+    // bit 0: hasHit - 是否击中任何几何体
+    // bit 1: hitInfinity - 是否击中无穷远（环境）
+    // bit 2: hitEmissive - 是否击中发光表面
+    // bit 3: hitTransmissive - 是否击中透射表面
+    // bit 4-7: 保留
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasHit() const {
         return hitFlags & 0x1;
@@ -172,31 +172,36 @@ struct alignas(16) WavefrontHitInfo {
     }
 };
 
-static_assert(sizeof(WavefrontHitInfo) == 32, "HitInfo size must be 32 bytes");
+static_assert(sizeof(WavefrontHitInfo) == 32, "HitInfo 大小必须为 32 字节");
 
 
 // ============================================================================
-// 2. Work Queue Management
+// 2. 工作队列管理
 // ============================================================================
 
-/// Work Queue: Manages indices of active paths
-/// Uses atomic operations for thread-safe enqueue/dequeue
+/// 工作队列：管理活跃路径的索引
+/// 使用原子操作实现线程安全的入队/出队
 struct WavefrontWorkQueue {
-    uint32_t* pathIndices;             // Path index array (GPU memory)
-    uint32_t* counter;                 // Atomic counter (GPU memory)
-    uint32_t capacity;                 // Queue capacity
+    uint32_t* pathIndices;             // 路径索引数组（GPU 内存）
+    uint32_t* counter;                 // 原子计数器（GPU 内存）
+    uint32_t capacity;                 // 队列容量
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t size() const {
         return *counter;
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t enqueue(uint32_t pathIndex) {
-        uint32_t slot = atomicAdd(counter, 1);
+#ifdef __CUDACC__
+        uint32_t slot = atomicAdd(counter, 1u);
+#else
+        atomicAdd(counter, 1u);
+        uint32_t slot = (*counter) - 1;
+#endif
         if (slot < capacity) {
             pathIndices[slot] = pathIndex;
             return slot;
         }
-        return 0xFFFFFFFF; // Queue full
+        return 0xFFFFFFFF; // 队列已满
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t dequeue() {
@@ -204,7 +209,7 @@ struct WavefrontWorkQueue {
         if (slot > 0 && slot <= capacity) {
             return pathIndices[slot - 1];
         }
-        return 0xFFFFFFFF; // Queue empty
+        return 0xFFFFFFFF; // 队列为空
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE void reset() {
@@ -213,19 +218,19 @@ struct WavefrontWorkQueue {
 };
 
 
-/// Material Classification: Used for path sorting and grouping
+/// 材质分类：用于路径排序和分组
 enum MaterialCategory : uint32_t {
-    MaterialCategory_Diffuse = 0,      // Diffuse materials (Lambert)
-    MaterialCategory_Glossy,           // Glossy reflection materials (GGX)
-    MaterialCategory_Specular,         // Perfect specular reflection
-    MaterialCategory_Transmissive,     // Transmissive materials (glass, etc.)
-    MaterialCategory_Emissive,         // Emissive materials
-    MaterialCategory_Mixed,            // Mixed materials
+    MaterialCategory_Diffuse = 0,      // 漫反射材质（Lambert）
+    MaterialCategory_Glossy,           // 光泽反射材质（GGX）
+    MaterialCategory_Specular,         // 完美镜面反射
+    MaterialCategory_Transmissive,     // 透射材质（玻璃等）
+    MaterialCategory_Emissive,         // 发光材质
+    MaterialCategory_Mixed,            // 混合材质
     NumMaterialCategories
 };
 
 
-/// Material Queue Set: Work queues classified by material type
+/// 材质队列集：按材质类型分类的工作队列
 struct WavefrontMaterialQueues {
     WavefrontWorkQueue queues[NumMaterialCategories];
     
@@ -243,22 +248,22 @@ struct WavefrontMaterialQueues {
 
 
 // ============================================================================
-// 3. Launch Parameters
+// 3. 启动参数
 // ============================================================================
 
-/// Wavefront rendering launch parameters
-/// This structure is uploaded to GPU constant memory
+/// 波前渲染启动参数
+/// 此结构体上传到 GPU 常量内存
 struct WavefrontLaunchParameters {
-    // === Common data inherited from PipelineLaunchParameters ===
-    // Note: In actual implementation, may need to inherit or include PipelineLaunchParameters
+    // === 从 PipelineLaunchParameters 继承的公共数据 ===
+    // 注意：实际实现中可能需要继承或包含 PipelineLaunchParameters
     
-    // Spectrum upsampling data
+    // 光谱上采样数据
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_xbar;
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_ybar;
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_zbar;
     float DiscretizedSpectrum_integralCMF;
     
-    // Material and node data
+    // 材质和节点数据
     const NodeProcedureSet* nodeProcedureSetBuffer;
     const SmallNodeDescriptor* smallNodeDescriptorBuffer;
     const MediumNodeDescriptor* mediumNodeDescriptorBuffer;
@@ -268,60 +273,60 @@ struct WavefrontLaunchParameters {
     const IDFProcedureSet* idfProcedureSetBuffer;
     const SurfaceMaterialDescriptor* materialDescriptorBuffer;
     
-    // Scene data
+    // 场景数据
     const GeometryInstance* geomInstBuffer;
     const Instance* instBuffer;
-    uint64_t topGroup;  // OptixTraversableHandle (defined when OptiX is available)
+    uint64_t topGroup;  // OptixTraversableHandle（OptiX 可用时定义）
     const SceneBounds* sceneBounds;
     const uint32_t* instIndices;
     DiscreteDistribution1D lightInstDist;
     uint32_t envLightInstIndex;
     
-    // Camera data
+    // 相机数据
     int32_t progSampleLensPosition;
     int32_t progTestLensIntersection;
     CameraDescriptor cameraDescriptor;
     
-    // === Wavefront Specific Data ===
+    // === 波前特定数据 ===
     
-    // Path state buffers
+    // 路径状态缓冲区
     WavefrontPathState* pathStateBuffer;
     WavefrontHitInfo* hitInfoBuffer;
     SurfacePoint* surfacePointBuffer;
     
-    // Work queues
-    WavefrontWorkQueue activePathQueue;      // Current active path queue
-    WavefrontWorkQueue nextActivePathQueue;  // Next round active path queue
+    // 工作队列
+    WavefrontWorkQueue activePathQueue;      // 当前活跃路径队列
+    WavefrontWorkQueue nextActivePathQueue;  // 下一轮活跃路径队列
     
-    // Material classification queues (optional optimization)
+    // 材质分类队列（可选优化）
     WavefrontMaterialQueues materialQueues;
     
-    // Output buffers
+    // 输出缓冲区
     optixu::NativeBlockBuffer2D<KernelRNG> rngBuffer;
     optixu::BlockBuffer2D<SpectrumStorage, 0> accumBuffer;
-    DiscretizedSpectrum* accumAlbedoBuffer;  // Denoiser Albedo
-    Normal3D* accumNormalBuffer;             // Denoiser Normal
+    DiscretizedSpectrum* accumAlbedoBuffer;  // 降噪器反照率
+    Normal3D* accumNormalBuffer;             // 降噪器法线
     
-    // Image parameters
-    uint2 imageSize;                   // Image dimensions
-    uint32_t imageStrideInPixels;      // Image stride
-    uint32_t numAccumFrames;           // Accumulated frame count
-    uint32_t limitNumAccumFrames;      // Maximum accumulated frames
+    // 图像参数
+    uint2 imageSize;                   // 图像尺寸
+    uint32_t imageStrideInPixels;      // 图像步长
+    uint32_t numAccumFrames;           // 累积帧数
+    uint32_t limitNumAccumFrames;      // 最大累积帧数
     
-    // Wavefront configuration
-    uint32_t maxPathLength;            // Maximum path length (default 25)
-    uint32_t maxNumPaths;              // Maximum number of paths
-    uint32_t currentDepth;             // Current path depth being processed
+    // 波前配置
+    uint32_t maxPathLength;            // 最大路径长度（默认 25）
+    uint32_t maxNumPaths;              // 最大路径数量
+    uint32_t currentDepth;             // 当前处理的路径深度
     
-    // Performance statistics (optional)
-    uint32_t* numActiveRays;           // Current active ray count
-    uint32_t* numShadowRays;           // Shadow ray count
-    uint32_t* numTerminatedPaths;      // Terminated path count
+    // 性能统计（可选）
+    uint32_t* numActiveRays;           // 当前活跃光线数
+    uint32_t* numShadowRays;           // 阴影光线数
+    uint32_t* numTerminatedPaths;      // 终止路径数
     
-    // Debug parameters
-    int32_t probePixX;                 // Probe pixel X
-    int32_t probePixY;                 // Probe pixel Y
-    uint32_t debugMode;                // Debug mode
+    // 调试参数
+    int32_t probePixX;                 // 探测像素 X
+    int32_t probePixY;                 // 探测像素 Y
+    uint32_t debugMode;                // 调试模式
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE void print() const {
         printf("=== Wavefront Launch Parameters ===\n");
@@ -336,94 +341,94 @@ struct WavefrontLaunchParameters {
 
 
 // ============================================================================
-// 4. Payload Definitions
+// 4. 载荷定义
 // ============================================================================
 
-/// Wavefront ray tracing payload
-/// Design principle: Minimize payload size, only pass necessary information
+/// 波前光线追踪载荷
+/// 设计原则：最小化载荷大小，仅传递必要信息
 struct WFTracePayload {
-    uint32_t pathIndex;                // Path index (4 bytes)
-    WavelengthSamples wls;             // Wavelength samples (24 bytes)
-    // Total: 28 bytes (7 dwords)
+    uint32_t pathIndex;                // 路径索引（4 字节）
+    WavelengthSamples wls;             // 波长采样（24 字节）
+    // 总计：28 字节（7 个双字）
 };
 
 using WFTracePayloadSignature = optixu::PayloadSignature<WFTracePayload>;
 
 
-/// Shadow ray payload (reuse existing ShadowPayloadSignature)
+/// 阴影光线载荷（重用现有的 ShadowPayloadSignature）
 // using ShadowPayloadSignature = optixu::PayloadSignature<WavelengthSamples, float>;
 
 
 // ============================================================================
-// 5. Ray Types
+// 5. 光线类型
 // ============================================================================
 
 enum WFRayType {
-    WFRayType_Closest = 0,             // Closest hit ray
-    WFRayType_Shadow,                  // Shadow ray
+    WFRayType_Closest = 0,             // 最近击中光线
+    WFRayType_Shadow,                  // 阴影光线
     NumWFRayTypes
 };
 
 
 // ============================================================================
-// 6. Auxiliary Data Structures
+// 6. 辅助数据结构
 // ============================================================================
 
-/// Material Evaluation Result: Caches BSDF/EDF evaluation results
+/// 材质评估结果：缓存 BSDF/EDF 评估结果
 struct WavefrontMaterialEvaluation {
-    SampledSpectrum baseColor;         // Base color
-    DirectionType bsdfType;            // BSDF type
-    bool hasNonDelta;                  // Has non-delta component
-    bool hasEmission;                  // Has emission
-    MaterialCategory category;         // Material category
+    SampledSpectrum baseColor;         // 基础颜色
+    DirectionType bsdfType;            // BSDF 类型
+    bool hasNonDelta;                  // 是否有非 delta 分量
+    bool hasEmission;                  // 是否有发光
+    MaterialCategory category;         // 材质分类
 };
 
 
-/// Light Sample Result: Caches light sampling information
+/// 光源采样结果：缓存光源采样信息
 struct WavefrontLightSample {
-    SurfacePoint lightSurfPt;          // Light surface point
-    SampledSpectrum Le;                // Light emission
-    float lightPDF;                    // Light sampling PDF
-    float bsdfPDF;                     // BSDF PDF
-    float MISWeight;                   // MIS weight
-    bool isVisible;                    // Is visible
+    SurfacePoint lightSurfPt;          // 光源表面点
+    SampledSpectrum Le;                // 光源发射
+    float lightPDF;                    // 光源采样概率密度
+    float bsdfPDF;                     // BSDF 概率密度
+    float MISWeight;                   // MIS 权重
+    bool isVisible;                    // 是否可见
 };
 
 
-/// BSDF Sample Result: Caches BSDF sampling information
+/// BSDF 采样结果：缓存 BSDF 采样信息
 struct WavefrontBSDFSample {
-    Vector3D dirLocal;                 // Sampled direction (local coordinates)
-    SampledSpectrum f;                 // BSDF value
-    float pdf;                         // PDF
-    DirectionType sampledType;         // Sampled type
-    bool isValid;                      // Is sample valid
+    Vector3D dirLocal;                 // 采样方向（局部坐标）
+    SampledSpectrum f;                 // BSDF 值
+    float pdf;                         // 概率密度
+    DirectionType sampledType;         // 采样类型
+    bool isValid;                      // 采样是否有效
 };
 
 
 // ============================================================================
-// 7. Performance Statistics
+// 7. 性能统计
 // ============================================================================
 
-/// Wavefront performance statistics
+/// 波前性能统计
 struct WavefrontPerformanceStats {
-    // Path statistics
+    // 路径统计
     uint32_t numInitialPaths;
-    uint32_t numActivePathsPerDepth[32];  // Active paths per depth
+    uint32_t numActivePathsPerDepth[32];  // 每个深度的活跃路径数
     uint32_t numTerminatedPathsPerDepth[32];
     
-    // Ray statistics
+    // 光线统计
     uint32_t numPrimaryRays;
     uint32_t numSecondaryRays;
     uint32_t numShadowRays;
     uint32_t totalRaysCast;
     
-    // Material statistics
+    // 材质统计
     uint32_t numDiffuseInteractions;
     uint32_t numGlossyInteractions;
     uint32_t numSpecularInteractions;
     uint32_t numTransmissiveInteractions;
     
-    // Timing statistics (milliseconds)
+    // 时间统计（毫秒）
     float timeGenerateRays;
     float timeTraceRays;
     float timeProcessHits;
@@ -433,7 +438,7 @@ struct WavefrontPerformanceStats {
     float timeAccumulate;
     float totalTime;
     
-    // Memory statistics
+    // 内存统计
     size_t memoryUsedBytes;
     size_t peakMemoryUsedBytes;
     
@@ -470,99 +475,99 @@ struct WavefrontPerformanceStats {
 
 
 // ============================================================================
-// 8. Debug Data Structures
+// 8. 调试数据结构
 // ============================================================================
 
-/// Wavefront debug modes
+/// 波前调试模式
 enum WavefrontDebugMode : uint32_t {
     WFDebug_None = 0,
-    WFDebug_PathLength,                // Visualize path length
-    WFDebug_MaterialCategory,          // Visualize material classification
-    WFDebug_Throughput,                // Visualize path throughput
-    WFDebug_NumBounces,                // Visualize bounce count
-    WFDebug_ActivePaths,               // Visualize active path distribution
-    WFDebug_RayDensity,                // Visualize ray density
-    WFDebug_TerminationReason,         // Visualize termination reason
+    WFDebug_PathLength,                // 可视化路径长度
+    WFDebug_MaterialCategory,          // 可视化材质分类
+    WFDebug_Throughput,                // 可视化路径吞吐量
+    WFDebug_NumBounces,                // 可视化反弹次数
+    WFDebug_ActivePaths,               // 可视化活跃路径分布
+    WFDebug_RayDensity,                // 可视化光线密度
+    WFDebug_TerminationReason,         // 可视化终止原因
 };
 
 
-/// Path termination reasons
+/// 路径终止原因
 enum PathTerminationReason : uint32_t {
     TerminationReason_None = 0,
-    TerminationReason_MaxLength,       // Reached maximum length
-    TerminationReason_RussianRoulette, // Russian roulette
-    TerminationReason_ZeroThroughput,  // Zero throughput
-    TerminationReason_Absorption,      // Absorbed
-    TerminationReason_EscapeScene,     // Escaped scene
+    TerminationReason_MaxLength,       // 达到最大长度
+    TerminationReason_RussianRoulette, // 俄罗斯轮盘赌
+    TerminationReason_ZeroThroughput,  // 吞吐量为零
+    TerminationReason_Absorption,      // 被吸收
+    TerminationReason_EscapeScene,     // 逃离场景
 };
 
 
 // ============================================================================
-// 9. Configuration Constants
+// 9. 配置常量
 // ============================================================================
 
 namespace WavefrontConfig {
-    // Path configuration
+    // 路径配置
     constexpr uint32_t DefaultMaxPathLength = 25;
     constexpr uint32_t MinPathLength = 1;
     constexpr uint32_t MaxPathLength = 64;
     
-    // Russian roulette configuration
-    constexpr uint32_t RRStartDepth = 3;      // Depth to start using RR
-    constexpr float RRThreshold = 0.05f;      // RR threshold
+    // 俄罗斯轮盘赌配置
+    constexpr uint32_t RRStartDepth = 3;      // 开始使用 RR 的深度
+    constexpr float RRThreshold = 0.05f;      // RR 阈值
     
-    // Queue configuration
+    // 队列配置
     constexpr uint32_t DefaultQueueCapacity = 1920 * 1080;
     constexpr uint32_t MaxQueueCapacity = 3840 * 2160;
     
-    // Performance configuration
-    constexpr uint32_t BlockSize = 256;       // CUDA block size
-    constexpr uint32_t WarpSize = 32;         // Warp size
+    // 性能配置
+    constexpr uint32_t BlockSize = 256;       // CUDA 块大小
+    constexpr uint32_t WarpSize = 32;         // Warp 大小
     
-    // Memory configuration
-    constexpr bool UsePathSorting = true;     // Use path sorting
-    constexpr bool UseMaterialQueues = true;  // Use material queues
-    constexpr bool UseStreamCompaction = true; // Use stream compaction
+    // 内存配置
+    constexpr bool UsePathSorting = true;     // 使用路径排序
+    constexpr bool UseMaterialQueues = true;  // 使用材质队列
+    constexpr bool UseStreamCompaction = true; // 使用流压缩
     
-    // Debug configuration
-    constexpr bool EnablePerfStats = true;    // Enable performance statistics
-    constexpr bool EnableValidation = false;  // Enable validation checks
+    // 调试配置
+    constexpr bool EnablePerfStats = true;    // 启用性能统计
+    constexpr bool EnableValidation = false;  // 启用校验检查
 }
 
 
 // ============================================================================
-// 10. Memory Layout Optimization (Optional SoA Version)
+// 10. 内存布局优化（可选 SoA 版本）
 // ============================================================================
 
-/// Structure of Arrays version of PathState (for memory optimization)
+/// PathState 的结构数组（SoA）版本（用于内存优化）
 struct WavefrontPathStateBuffers_SoA {
-    // Ray information
+    // 光线信息
     Point3D* origins;
     Vector3D* directions;
     
-    // Spectrum information
+    // 光谱信息
     SampledSpectrum* throughputs;
     SampledSpectrum* contributions;
     WavelengthSamples* wavelengthSamples;
     float* initImportances;
     
-    // RNG
+    // 随机数生成器
     KernelRNG* rngs;
     
-    // Path history
+    // 路径历史
     float* prevDirPDFs;
     DirectionType* prevSampledTypes;
     uint32_t* pathLengths;
     
-    // Pixel coordinates
+    // 像素坐标
     uint32_t* pixelXs;
     uint32_t* pixelYs;
     
-    // Flags
+    // 标志位
     uint32_t* flags;
     uint32_t* materialCategories;
     
-    // Access interface
+    // 访问接口
     CUDA_DEVICE_FUNCTION CUDA_INLINE void load(
         uint32_t index, WavefrontPathState* state) const {
         state->origin = origins[index];
@@ -602,10 +607,10 @@ struct WavefrontPathStateBuffers_SoA {
 
 
 // ============================================================================
-// 11. Stream Compaction Helpers
+// 11. 流压缩辅助
 // ============================================================================
 
-/// Path activity predicate (for stream compaction)
+/// 路径活跃谓词（用于流压缩）
 struct PathIsActivePredicate {
     WavefrontPathState* pathStates;
     
@@ -615,7 +620,7 @@ struct PathIsActivePredicate {
 };
 
 
-/// Material category comparator (for path sorting)
+/// 材质分类比较器（用于路径排序）
 struct MaterialCategoryComparator {
     WavefrontPathState* pathStates;
     
@@ -628,7 +633,7 @@ struct MaterialCategoryComparator {
 
 
 // ============================================================================
-// 12. Version Information
+// 12. 版本信息
 // ============================================================================
 
 namespace WavefrontVersion {

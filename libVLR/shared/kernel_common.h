@@ -1,37 +1,37 @@
 // ============================================================================
-// VLR Kernel Common
-// 
-// This file includes common headers and definitions for CUDA/OptiX kernels.
-// 
-// Author: VLR Development Team
-// Created: 2026-03-07
-// Environment: CUDA 13.1, OptiX 8.0.0, VS2022
+// VLR 内核公共头文件
+//
+// 本文件包含 CUDA/OptiX 内核的公共头文件和定义。
+//
+// 作者：VLR 开发团队
+// 创建时间：2026-03-07
+// 环境：CUDA 13.1，OptiX 8.0.0，VS2022
 // ============================================================================
 
 #pragma once
 
-// Include basic types
+// 包含基本类型
 #include "../include/vlr/basic_types.h"
 
-// OptiX headers (only when OptiX is available)
+// OptiX 头文件（仅在 OptiX 可用时包含）
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
     #include <optix.h>
     #include <optix_device.h>
 #endif
 
-// CUDA headers
+// CUDA 头文件
 #ifdef __CUDACC__
     #include <cuda_runtime.h>
 #endif
 
-// Standard headers
+// 标准库头文件
 #include <cstdint>
 #include <cstring>
 
 namespace vlr {
 namespace shared {
 
-// Import basic types into shared namespace
+// 将基本类型导入 shared 命名空间
 using ::vlr::Vector3D;
 using ::vlr::Point3D;
 using ::vlr::Normal3D;
@@ -71,24 +71,24 @@ using ::vlr::DiscreteDistribution1D;
 using ::vlr::SceneBounds;
 using ::vlr::NumSpectralSamples;
 
-// OptiX utility namespace
+// OptiX 工具命名空间
 namespace optixu = ::vlr::optixu;
 
 // ============================================================================
-// Global Launch Parameters Pointer
+// 全局启动参数指针
 // ============================================================================
 
-// Forward declaration
+// 前向声明
 struct WavefrontLaunchParameters;
 
-// Global constant memory for launch parameters
-// Note: This should be defined in each kernel file that uses it
+// 用于启动参数的全局常量内存
+// 注意：应在使用它的每个内核文件中定义
 // #ifdef __CUDACC__
 //     extern "C" __constant__ WavefrontLaunchParameters wlp;
 // #endif
 
-// Convenience macro for accessing launch parameters
+// 访问启动参数的便捷宏
 // #define WLP wlp
 
-} // namespace shared
-} // namespace vlr
+}  // namespace shared
+}  // namespace vlr

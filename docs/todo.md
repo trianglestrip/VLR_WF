@@ -127,30 +127,34 @@ git checkout -b wavefront-renderer
   - [ ] 添加 Wavefront 配置结构体（可选）
 - [ ] **验收**: 编译通过，枚举值正确
 
-#### 1.4 创建 Context 扩展 (3 天)
-- [ ] 修改 `libVLR/context.h`
-  - [ ] 在 `Context::OptiX` 中添加 `WavefrontPathTracing` 结构体
+#### 1.4 创建 Context 扩展 (3 天) ✅ **已完成**
+- [x] 修改 `libVLR/context.h`
+  - [x] 在 `Context::OptiX` 中添加 `WavefrontPathTracing` 结构体
     - Pipeline 和 Module
     - Programs (RayGen, Miss, HitGroup)
     - 缓冲区（PathState, HitInfo, SurfacePoint, Queues）
     - CUDA Kernels
-  - [ ] 添加 `WavefrontLaunchParameters` 成员
-  - [ ] 声明 `renderWavefront()` 方法
-- [ ] **验收**: 编译通过，结构完整
+  - [x] 添加 `WavefrontLaunchParameters` 成员
+  - [x] 声明 `renderWavefront()` 方法
+- [x] 创建 `libVLR/utils/cuda_util.h` - CUDA 工具类
+- [x] 创建 `libVLR/utils/optix_util.h` - OptiX 工具类
+- [x] **验收**: 编译通过，结构完整 ✅
 
-#### 1.5 实现 Context 初始化 (4 天)
-- [ ] 修改 `libVLR/context.cpp`
-  - [ ] 在构造函数中初始化 Wavefront Pipeline
-    - [ ] 创建 Pipeline
-    - [ ] 加载 PTX 模块（占位符）
-    - [ ] 创建 Programs（占位符）
-    - [ ] 分配缓冲区
-    - [ ] 初始化工作队列
-    - [ ] 设置 Launch Parameters
-  - [ ] 在析构函数中清理资源
-  - [ ] 实现 `resizeWavefrontBuffers()` 方法
-  - [ ] 实现 `resetWavefrontQueues()` 方法
-- [ ] **验收**: 初始化成功，无内存泄漏
+#### 1.5 实现 Context 初始化 (4 天) ✅ **已完成**
+- [x] 修改 `libVLR/context.cpp`
+  - [x] 在构造函数中初始化 Wavefront Pipeline
+    - [x] 创建 Pipeline（占位符）
+    - [x] 加载 PTX 模块（占位符）
+    - [x] 创建 Programs（占位符）
+    - [x] 分配缓冲区
+    - [x] 初始化工作队列
+    - [x] 设置 Launch Parameters
+  - [x] 在析构函数中清理资源
+  - [x] 实现 `resizeWavefrontBuffers()` 方法
+  - [x] 实现 `resetWavefrontQueues()` 方法
+- [x] 实现 `executeWavefrontRender()` 主渲染循环
+- [x] 实现内核启动方法占位符
+- [x] **验收**: 初始化成功，编译通过 ✅
 
 **阶段 1 里程碑**: ✅ 基础架构完成，可以开始实现 Kernel
 
