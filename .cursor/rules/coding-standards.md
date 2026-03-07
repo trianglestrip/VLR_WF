@@ -41,21 +41,36 @@ struct WavefrontPathState {
 CUDA_DEVICE_FUNCTION WavefrontPathState initPathState(uint32_t pathIndex);
 ```
 
-## 文件编码规范
+## 文件编码规范 ⚠️ 极其重要
 
-### 换行符
+### 换行符 - 必须 CRLF
 - **所有文件必须使用 CRLF (Windows 风格) 换行符**
-- 适用于所有文本文件：`.cpp`, `.h`, `.cu`, `.md`, `.txt` 等
+- **绝对不能使用 LF (Unix 风格) 换行符**
+- 适用于所有文本文件：`.cpp`, `.h`, `.cu`, `.cuh`, `.md`, `.txt`, `.cmake`, `CMakeLists.txt` 等
+- **原因**：NVCC 编译器在 Windows 上对 LF 换行符处理有严重问题，会导致编译失败
 
 ### 字符编码
 - **所有文件必须使用 UTF-8 编码（带 BOM 或不带 BOM 均可）**
 - 确保中文注释正确显示
+- NVCC 编译时需要 `-Xcompiler=/utf-8` 选项
 
-### Git 配置
+### Git 配置（项目级别）
 ```bash
-# 配置 Git 自动处理换行符（保持 CRLF）
-git config --global core.autocrlf false
-git config --global core.eol crlf
+# 在项目仓库中设置（不要用 --global）
+git config core.autocrlf true
+git config core.eol crlf
+
+# 重新规范化所有文件为 CRLF
+git add --renormalize .
+```
+
+### 验证换行符
+```powershell
+# 检查文件换行符类型
+file <filename>
+
+# 或使用 Git
+git ls-files --eol
 ```
 
 ### 编辑器配置

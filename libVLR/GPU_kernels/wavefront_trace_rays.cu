@@ -9,11 +9,15 @@
 // 环境：CUDA 13.1, OptiX 7/8, VS2022
 // ============================================================================
 
-#include "../shared/wavefront_types.h"
-#include "../shared/kernel_common.h"
-#include "../include/vlr/basic_types.h"
+#include "../shared/wavefront_types_minimal.h"
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
+#ifndef _WIN64
+#define _WIN64 1
+#endif
+#ifndef CUdeviceptr
+typedef unsigned long long CUdeviceptr;
+#endif
 #include <optix.h>
 #include <optix_device.h>
 #endif

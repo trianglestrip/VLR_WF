@@ -29,7 +29,7 @@ namespace shared {
 /// Classify material based on BSDF characteristics
 /// This is used to sort paths by material type for better coherence
 CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory classifyMaterial(
-    const BSDF<TransportMode::Radiance>& bsdf) {
+    const BSDF& bsdf) {
     
     // Check for perfect specular reflection
     if (bsdf.matches(DirectionType::Delta0D() | DirectionType::Reflection()))
@@ -425,7 +425,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void generateCameraRay(
     idfSample.positionLocal = lensPosSample.position;
     idfSample.dirPDF = 1.0f;
     SampledSpectrum We = SampledSpectrum::One();
-    if (camera.progEvaluateIDF >= 0) {
+    if (wlp.progEvaluateIDF >= 0) {
         // OptiX callable would go here
     }
     
@@ -537,7 +537,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
 
 /// Evaluate BSDF for a given direction
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
-    const BSDF<TransportMode::Radiance>& bsdf,
+    const BSDF& bsdf,
     const Vector3D& dirInLocal,
     const Vector3D& dirOutLocal,
     const WavelengthSamples& wls,
@@ -557,7 +557,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
 
 /// Sample BSDF direction
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleBSDF(
-    const BSDF<TransportMode::Radiance>& bsdf,
+    const BSDF& bsdf,
     const Vector3D& dirInLocal,
     WavefrontPathState& pathState,
     WavefrontBSDFSample* bsdfSample) {

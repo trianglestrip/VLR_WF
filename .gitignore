@@ -66,6 +66,9 @@ cmake_install.cmake
 *.cmake
 !CMakeLists.txt
 
+# 输出目录
+bin/
+
 # IDE 配置
 .idea/
 *.sln.iml

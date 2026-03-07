@@ -13,16 +13,10 @@
 // 包含基本类型
 #include "../include/vlr/basic_types.h"
 
-// OptiX 头文件（仅在 OptiX 可用时包含）
-#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-    #include <optix.h>
-    #include <optix_device.h>
-#endif
+// 注意：OptiX 头文件由各内核文件按需包含
 
-// CUDA 头文件
-#ifdef __CUDACC__
-    #include <cuda_runtime.h>
-#endif
+// CUDA 头文件（无条件包含，本文件仅被 .cu 使用；避免条件包含导致 C1020）
+#include <cuda_runtime.h>
 
 // 标准库头文件
 #include <cstdint>

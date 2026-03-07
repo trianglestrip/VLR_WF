@@ -25,8 +25,9 @@ endif()
 
 # ----------------------------------------------------------------------------
 # PTX 编译：OptiX 内核（wavefront_trace_rays.cu 含 RG/CH/MS/AH 程序）
+# 输出到 bin/GPU_kernels/ 目录
 # ----------------------------------------------------------------------------
-set(PTX_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/GPU_kernels)
+set(PTX_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/bin/GPU_kernels)
 file(MAKE_DIRECTORY ${PTX_OUTPUT_DIR})
 
 if(OPTIX_FOUND)
@@ -39,19 +40,21 @@ if(OPTIX_FOUND)
             --expt-relaxed-constexpr
             -DVLR_Device
             -DVLR_USE_OPTIX
+            -DVLR_PTX_TRACERAYS
+            -D_WIN64
             -I${CMAKE_CURRENT_SOURCE_DIR}/shared
             -I${CMAKE_CURRENT_SOURCE_DIR}/include
             -I${OPTIX_INCLUDE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/wavefront_trace_rays.cu
             -o ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/wavefront_trace_rays.cu
-        COMMENT "编译 wavefront_trace_rays.cu -> PTX (OptiX)"
+        COMMENT "编译 wavefront_trace_rays.cu -> PTX (OptiX) -> bin/GPU_kernels/"
         VERBATIM
     )
     add_custom_target(wavefront_trace_rays_ptx ALL
         DEPENDS ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx
     )
-    message(STATUS "[libVLR] OptiX PTX 目标已启用：wavefront_trace_rays.ptx")
+    message(STATUS "[libVLR] OptiX PTX 目标已启用：wavefront_trace_rays.ptx -> bin/GPU_kernels/")
 endif()
 
 # ----------------------------------------------------------------------------

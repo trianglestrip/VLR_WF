@@ -65,6 +65,21 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
+# 设置输出目录：所有可执行文件和库输出到 bin/
+# ----------------------------------------------------------------------------
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+
+# 为多配置生成器（如 Visual Studio）设置
+foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/bin)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/bin)
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/bin)
+endforeach()
+
+# ----------------------------------------------------------------------------
 # 添加子目录（OPTIX_FOUND、OPTIX_PATH、VLR_CUDA_ARCH 将传递给 libVLR）
 # ----------------------------------------------------------------------------
 add_subdirectory(libVLR)
@@ -76,10 +91,11 @@ add_executable(simple_render_test test/simple_render_test.cpp)
 target_include_directories(simple_render_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
 target_link_libraries(simple_render_test PRIVATE VLR CUDA::cudart)
 
-# 构建后复制 VLR 库和 PTX 到测试可执行文件目录，便于运行
+# PTX 文件也输出到 bin/GPU_kernels/
 add_custom_command(TARGET simple_render_test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:VLR> $<TARGET_FILE_DIR:simple_render_test>
-    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:simple_render_test>/GPU_kernels
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:VLR>/GPU_kernels/wavefront_trace_rays.ptx $<TARGET_FILE_DIR:simple_render_test>/GPU_kernels/
-    COMMENT "复制 VLR 库和 PTX 到测试可执行文件目录"
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/bin/GPU_kernels
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+        ${CMAKE_BINARY_DIR}/libVLR/GPU_kernels/wavefront_trace_rays.ptx 
+        ${CMAKE_SOURCE_DIR}/bin/GPU_kernels/
+    COMMENT "复制 PTX 文件到 bin/GPU_kernels/"
 )

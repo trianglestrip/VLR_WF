@@ -304,6 +304,7 @@ struct WavefrontLaunchParameters {
     // 相机数据
     int32_t progSampleLensPosition;
     int32_t progTestLensIntersection;
+    int32_t progEvaluateIDF;  ///< IDF 求值程序索引，-1 表示无（从 CameraDescriptor 移出以兼容 PTX）
     CameraDescriptor cameraDescriptor;
     
     // === 波前特定数据 ===

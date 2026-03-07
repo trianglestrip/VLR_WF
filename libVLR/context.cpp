@@ -14,6 +14,7 @@
 #include "utils/cuda_util.h"
 #include "utils/optix_util.h"
 #include <optix_function_table_definition.h>  // OptiX: 提供 g_optixFunctionTable 定义
+#include <optix_stack_size.h>                 // OptiX: optixUtilAccumulateStackSizes, optixUtilComputeStackSizes
 #include <cstring>
 #include <stdexcept>
 #include <fstream>
@@ -28,15 +29,21 @@ namespace vlr {
 
 namespace {
 
-/// 从 libVLR/GPU_kernels/ 目录加载 PTX 文件内容
-/// 尝试多个路径以支持不同构建/运行目录布局
+/// 从 libVLR/GPU_kernels/ 或 build/Release 目录加载 PTX 文件内容
+/// 尝试多个路径以支持不同构建/运行目录布局（含 build/Release 运行时）
 std::vector<char> loadPTXFile(const char* filename) {
-    // 候选路径：支持从项目根目录或 libVLR 目录运行
+    // 候选路径：项目根、libVLR、build/Release、build/Debug 等
     const char* searchPaths[] = {
+        "GPU_kernels/",                    // build/Release 或 build/Debug 运行时
         "libVLR/GPU_kernels/",
-        "GPU_kernels/",
+        "../GPU_kernels/",
+        "../../GPU_kernels/",
+        "Release/GPU_kernels/",
+        "Debug/GPU_kernels/",
         "../libVLR/GPU_kernels/",
         "../../libVLR/GPU_kernels/",
+        "build/Release/GPU_kernels/",
+        "build/Debug/GPU_kernels/",
     };
     
     for (const char* basePath : searchPaths) {
@@ -56,7 +63,7 @@ std::vector<char> loadPTXFile(const char* filename) {
     
     throw std::runtime_error(
         std::string("无法加载 PTX 文件: ") + filename +
-        "。请确保文件位于 libVLR/GPU_kernels/ 目录，并已运行 compile_wavefront_ptx.bat 生成 PTX。");
+        "。请确保文件位于 GPU_kernels/ 或 libVLR/GPU_kernels/，从 build/Release 运行时 PTX 应在 build/Release/GPU_kernels/。");
 }
 
 }  // 匿名命名空间
@@ -113,7 +120,23 @@ void Context::initializeWavefrontPipeline() {
         return;
     }
     
-    // 创建管线编译选项
+    printf("[Wavefront] 开始初始化 Pipeline...\n");
+    
+    // ------------------------------------------------------------------------
+    // 1. 加载 PTX 文件
+    // ------------------------------------------------------------------------
+    std::vector<char> ptxCode;
+    try {
+        ptxCode = loadPTXFile("wavefront_trace_rays.ptx");
+        printf("[Wavefront] PTX 加载成功，大小: %zu 字节\n", ptxCode.size() - 1);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[Wavefront] 错误: PTX 加载失败 - %s\n", e.what());
+        throw;
+    }
+    
+    // ------------------------------------------------------------------------
+    // 2. 创建管线编译选项
+    // ------------------------------------------------------------------------
     OptixPipelineCompileOptions pipelineCompileOptions = {};
     pipelineCompileOptions.usesMotionBlur = false;
     pipelineCompileOptions.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
@@ -128,12 +151,133 @@ void Context::initializeWavefrontPipeline() {
     moduleCompileOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
     moduleCompileOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
     
-    // 注意: PTX 模块将在创建内核文件后加载
-    // 目前，我们将管线标记为已初始化但尚不可完全使用
+    // ------------------------------------------------------------------------
+    // 3. 创建 OptiX 模块
+    // ------------------------------------------------------------------------
+    char moduleLog[2048];
+    size_t moduleLogSize = sizeof(moduleLog);
+    OptixResult moduleRes = optixModuleCreate(
+        m_optix.context,
+        &moduleCompileOptions,
+        &pipelineCompileOptions,
+        ptxCode.data(),
+        ptxCode.size() - 1,  // 不含结尾 '\0'
+        moduleLog,
+        &moduleLogSize,
+        &wf.module
+    );
+    if (moduleRes != OPTIX_SUCCESS) {
+        fprintf(stderr, "[Wavefront] 错误: optixModuleCreate 失败 - %s (%d)\n", optixGetErrorName(moduleRes), moduleRes);
+        if (moduleLogSize > 1) {
+            fprintf(stderr, "[Wavefront] 模块编译日志:\n%.*s\n", static_cast<int>(moduleLogSize), moduleLog);
+        }
+        throw std::runtime_error(
+            std::string("OptiX 模块创建失败: ") + optixGetErrorName(moduleRes) + " (" + std::to_string(moduleRes) + ")");
+    }
+    printf("[Wavefront] OptiX 模块创建成功\n");
+    
+    // ------------------------------------------------------------------------
+    // 4. 创建程序组（RayGen、Miss、HitGroup、ShadowMiss、ShadowHitGroup）
+    // ------------------------------------------------------------------------
+    try {
+        createWavefrontPrograms();
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[Wavefront] 错误: createWavefrontPrograms 失败 - %s\n", e.what());
+        if (wf.module) {
+            optixModuleDestroy(wf.module);
+            wf.module = nullptr;
+        }
+        throw;
+    }
+    
+    // ------------------------------------------------------------------------
+    // 5. 创建着色器绑定表 (SBT)
+    // ------------------------------------------------------------------------
+    try {
+        createWavefrontSBT();
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[Wavefront] 错误: createWavefrontSBT 失败 - %s\n", e.what());
+        cleanupWavefrontResources();
+        throw;
+    }
+    
+    // ------------------------------------------------------------------------
+    // 6. 创建 Pipeline
+    // ------------------------------------------------------------------------
+    OptixProgramGroup programGroups[] = {
+        wf.raygenProgram,
+        wf.missProgram,
+        wf.hitGroupProgram,
+        wf.shadowMissProgram,
+        wf.shadowHitGroupProgram
+    };
+    const uint32_t numProgramGroups = sizeof(programGroups) / sizeof(programGroups[0]);
+    
+    OptixPipelineLinkOptions pipelineLinkOptions = {};
+    pipelineLinkOptions.maxTraceDepth = 2;  // 主光线 + 阴影光线
+    pipelineLinkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
+    
+    char pipelineLog[2048];
+    size_t pipelineLogSize = sizeof(pipelineLog);
+    OptixResult pipelineRes = optixPipelineCreate(
+        m_optix.context,
+        &pipelineCompileOptions,
+        &pipelineLinkOptions,
+        programGroups,
+        numProgramGroups,
+        pipelineLog,
+        &pipelineLogSize,
+        &wf.pipeline
+    );
+    if (pipelineRes != OPTIX_SUCCESS) {
+        fprintf(stderr, "[Wavefront] 错误: optixPipelineCreate 失败 - %s (%d)\n", optixGetErrorName(pipelineRes), pipelineRes);
+        if (pipelineLogSize > 1) {
+            fprintf(stderr, "[Wavefront] 管线链接日志:\n%.*s\n", static_cast<int>(pipelineLogSize), pipelineLog);
+        }
+        cleanupWavefrontResources();
+        throw std::runtime_error(
+            std::string("OptiX Pipeline 创建失败: ") + optixGetErrorName(pipelineRes) + " (" + std::to_string(pipelineRes) + ")");
+    }
+    printf("[Wavefront] OptiX Pipeline 创建成功\n");
+    
+    // 设置栈大小（使用 OptiX 工具计算）
+    const uint32_t maxTraceDepth = 2;  // 主光线 + 阴影光线
+    OptixStackSizes stackSizes = {};
+    for (OptixProgramGroup pg : programGroups) {
+        OptixResult accRes = optixUtilAccumulateStackSizes(pg, &stackSizes, wf.pipeline);
+        if (accRes != OPTIX_SUCCESS) {
+            fprintf(stderr, "[Wavefront] 警告: optixUtilAccumulateStackSizes 失败 - %s (%d)\n",
+                    optixGetErrorName(accRes), accRes);
+        }
+    }
+    uint32_t directCallableStackSizeFromTraversal = 0;
+    uint32_t directCallableStackSizeFromState = 0;
+    uint32_t continuationStackSize = 0;
+    OptixResult stackRes = optixUtilComputeStackSizes(
+        &stackSizes,
+        maxTraceDepth,
+        0,  // maxCCDepth
+        0,  // maxDCDepth
+        &directCallableStackSizeFromTraversal,
+        &directCallableStackSizeFromState,
+        &continuationStackSize
+    );
+    if (stackRes == OPTIX_SUCCESS) {
+        stackRes = optixPipelineSetStackSize(
+            wf.pipeline,
+            directCallableStackSizeFromTraversal,
+            directCallableStackSizeFromState,
+            continuationStackSize,
+            2  // maxTraversableGraphDepth
+        );
+    }
+    if (stackRes != OPTIX_SUCCESS) {
+        fprintf(stderr, "[Wavefront] 警告: 栈大小设置失败 - %s (%d)，可能影响渲染\n",
+                optixGetErrorName(stackRes), stackRes);
+    }
     
     wf.isInitialized = true;
-    
-    printf("Wavefront pipeline initialized (awaiting PTX modules)\n");
+    printf("[Wavefront] Pipeline 初始化完成\n");
 }
 
 
@@ -509,6 +653,9 @@ void Context::setupWavefrontLaunchParams() {
         lp.vertexTexCoords = m_sceneSource->getVertexTexCoords();
         lp.topGroup = m_sceneSource->getTopGroup();
         lp.cameraDescriptor = m_sceneSource->getCamera();
+        lp.progSampleLensPosition = -1;
+        lp.progTestLensIntersection = -1;
+        lp.progEvaluateIDF = -1;
         // SceneBounds 需设备指针，上传到小缓冲区
         if (!wf.sceneBoundsBuffer) {
             wf.sceneBoundsBuffer = new cudau::Buffer<shared::SceneBounds>();
@@ -529,6 +676,9 @@ void Context::setupWavefrontLaunchParams() {
         lp.topGroup = 0;
         lp.sceneBounds = nullptr;
         lp.cameraDescriptor = m_scene.camera;  // 使用默认 SceneData
+        lp.progSampleLensPosition = -1;
+        lp.progTestLensIntersection = -1;
+        lp.progEvaluateIDF = -1;
     }
     
     // 设置图像参数

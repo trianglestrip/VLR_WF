@@ -305,7 +305,6 @@ void Scene::setCamera(const CameraParams& params) {
     m_camera.lensRadius = params.lensRadius;
     m_camera.focusDistance = params.focusDistance;
     m_camera.cameraType = params.cameraType;
-    m_camera.progEvaluateIDF = -1;
 }
 
 // ============================================================================

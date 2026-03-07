@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CustomBuild Include="F:\project\VLR_WF\build\CMakeFiles\5c657172a6cb8d1f92433186dc198a36\wavefront_trace_rays.ptx.rule">
+    <CustomBuild Include="F:\project\VLR_WF\build\CMakeFiles\524ca9575ea51ac2c557b881d6e19c56\wavefront_trace_rays.ptx.rule">
       <Filter>CMake Rules</Filter>
     </CustomBuild>
     <CustomBuild Include="F:\project\VLR_WF\build\CMakeFiles\0218c7d6425c1f96fc91b0b3e24c7d59\wavefront_trace_rays_ptx.rule">

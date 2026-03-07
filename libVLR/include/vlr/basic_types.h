@@ -13,13 +13,14 @@
 #include <cstdint>
 #include <cmath>
 
-// 平台检测
-#ifdef __CUDACC__
+// 平台检测：使用两个独立 #if 块避免 #else，修复 nvcc/MSVC C1019 预处理器错误
+#if defined(__CUDACC__)
     #define CUDA_DEVICE_FUNCTION __device__
     #define CUDA_HOST_FUNCTION __host__
     #define CUDA_INLINE __forceinline__
     #define CUDA_DEVICE_KERNEL extern "C" __global__
-#else
+#endif
+#if !defined(__CUDACC__)
     #define CUDA_DEVICE_FUNCTION
     #define CUDA_HOST_FUNCTION
     #define CUDA_INLINE inline
@@ -29,19 +30,29 @@
 namespace vlr {
 
 // ============================================================================
-// 数学常量
+// 数学常量（使用宏定义确保 PTX/设备代码中可用）
 // ============================================================================
 
-constexpr float VLR_M_PI = 3.14159265358979323846f;
-constexpr float VLR_M_2PI = 6.28318530717958647692f;
-constexpr float VLR_M_INV_PI = 0.31830988618379067154f;
-constexpr float VLR_M_INV_2PI = 0.15915494309189533577f;
+#ifndef VLR_M_PI
+#define VLR_M_PI 3.14159265358979323846f
+#endif
+#ifndef VLR_M_2PI
+#define VLR_M_2PI 6.28318530717958647692f
+#endif
+#ifndef VLR_M_INV_PI
+#define VLR_M_INV_PI 0.31830988618379067154f
+#endif
+#ifndef VLR_M_INV_2PI
+#define VLR_M_INV_2PI 0.15915494309189533577f
+#endif
 
 /// 设备端安全的 max/min（替代 std::max/min，避免 CUDA 设备代码中的链接问题）
-CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE float vlr_max(float a, float b) {
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+float vlr_max(float a, float b) {
     return (a > b) ? a : b;
 }
-CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE float vlr_min(float a, float b) {
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+float vlr_min(float a, float b) {
     return (a < b) ? a : b;
 }
 
@@ -87,8 +98,13 @@ struct Vector3D {
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     void toPolarYUp(float* theta, float* phi) const {
+#ifdef __CUDACC__
+        *theta = acosf(y);
+        *phi = atan2f(z, x);
+#else
         *theta = std::acos(y);
         *phi = std::atan2(z, x);
+#endif
         if (*phi < 0) *phi += VLR_M_2PI;
     }
 };
@@ -145,7 +161,11 @@ float dot(const Vector3D& a, const Vector3D& b) {
 
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 float absDot(const Vector3D& a, const Vector3D& b) {
+#ifdef __CUDACC__
+    return fabsf(dot(a, b));
+#else
     return std::abs(dot(a, b));
+#endif
 }
 
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -159,7 +179,11 @@ Vector3D cross(const Vector3D& a, const Vector3D& b) {
 
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 float length(const Vector3D& v) {
+#ifdef __CUDACC__
+    return sqrtf(dot(v, v));
+#else
     return std::sqrt(dot(v, v));
+#endif
 }
 
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -368,7 +392,7 @@ struct WavelengthSamples {
     }
 };
 
-static_assert(sizeof(WavelengthSamples) == 24, "WavelengthSamples 必须为 24 字节");
+static_assert(sizeof(WavelengthSamples) == 24, "WavelengthSamples must be 24 bytes");
 
 // toDiscretizedSpectrum 实现在此（需要 WavelengthSamples 完整定义）
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -444,7 +468,7 @@ struct KernelRNG {
     }
 };
 
-static_assert(sizeof(KernelRNG) == 16, "KernelRNG 必须为 16 字节");
+static_assert(sizeof(KernelRNG) == 16, "KernelRNG must be 16 bytes");
 
 
 // ============================================================================
@@ -467,11 +491,11 @@ struct SurfacePoint {
 // 相机类型与描述符
 // ============================================================================
 
-/// 相机类型枚举（与 VLRCameraType 对应）
+/// 相机类型枚举（与 VLRCameraType 对应，使用 uint32_t 确保设备端可读）
 enum CameraType : uint32_t {
     CameraType_Perspective = 0,
-    CameraType_Equirectangular,
-    NumCameraTypes
+    CameraType_Equirectangular = 1,
+    NumCameraTypes = 2
 };
 
 struct CameraDescriptor {
@@ -481,8 +505,8 @@ struct CameraDescriptor {
     float aspect;
     float lensRadius;
     float focusDistance;
-    uint32_t cameraType;     ///< CameraType 枚举值
-    int32_t progEvaluateIDF;
+    uint32_t cameraType;     ///< CameraType 枚举值（0=透视，1=等距柱状）
+    /// 注：progEvaluateIDF 已移至 WavefrontLaunchParameters，避免 PTX 设备编译问题
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     CameraDescriptor() 
@@ -491,8 +515,7 @@ struct CameraDescriptor {
         , aspect(16.0f / 9.0f)
         , lensRadius(0.0f)
         , focusDistance(1.0f)
-        , cameraType(CameraType_Perspective)
-        , progEvaluateIDF(-1)
+        , cameraType(0)       /* CameraType_Perspective，避免设备端枚举读取问题 */
     {}
 };
 
@@ -602,32 +625,10 @@ enum class TransportMode : uint32_t {
 
 // ============================================================================
 // BSDF/EDF 查询类型（占位符）
+// PTX TraceRays 编译时跳过，避免设备端解析问题
 // ============================================================================
 
-template <TransportMode mode>
-struct BSDF {
-    const SurfaceMaterialDescriptor* matDesc;
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    bool matches(DirectionType type) const {
-        return true;  // 占位符
-    }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    SampledSpectrum evaluate(const struct BSDFQuery& query) const {
-        return SampledSpectrum::Zero();  // 占位符
-    }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    float evaluatePDF(const struct BSDFQuery& query) const {
-        return 0.0f;  // 占位符
-    }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    SampledSpectrum sample(const struct BSDFQuery& query, float u0, float u1, struct BSDFSample* sample) const {
-        return SampledSpectrum::Zero();  // 占位符
-    }
-};
+#if !defined(VLR_PTX_TRACERAYS)
 
 struct BSDFQuery {
     Vector3D dirIn;
@@ -644,13 +645,38 @@ struct BSDFQuery {
     CUDA_DEVICE_FUNCTION CUDA_INLINE
     BSDFQuery(const Vector3D& dirIn_, const WavelengthSamples& wls_, 
               DirectionType filter, TransportMode mode)
-        : dirIn(dirIn_), wls(wls_), dirTypeFilter(filter), transportMode(mode) {}
+        : dirIn(dirIn_), dirOut(0, 0, 0), wls(wls_), dirTypeFilter(filter), transportMode(mode) {}
 };
 
 struct BSDFSample {
     Vector3D dirLocal;
     float dirPDF;
     DirectionType dirType;
+};
+
+/// BSDF 结构体（非模板，以兼容 NVCC PTX 设备编译）
+struct BSDF {
+    const SurfaceMaterialDescriptor* matDesc;
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    bool matches(DirectionType type) const {
+        return true;
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    SampledSpectrum evaluate(const BSDFQuery& query) const {
+        return SampledSpectrum::Zero();
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    float evaluatePDF(const BSDFQuery& query) const {
+        return 0.0f;
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    SampledSpectrum sample(const BSDFQuery& query, float u0, float u1, BSDFSample* sample) const {
+        return SampledSpectrum::Zero();
+    }
 };
 
 struct EDF {
@@ -679,6 +705,8 @@ struct EDFQuery {
     EDFQuery(DirectionType filter, const WavelengthSamples& wls_)
         : dirTypeFilter(filter), wls(wls_) {}
 };
+
+#endif  // !VLR_PTX_TRACERAYS
 
 
 // ============================================================================
@@ -782,18 +810,18 @@ struct DiscretizedSpectrumAlwaysSpectral {
 
 CUDA_DEVICE_FUNCTION CUDA_INLINE
 void applyBumpMapping(const Normal3D& localNormal, SurfacePoint* surfPt) {
-    // 占位符
+    /* placeholder */
 }
 
 CUDA_DEVICE_FUNCTION CUDA_INLINE
 void modifyTangent(const Vector3D& newTangent, SurfacePoint* surfPt) {
-    // 占位符
+    /* placeholder */
 }
 
 template <typename T>
 CUDA_DEVICE_FUNCTION CUDA_INLINE
 T calcNode(int32_t nodeIndex, const T& defaultValue, const SurfacePoint& surfPt, const WavelengthSamples& wls) {
-    return defaultValue;  // 占位符
+    return defaultValue;  /* placeholder */
 }
 
 #ifdef __CUDACC__
