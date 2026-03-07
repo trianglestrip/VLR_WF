@@ -47,17 +47,22 @@ extern "C" __global__ void sampleBSDF(
         return;
 
     uint32_t pathIndex = wlp.activePathQueue.pathIndices[workIndex];
-    WavefrontPathState& pathState = wlp.pathStateBuffer[pathIndex];
+    
+    // 优化：使用 __restrict__ 提示编译器优化内存访问
+    WavefrontPathState* __restrict__ pathStatePtr = &wlp.pathStateBuffer[pathIndex];
+    WavefrontPathState& pathState = *pathStatePtr;
 
     // 跳过非活跃路径
     if (!pathState.isActive())
         return;
 
-    const WavefrontHitInfo& hitInfo = wlp.hitInfoBuffer[pathIndex];
+    const WavefrontHitInfo* __restrict__ hitInfoPtr = &wlp.hitInfoBuffer[pathIndex];
+    const WavefrontHitInfo& hitInfo = *hitInfoPtr;
     if (!hitInfo.hasHit() || hitInfo.hitInfinity())
         return;
 
-    const SurfacePoint& surfPt = wlp.surfacePointBuffer[pathIndex];
+    const SurfacePoint* __restrict__ surfPtPtr = &wlp.surfacePointBuffer[pathIndex];
+    const SurfacePoint& surfPt = *surfPtPtr;
 
     // ========================================================================
     // 1. 获取材质和 BSDF 上下文

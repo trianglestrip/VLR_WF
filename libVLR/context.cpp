@@ -26,6 +26,7 @@
 #include <sstream>
 #include <vector>
 #include <chrono>
+#include "shared/performance_config.h"
 
 namespace vlr {
 
@@ -1217,8 +1218,8 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
     }
     
         // 主 Wavefront 循环
-        // 优化：减少同步频率，每 4 个深度同步一次以检查活跃路径数
-        constexpr uint32_t SYNC_INTERVAL = 4;
+        // 优化：减少同步频率，使用配置的同步间隔
+        constexpr uint32_t SYNC_INTERVAL = shared::PerformanceConfig::SyncInterval;
         uint32_t numActivePaths = numPixels;  // 初始时所有路径都活跃
         
         for (uint32_t depth = 0; depth < wf.maxPathLength; ++depth) {
@@ -1262,11 +1263,13 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
         }
         
-        // 优化：只在路径数下降超过阈值时才执行压缩
-        constexpr float COMPRESSION_THRESHOLD = 0.75f;  // 路径数下降超过 25% 时才压缩
+        // 优化：只在路径数下降超过阈值且路径数足够多时才执行压缩
+        constexpr float COMPRESSION_THRESHOLD = shared::PerformanceConfig::CompressionThreshold;
+        constexpr uint32_t MIN_PATHS = shared::PerformanceConfig::MinPathsForCompression;
         float compressionRatio = (numActivePaths > 0) ? 
             static_cast<float>(numNextPaths) / numActivePaths : 0.0f;
-        bool shouldCompress = (compressionRatio < COMPRESSION_THRESHOLD) && (numNextPaths > 0);
+        bool shouldCompress = (compressionRatio < COMPRESSION_THRESHOLD) && 
+                             (numNextPaths > MIN_PATHS);
         
         if (wf.useStreamCompaction && shouldCompress) {
             // 使用 CUB Stream Compaction 移除已终止路径

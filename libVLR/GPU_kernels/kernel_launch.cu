@@ -10,6 +10,7 @@
 // ============================================================================
 
 #include "kernel_launch.h"
+#include "../shared/performance_config.h"
 
 #ifdef VLR_DEBUG_NAN_TRACKING
 __device__ __managed__ unsigned int g_vlrNanPrintCount = 0;
@@ -62,9 +63,9 @@ void launchGenerateRaysKernel(
     uint32_t height,
     cudaStream_t stream)
 {
-    // 计算 2D grid/block 尺寸（16x16 块覆盖图像）
-    constexpr uint32_t blockWidth = 16;
-    constexpr uint32_t blockHeight = 16;
+    // 使用性能配置的 block 尺寸
+    constexpr uint32_t blockWidth = shared::PerformanceConfig::GenerateRaysBlockWidth;
+    constexpr uint32_t blockHeight = shared::PerformanceConfig::GenerateRaysBlockHeight;
     dim3 blockDim(blockWidth, blockHeight);
     dim3 gridDim(
         (width + blockWidth - 1) / blockWidth,
@@ -79,8 +80,8 @@ void launchProcessHitsKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    // 优化：processHits 寄存器使用较多，使用较小的 block size 以提高 occupancy
-    constexpr uint32_t blockSize = 128;
+    // 使用性能配置的 block size
+    constexpr uint32_t blockSize = shared::PerformanceConfig::ProcessHitsBlockSize;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
@@ -93,8 +94,8 @@ void launchSampleLightsKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    // 优化：sampleLights 计算密集，使用较大的 block size
-    constexpr uint32_t blockSize = 256;
+    // 使用性能配置的 block size
+    constexpr uint32_t blockSize = shared::PerformanceConfig::SampleLightsBlockSize;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
@@ -107,8 +108,8 @@ void launchSampleBSDFKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    // 优化：sampleBSDF 是最复杂的 kernel，使用中等 block size 平衡寄存器和 occupancy
-    constexpr uint32_t blockSize = 192;
+    // 使用性能配置的 block size
+    constexpr uint32_t blockSize = shared::PerformanceConfig::SampleBSDFBlockSize;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
@@ -121,7 +122,8 @@ void launchAccumulateKernel(
     uint32_t numPaths,
     cudaStream_t stream)
 {
-    constexpr uint32_t blockSize = 256;
+    // 使用性能配置的 block size
+    constexpr uint32_t blockSize = shared::PerformanceConfig::AccumulateBlockSize;
     uint32_t gridSize = (numPaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 

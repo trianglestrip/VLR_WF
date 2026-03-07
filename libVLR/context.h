@@ -170,6 +170,12 @@ private:
             cudaEvent_t endEvent;
             bool eventsCreated;
             
+            // CUDA Graphs（用于减少 kernel 启动开销）
+            cudaGraph_t renderGraph;
+            cudaGraphExec_t renderGraphExec;
+            bool graphCaptured;
+            bool useGraphExecution;
+            
             // CUB 临时存储（用于排序和压缩）
             cudau::Buffer<uint8_t>* cubTempStorage;
             size_t cubTempStorageBytes;
@@ -222,6 +228,10 @@ private:
                 , startEvent(nullptr)
                 , endEvent(nullptr)
                 , eventsCreated(false)
+                , renderGraph(nullptr)
+                , renderGraphExec(nullptr)
+                , graphCaptured(false)
+                , useGraphExecution(true)  // 默认启用 CUDA Graphs
                 , cubTempStorage(nullptr)
                 , cubTempStorageBytes(0)
                 , sortedPathIndices(nullptr)
