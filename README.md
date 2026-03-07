@@ -126,27 +126,31 @@ vlrDestroyContext(context);
 
 ### Configuration-Based Usage
 
+#### 方式1: 分离配置（推荐）
+
 ```cpp
 #include "config_loader.h"
 
 int main(int argc, char* argv[]) {
-    // 1. 加载配置文件
     vlr::RenderConfig config;
-    std::string configFile = (argc > 1) ? argv[1] : "render_config.ini";
     
-    if (!vlr::ConfigLoader::loadRenderConfig(configFile, config)) {
-        fprintf(stderr, "Failed to load config, using defaults\n");
+    if (argc >= 3) {
+        // 加载分离的配置：场景配置 + 性能配置
+        if (!vlr::ConfigLoader::loadSplitConfig(argv[1], argv[2], config)) {
+            fprintf(stderr, "Failed to load configs\n");
+            return 1;
+        }
+    } else {
+        // 使用默认配置
+        printf("Using default configuration\n");
     }
     
-    // 2. 打印配置摘要
     vlr::ConfigLoader::printConfigSummary(config);
     
-    // 3. 创建上下文并应用配置
     VLRContext ctx = nullptr;
     vlrCreateContext(nullptr, config.deviceID, &ctx);
     vlrSetPerformanceConfig(ctx, &config.perfConfig);
     
-    // 4. 渲染
     vlrRender(ctx, scene, config.width, config.height, 
               config.samples, VLRRenderer_WavefrontPathTracing);
     
@@ -157,17 +161,34 @@ int main(int argc, char* argv[]) {
 **使用预设配置**：
 
 ```bash
-# 快速预览
+# 快速预览（分离配置）
+.\cornell_box_improved_test.exe config_presets\preview_scene.ini config_presets\preview_performance.ini
+
+# 高质量渲染（分离配置）
+.\cornell_box_improved_test.exe config_presets\high_quality_scene.ini config_presets\high_quality_performance.ini
+
+# 性能测试（分离配置）
+.\cornell_box_improved_test.exe config_presets\benchmark_scene.ini config_presets\benchmark_performance.ini
+
+# 或使用合并配置（向后兼容）
 .\cornell_box_improved_test.exe config_presets\preview.ini
-
-# 高质量渲染
-.\cornell_box_improved_test.exe config_presets\high_quality.ini
-
-# 性能测试
-.\cornell_box_improved_test.exe config_presets\benchmark.ini
 ```
 
-📖 **详细配置指南**: [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md)
+#### 方式2: 只加载性能配置
+
+```cpp
+// 场景参数硬编码，只从文件加载性能配置
+vlr::RuntimePerformanceConfig perfConfig;
+vlr::ConfigLoader::loadPerformanceConfig("vlr_performance.ini", perfConfig);
+
+VLRContext ctx = nullptr;
+vlrCreateContext(nullptr, 0, &ctx);
+vlrSetPerformanceConfig(ctx, &perfConfig);
+```
+
+📖 **配置文档**: 
+- [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md) - 完整配置指南
+- [docs/CONFIG_USAGE_EXAMPLES.md](docs/CONFIG_USAGE_EXAMPLES.md) - 使用示例
 
 ---
 

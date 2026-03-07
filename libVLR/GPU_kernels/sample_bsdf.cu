@@ -17,6 +17,7 @@
 #include "../shared/geometry_common.h"
 #include "../shared/material_types.h"
 #include "../include/vlr/basic_types.h"
+#include "warp_utils.cuh"
 
 #include <cuda_runtime.h>
 #include <cmath>
@@ -52,8 +53,14 @@ extern "C" __global__ void sampleBSDF(
     WavefrontPathState* __restrict__ pathStatePtr = &wlp.pathStateBuffer[pathIndex];
     WavefrontPathState& pathState = *pathStatePtr;
 
+    // 优化：warp-level 早期退出
+    // 如果整个 warp 都不活跃，直接返回
+    bool isActive = pathState.isActive();
+    if (warpAllInactive(isActive))
+        return;
+    
     // 跳过非活跃路径
-    if (!pathState.isActive())
+    if (!isActive)
         return;
 
     const WavefrontHitInfo* __restrict__ hitInfoPtr = &wlp.hitInfoBuffer[pathIndex];

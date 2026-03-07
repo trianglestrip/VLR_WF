@@ -520,7 +520,7 @@ namespace WavefrontConfig {
     constexpr uint32_t WarpSize = 32;         // Warp 大小
     
     // 内存配置
-    constexpr bool UsePathSorting = true;     // 使用路径排序
+    constexpr bool UsePathSorting = false;     // 使用路径排序（暂时禁用，CUB 临时存储问题）
     constexpr bool UseMaterialQueues = true;  // 使用材质队列
     constexpr bool UseStreamCompaction = true; // 使用流压缩
     

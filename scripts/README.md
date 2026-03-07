@@ -6,6 +6,70 @@
 
 ## 📁 脚本列表
 
+### split_config.py - 配置拆分
+
+将合并的配置文件拆分为场景配置和性能配置。
+
+**功能**：
+- 自动识别场景和性能参数
+- 拆分为两个独立文件
+- 保留所有参数和注释
+
+**用法**：
+
+```bash
+# 拆分合并的配置
+python split_config.py render_config.ini scene.ini performance.ini
+
+# 拆分预设配置
+python split_config.py config_presets\benchmark.ini benchmark_scene.ini benchmark_perf.ini
+
+# 批量拆分
+for %f in (*.ini) do python split_config.py %f %~nf_scene.ini %~nf_perf.ini
+```
+
+**示例输出**：
+
+```
+==============================================================
+  VLR Wavefront 配置拆分工具
+==============================================================
+  输入: render_config.ini
+  场景配置: scene.ini
+  性能配置: performance.ini
+==============================================================
+
+✓ 场景配置已保存: scene.ini (15 个参数)
+✓ 性能配置已保存: performance.ini (32 个参数)
+
+==============================================================
+  拆分摘要
+==============================================================
+
+场景配置包含:
+  [Render]: 5 个参数
+  [Output]: 2 个参数
+  [Camera]: 8 个参数
+
+性能配置包含:
+  [Optimization]: 5 个参数
+  [KernelConfig]: 5 个参数
+  [EarlyTermination]: 3 个参数
+  [Memory]: 3 个参数
+  [Advanced]: 6 个参数
+  [Debug]: 4 个参数
+  [Device]: 2 个参数
+
+==============================================================
+  拆分完成 ✓
+==============================================================
+
+使用拆分后的配置:
+  .\cornell_box_improved_test.exe scene.ini performance.ini
+```
+
+---
+
 ### validate_config.py - 配置验证
 
 验证配置文件的有效性和合理性。

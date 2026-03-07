@@ -153,6 +153,12 @@ if(VLR_DEBUG_NAN_TRACKING)
     message(STATUS "[libVLR] VLR_DEBUG_NAN_TRACKING 已启用")
 endif()
 
+# 快速 RNG（cmake -DVLR_USE_FAST_RNG=ON）
+if(VLR_USE_FAST_RNG)
+    target_compile_definitions(VLR PRIVATE VLR_USE_FAST_RNG)
+    message(STATUS "[libVLR] VLR_USE_FAST_RNG 已启用（使用 xorshift RNG）")
+endif()
+
 # ----------------------------------------------------------------------------
 # PTX 输出：已通过 PTX_OUTPUT_DIR 直接输出到 bin/GPU_kernels/，无需复制
 # ----------------------------------------------------------------------------

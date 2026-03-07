@@ -182,6 +182,7 @@ public:
 /// 配置加载器
 class ConfigLoader {
 public:
+    /// 加载完整配置（单个文件，包含所有参数）
     static bool loadRenderConfig(const std::string& filename, RenderConfig& config) {
         INIParser parser;
         if (!parser.load(filename)) {
@@ -252,6 +253,144 @@ public:
         perf.enablePerfCounters = parser.getBool("Debug", "EnablePerfCounters", false);
         perf.printKernelTiming = parser.getBool("Debug", "PrintKernelTiming", false);
         perf.validateQueues = parser.getBool("Debug", "ValidateQueues", false);
+        
+        return true;
+    }
+    
+    /// 加载分离的配置文件（推荐方式）
+    /// @param sceneConfigFile 场景配置文件（Render, Output, Camera）
+    /// @param perfConfigFile 性能配置文件（Optimization, KernelConfig, EarlyTermination等）
+    static bool loadSplitConfig(const std::string& sceneConfigFile, 
+                                const std::string& perfConfigFile,
+                                RenderConfig& config) {
+        // 1. 加载场景配置
+        INIParser sceneParser;
+        if (!sceneParser.load(sceneConfigFile)) {
+            return false;
+        }
+        
+        // [Render]
+        config.width = sceneParser.getInt("Render", "Width", 512);
+        config.height = sceneParser.getInt("Render", "Height", 512);
+        config.samples = sceneParser.getInt("Render", "Samples", 64);
+        config.maxDepth = sceneParser.getInt("Render", "MaxDepth", 8);
+        config.exposure = sceneParser.getFloat("Render", "Exposure", 1.0f);
+        
+        // [Output]
+        config.outputFilename = sceneParser.getString("Output", "Filename", "output.png");
+        config.outputFormat = sceneParser.getString("Output", "Format", "png");
+        
+        // [Camera]
+        config.cameraPosX = sceneParser.getFloat("Camera", "PositionX", 0.0f);
+        config.cameraPosY = sceneParser.getFloat("Camera", "PositionY", 1.5f);
+        config.cameraPosZ = sceneParser.getFloat("Camera", "PositionZ", 6.0f);
+        config.cameraTargetX = sceneParser.getFloat("Camera", "TargetX", 0.0f);
+        config.cameraTargetY = sceneParser.getFloat("Camera", "TargetY", 1.5f);
+        config.cameraTargetZ = sceneParser.getFloat("Camera", "TargetZ", 0.0f);
+        config.cameraFOV = sceneParser.getFloat("Camera", "FOV", 40.0f);
+        config.lensRadius = sceneParser.getFloat("Camera", "LensRadius", 0.0f);
+        config.focusDistance = sceneParser.getFloat("Camera", "FocusDistance", 1.0f);
+        
+        // 2. 加载性能配置
+        INIParser perfParser;
+        if (!perfParser.load(perfConfigFile)) {
+            // 性能配置可选，使用默认值
+            printf("[Warning] Failed to load performance config: %s, using defaults\n", 
+                   perfConfigFile.c_str());
+            return true;  // 场景配置已加载，继续
+        }
+        
+        auto& perf = config.perfConfig;
+        
+        // [Optimization]
+        perf.syncInterval = perfParser.getInt("Optimization", "SyncInterval", 4);
+        perf.compressionThreshold = perfParser.getFloat("Optimization", "CompressionThreshold", 0.75f);
+        perf.minPathsForCompression = perfParser.getInt("Optimization", "MinPathsForCompression", 2048);
+        perf.enablePathSorting = perfParser.getBool("Optimization", "EnablePathSorting", true);
+        perf.enableStreamCompaction = perfParser.getBool("Optimization", "EnableStreamCompaction", true);
+        
+        // [KernelConfig]
+        perf.generateRaysBlockSize = perfParser.getInt("KernelConfig", "GenerateRaysBlockSize", 256);
+        perf.processHitsBlockSize = perfParser.getInt("KernelConfig", "ProcessHitsBlockSize", 128);
+        perf.sampleLightsBlockSize = perfParser.getInt("KernelConfig", "SampleLightsBlockSize", 256);
+        perf.sampleBSDFBlockSize = perfParser.getInt("KernelConfig", "SampleBSDFBlockSize", 192);
+        perf.accumulateBlockSize = perfParser.getInt("KernelConfig", "AccumulateBlockSize", 256);
+        
+        // [EarlyTermination]
+        perf.enableEarlyTermination = perfParser.getBool("EarlyTermination", "EnableEarlyTermination", true);
+        perf.earlyTerminationThreshold = perfParser.getFloat("EarlyTermination", "Threshold", 0.01f);
+        perf.earlyTerminationMinDepth = perfParser.getInt("EarlyTermination", "MinDepth", 10);
+        
+        // [Memory]
+        perf.useRestrictPointers = perfParser.getBool("Memory", "UseRestrictPointers", true);
+        perf.useMaterialCache = perfParser.getBool("Memory", "UseMaterialCache", false);
+        perf.useTextureMemory = perfParser.getBool("Memory", "UseTextureMemory", false);
+        
+        // [Advanced]
+        perf.useCudaGraphs = perfParser.getBool("Advanced", "UseCudaGraphs", false);
+        perf.useWarpOptimizations = perfParser.getBool("Advanced", "UseWarpOptimizations", true);
+        perf.usePrefetching = perfParser.getBool("Advanced", "UsePrefetching", false);
+        perf.useFusedKernels = perfParser.getBool("Advanced", "UseFusedKernels", true);
+        perf.useDynamicMaxDepth = perfParser.getBool("Advanced", "UseDynamicMaxDepth", false);
+        perf.useAdaptiveSampling = perfParser.getBool("Advanced", "UseAdaptiveSampling", false);
+        
+        // [Debug]
+        perf.enableNaNTracking = perfParser.getBool("Debug", "EnableNaNTracking", false);
+        perf.enablePerfCounters = perfParser.getBool("Debug", "EnablePerfCounters", false);
+        perf.printKernelTiming = perfParser.getBool("Debug", "PrintKernelTiming", false);
+        perf.validateQueues = perfParser.getBool("Debug", "ValidateQueues", false);
+        
+        // [Device]
+        config.deviceID = perfParser.getInt("Device", "DeviceID", 0);
+        config.verboseLogging = perfParser.getBool("Device", "VerboseLogging", true);
+        
+        return true;
+    }
+    
+    /// 只加载性能配置
+    static bool loadPerformanceConfig(const std::string& filename, RuntimePerformanceConfig& perfConfig) {
+        INIParser parser;
+        if (!parser.load(filename)) {
+            return false;
+        }
+        
+        // [Optimization]
+        perfConfig.syncInterval = parser.getInt("Optimization", "SyncInterval", 4);
+        perfConfig.compressionThreshold = parser.getFloat("Optimization", "CompressionThreshold", 0.75f);
+        perfConfig.minPathsForCompression = parser.getInt("Optimization", "MinPathsForCompression", 2048);
+        perfConfig.enablePathSorting = parser.getBool("Optimization", "EnablePathSorting", true);
+        perfConfig.enableStreamCompaction = parser.getBool("Optimization", "EnableStreamCompaction", true);
+        
+        // [KernelConfig]
+        perfConfig.generateRaysBlockSize = parser.getInt("KernelConfig", "GenerateRaysBlockSize", 256);
+        perfConfig.processHitsBlockSize = parser.getInt("KernelConfig", "ProcessHitsBlockSize", 128);
+        perfConfig.sampleLightsBlockSize = parser.getInt("KernelConfig", "SampleLightsBlockSize", 256);
+        perfConfig.sampleBSDFBlockSize = parser.getInt("KernelConfig", "SampleBSDFBlockSize", 192);
+        perfConfig.accumulateBlockSize = parser.getInt("KernelConfig", "AccumulateBlockSize", 256);
+        
+        // [EarlyTermination]
+        perfConfig.enableEarlyTermination = parser.getBool("EarlyTermination", "EnableEarlyTermination", true);
+        perfConfig.earlyTerminationThreshold = parser.getFloat("EarlyTermination", "Threshold", 0.01f);
+        perfConfig.earlyTerminationMinDepth = parser.getInt("EarlyTermination", "MinDepth", 10);
+        
+        // [Memory]
+        perfConfig.useRestrictPointers = parser.getBool("Memory", "UseRestrictPointers", true);
+        perfConfig.useMaterialCache = parser.getBool("Memory", "UseMaterialCache", false);
+        perfConfig.useTextureMemory = parser.getBool("Memory", "UseTextureMemory", false);
+        
+        // [Advanced]
+        perfConfig.useCudaGraphs = parser.getBool("Advanced", "UseCudaGraphs", false);
+        perfConfig.useWarpOptimizations = parser.getBool("Advanced", "UseWarpOptimizations", true);
+        perfConfig.usePrefetching = parser.getBool("Advanced", "UsePrefetching", false);
+        perfConfig.useFusedKernels = parser.getBool("Advanced", "UseFusedKernels", true);
+        perfConfig.useDynamicMaxDepth = parser.getBool("Advanced", "UseDynamicMaxDepth", false);
+        perfConfig.useAdaptiveSampling = parser.getBool("Advanced", "UseAdaptiveSampling", false);
+        
+        // [Debug]
+        perfConfig.enableNaNTracking = parser.getBool("Debug", "EnableNaNTracking", false);
+        perfConfig.enablePerfCounters = parser.getBool("Debug", "EnablePerfCounters", false);
+        perfConfig.printKernelTiming = parser.getBool("Debug", "PrintKernelTiming", false);
+        perfConfig.validateQueues = parser.getBool("Debug", "ValidateQueues", false);
         
         return true;
     }

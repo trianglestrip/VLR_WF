@@ -480,13 +480,14 @@ struct DirectionType {
 // 随机数生成器
 // ============================================================================
 
+// PCG32 RNG (默认，质量高)
 struct KernelRNG {
     uint64_t state;
     uint64_t inc;
-    
+
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     KernelRNG() : state(0x853c49e6748fea9bULL), inc(0xda3e39cb94b95bdbULL) {}
-    
+
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     uint32_t next() {
         uint64_t oldstate = state;
@@ -495,12 +496,45 @@ struct KernelRNG {
         uint32_t rot = oldstate >> 59u;
         return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
     }
-    
+
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     float getFloat0cTo1o() {
         return (next() >> 8) * 0x1.0p-24f;
     }
 };
+
+// Xorshift32 RNG (更快，质量略低但足够)
+struct XorshiftRNG {
+    uint32_t state;
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    XorshiftRNG() : state(2463534242u) {}
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    XorshiftRNG(uint32_t seed) : state(seed) {}
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    uint32_t next() {
+        uint32_t x = state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        state = x;
+        return x;
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    float getFloat0cTo1o() {
+        return (next() >> 8) * 0x1.0p-24f;
+    }
+};
+
+// 使用宏选择 RNG 类型
+#ifdef VLR_USE_FAST_RNG
+using FastRNG = XorshiftRNG;
+#else
+using FastRNG = KernelRNG;
+#endif
 
 static_assert(sizeof(KernelRNG) == 16, "KernelRNG must be 16 bytes");
 

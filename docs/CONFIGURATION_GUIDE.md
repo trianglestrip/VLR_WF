@@ -18,25 +18,57 @@
 
 VLR Wavefront支持通过INI配置文件进行灵活的参数调整，无需重新编译。
 
-### 配置文件位置
+### 配置文件类型
+
+#### 方式1: 分离配置（推荐）⭐
 
 ```
-bin/render_config.ini  - 主配置文件
+bin/scene_config.ini        - 场景配置（分辨率、相机、输出）
+bin/vlr_performance.ini     - 性能配置（优化参数、kernel配置）
+```
+
+**优点**：
+- 关注点分离
+- 复用性能配置
+- 便于团队协作
+
+**使用**：
+```bash
+.\test.exe scene_config.ini vlr_performance.ini
+```
+
+#### 方式2: 合并配置（向后兼容）
+
+```
+bin/render_config.ini       - 包含所有参数的单一配置文件
+```
+
+**使用**：
+```bash
+.\test.exe render_config.ini
 ```
 
 ### 配置文件结构
 
+#### 场景配置（scene_config.ini）
+
 ```ini
-[Render]          # 基本渲染参数
-[Output]          # 输出设置
-[Camera]          # 相机参数
-[Performance]     # 性能设置
-[Optimization]    # 优化参数 ⭐ 核心
-[KernelConfig]    # Kernel线程块配置 ⭐ 核心
+[Render]          # 图像分辨率、采样数、深度
+[Output]          # 输出文件名、格式
+[Camera]          # 相机位置、FOV、景深
+[Scene]           # 场景描述（可选）
+```
+
+#### 性能配置（vlr_performance.ini）
+
+```ini
+[Optimization]    # ⭐ 优化参数（同步、压缩、排序）
+[KernelConfig]    # ⭐ Kernel线程块配置
 [EarlyTermination] # 早期终止优化
 [Memory]          # 内存优化
 [Advanced]        # 高级优化（实验性）
 [Debug]           # 调试选项
+[Device]          # GPU设备配置
 ```
 
 ---
@@ -640,53 +672,54 @@ nsys profile -o timeline ./cornell_box_improved_test.exe
 
 ## 使用示例
 
-### 在测试程序中加载配置
+### 方式1: 使用分离配置（推荐）
 
 ```cpp
 #include "config_loader.h"
 
 int main(int argc, char* argv[]) {
-    // 1. 加载配置
     vlr::RenderConfig config;
-    std::string configFile = "render_config.ini";
     
-    if (argc > 1) {
-        configFile = argv[1];  // 支持命令行指定配置文件
-    }
-    
-    if (!vlr::ConfigLoader::loadRenderConfig(configFile, config)) {
-        fprintf(stderr, "[Error] Failed to load config: %s\n", configFile.c_str());
-        fprintf(stderr, "[Info] Using default configuration\n");
-        // 使用默认配置继续
+    if (argc >= 3) {
+        // 加载分离的配置文件
+        std::string sceneConfig = argv[1];
+        std::string perfConfig = argv[2];
+        
+        if (!vlr::ConfigLoader::loadSplitConfig(sceneConfig, perfConfig, config)) {
+            fprintf(stderr, "[Error] Failed to load configs\n");
+            return 1;
+        }
+        
+        printf("[Info] Scene config: %s\n", sceneConfig.c_str());
+        printf("[Info] Performance config: %s\n", perfConfig.c_str());
+        
+    } else if (argc == 2) {
+        // 向后兼容：加载合并的配置文件
+        if (!vlr::ConfigLoader::loadRenderConfig(argv[1], config)) {
+            fprintf(stderr, "[Error] Failed to load config\n");
+            return 1;
+        }
     } else {
-        printf("[Info] Loaded config from: %s\n", configFile.c_str());
+        // 使用默认配置
+        printf("[Info] Using default configuration\n");
     }
     
-    // 2. 打印配置摘要
+    // 打印配置摘要
     vlr::ConfigLoader::printConfigSummary(config);
     
-    // 3. 创建上下文并应用配置
+    // 创建上下文并应用配置
     VLRContext ctx = nullptr;
     vlrCreateContext(nullptr, config.deviceID, &ctx);
-    
-    // 4. 应用性能配置
     vlrSetPerformanceConfig(ctx, &config.perfConfig);
     
-    // 5. 创建场景
-    VLRScene scene = nullptr;
-    vlrCreateScene(ctx, &scene);
-    // ... 构建场景 ...
-    
-    // 6. 渲染
-    vlrRender(ctx, scene, 
-              config.width, config.height, 
-              config.samples, 
+    // 渲染
+    vlrRender(ctx, scene, config.width, config.height, config.samples, 
               VLRRenderer_WavefrontPathTracing);
     
-    // 7. 保存结果
+    // 保存结果
     vlrSaveImage(ctx, config.outputFilename.c_str());
     
-    // 8. 清理
+    // 清理
     vlrDestroyScene(scene);
     vlrDestroyContext(ctx);
     
@@ -694,20 +727,35 @@ int main(int argc, char* argv[]) {
 }
 ```
 
+### 方式2: 只加载性能配置
+
+```cpp
+// 场景参数硬编码，只从文件加载性能配置
+vlr::RuntimePerformanceConfig perfConfig;
+vlr::ConfigLoader::loadPerformanceConfig("vlr_performance.ini", perfConfig);
+
+VLRContext ctx = nullptr;
+vlrCreateContext(nullptr, 0, &ctx);
+vlrSetPerformanceConfig(ctx, &perfConfig);
+
+// 使用硬编码的场景参数
+vlrRender(ctx, scene, 512, 512, 64, VLRRenderer_WavefrontPathTracing);
+```
+
 ### 命令行使用
 
 ```bash
+# 使用分离配置（推荐）
+.\cornell_box_improved_test.exe scene_config.ini vlr_performance.ini
+
+# 使用预设的分离配置
+.\cornell_box_improved_test.exe config_presets\preview_scene.ini config_presets\preview_performance.ini
+
+# 使用合并配置（向后兼容）
+.\cornell_box_improved_test.exe render_config.ini
+
 # 使用默认配置
 .\cornell_box_improved_test.exe
-
-# 使用自定义配置
-.\cornell_box_improved_test.exe my_config.ini
-
-# 快速预览配置
-.\cornell_box_improved_test.exe preview.ini
-
-# 高质量渲染配置
-.\cornell_box_improved_test.exe high_quality.ini
 ```
 
 ---

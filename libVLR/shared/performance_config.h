@@ -40,6 +40,11 @@ struct PerformanceConfig {
     /// 推荐值：1024-4096
     static constexpr uint32_t MinPathsForCompression = 2048;
     
+    /// CUB 临时存储缓冲区扩展系数
+    /// 为 CUB 操作分配额外的临时存储空间，避免频繁 fallback
+    /// 推荐值：1.5-2.0（即增加 50-100%）
+    static constexpr float CubTempStorageMultiplier = 2.0f;
+    
     // ========================================================================
     // Kernel 启动配置
     // ========================================================================
@@ -80,7 +85,7 @@ struct PerformanceConfig {
     
     /// 是否使用 CUDA Graphs
     /// 注意：对于动态工作负载，效果可能有限
-    static constexpr bool UseCudaGraphs = false;  // 暂时禁用
+    static constexpr bool UseCudaGraphs = false;  // 暂时禁用，动态工作负载效果有限
     
     /// 是否使用 warp-level 操作优化
     static constexpr bool UseWarpOptimizations = true;

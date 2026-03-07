@@ -315,6 +315,17 @@ void Context::initializeWavefrontPipeline() {
                 optixGetErrorName(stackRes), stackRes);
     }
     
+    // 初始化 CUDA 事件
+    CUDA_CHECK(cudaEventCreate(&wf.startEvent));
+    CUDA_CHECK(cudaEventCreate(&wf.endEvent));
+    wf.eventsCreated = true;
+
+    // 初始化 CUDA Graphs 状态
+    wf.graphCaptured = false;
+    wf.useGraphExecution = shared::PerformanceConfig::UseCudaGraphs;
+    wf.renderGraph = nullptr;
+    wf.renderGraphExec = nullptr;
+
     wf.isInitialized = true;
     printf("[VLR] Pipeline initialization complete\n");
 }
@@ -671,7 +682,13 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
         }
         
         // 取最大值（两个操作不会同时使用临时存储）
-        wf.cubTempStorageBytes = std::max(sortBytes, compactBytes);
+        // 优化：增加额外的缓冲区以避免频繁的 fallback
+        wf.cubTempStorageBytes = static_cast<size_t>(
+            std::max(sortBytes, compactBytes) * shared::PerformanceConfig::CubTempStorageMultiplier);
+        
+        printf("[VLR] CUB temp storage allocated: %.2f KB (multiplier: %.1fx)\n", 
+               wf.cubTempStorageBytes / 1024.0f, 
+               shared::PerformanceConfig::CubTempStorageMultiplier);
         
         if (wf.cubTempStorageBytes > 0) {
             if (!wf.cubTempStorage) {
@@ -717,6 +734,13 @@ void Context::resizeWavefrontBuffers(uint32_t width, uint32_t height) {
     
     if (wf.currentWidth == width && wf.currentHeight == height) {
         return;  // 无需调整大小
+    }
+    
+    // 缓冲区大小改变，需要重新捕获 CUDA Graph
+    if (wf.graphCaptured) {
+        cudaGraphExecDestroy(wf.renderGraphExec);
+        cudaGraphDestroy(wf.renderGraph);
+        wf.graphCaptured = false;
     }
     
     allocateWavefrontBuffers(width, height);
@@ -1020,6 +1044,13 @@ void Context::cleanupWavefrontResources() {
         cudaEventDestroy(wf.endEvent);
         wf.eventsCreated = false;
     }
+
+    // 销毁 CUDA Graphs
+    if (wf.graphCaptured) {
+        cudaGraphExecDestroy(wf.renderGraphExec);
+        cudaGraphDestroy(wf.renderGraph);
+        wf.graphCaptured = false;
+    }
     
     // 释放 CUB 临时存储
     delete wf.cubTempStorage;
@@ -1306,6 +1337,15 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             // 注意：仅在深度>0时排序，因为深度0时materialCategory未初始化
             // 注意：临时存储大小需要与实际路径数匹配
             size_t requiredTempBytes = shared::sortPathsByMaterialTempStorageBytes(numNextPaths);
+            
+            // 调试：仅在第一次警告时打印详细信息
+            static bool firstWarning = true;
+            if (requiredTempBytes > wf.cubTempStorageBytes && firstWarning) {
+                fprintf(stderr, "[VLR] DEBUG: paths=%u, required=%zu bytes (%.2f KB), allocated=%zu bytes (%.2f KB)\n",
+                        numNextPaths, requiredTempBytes, requiredTempBytes/1024.0f, 
+                        wf.cubTempStorageBytes, wf.cubTempStorageBytes/1024.0f);
+                firstWarning = false;
+            }
             
             if (requiredTempBytes > wf.cubTempStorageBytes) {
                 fprintf(stderr, "[VLR] Warning: CUB temp storage insufficient (%zu > %zu), using simple swap\n",
