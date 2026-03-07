@@ -68,4 +68,25 @@ void launchAccumulateKernel(
     uint32_t numPaths,
     cudaStream_t stream);
 
+/// 初始化 RNG 缓冲区（每个像素一个独立的 RNG 状态）
+/// @param rngBuffer 设备端 RNG 缓冲区指针
+/// @param numPixels 像素数量
+/// @param baseSeed 基础种子（通常使用时间戳或帧数）
+/// @param stream CUDA 流
+void initializeRNGBuffer(
+    shared::KernelRNG* rngBuffer,
+    uint32_t numPixels,
+    uint64_t baseSeed,
+    cudaStream_t stream);
+
+#ifdef VLR_DEBUG_NAN_TRACKING
+extern __device__ __managed__ unsigned int g_vlrNanPrintCount;
+/// 重置 NaN 调试计数器（每帧开始时调用）
+void resetNanDebugCount();
+#endif
+
+// 通用调试计数器
+extern "C" __device__ __managed__ unsigned int g_vlrDebugPrintCount;
+extern "C" void resetDebugCount();
+
 }  // namespace vlr

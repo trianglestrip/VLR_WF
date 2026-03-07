@@ -59,11 +59,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
     
     *rayDirection = rayDir;
     
-    // 透视相机的方向 PDF：与 cos^4(theta) 相关（立体角到面积测度的雅可比）
+    // 透视相机的方向 PDF（与原始 VLR PerspectiveCameraIDF 一致）：
+    // dirPDF = imageSize.x * imageSize.y / (cos^3 * imgPlaneArea)
+    // 其中 imgPlaneArea = opWidth * opHeight，opHeight = 2*tan(fovY/2)，opWidth = aspect * opHeight
     // orientation.z 为相机前向
     float cosTheta = dot(rayDir, camera.orientation.z);
     if (cosTheta <= 0.0f) cosTheta = 1e-6f;
-    *dirPDF = 1.0f / (cosTheta * cosTheta * cosTheta * cosTheta);
+    float cos3 = cosTheta * cosTheta * cosTheta;
+    float imgPlaneArea = vw * vh;
+    *dirPDF = (static_cast<float>(imageWidth) * static_cast<float>(imageHeight)) / (cos3 * imgPlaneArea);
 }
 
 }  // anonymous namespace
@@ -131,20 +135,30 @@ extern "C" __global__ void generateRays(
         &rayOrigin, &rayDirection, &dirPDF);
     
     // ========================================================================
-    // 4. IDF 评估
+    // 4. IDF 评估与吞吐量计算
     // ========================================================================
-    // 透视/等距柱状相机的 IDF 重要性：传感器响应简化为 1
-    // 若有 progEvaluateIDF 可调用，此处为占位实现
+    // 针孔相机：重要性函数 We 与主光线 PDF 相互抵消，初始 throughput = 1
+    // 参考：https://agraphicsguynotes.com/posts/the_missing_primary_ray_pdf_in_path_tracing/
+    // 原公式 throughput = (We*cos)/(areaPDF*dirPDF*selectWLPDF) 中 dirPDF 过大导致全黑
     SampledSpectrum We = SampledSpectrum::One();
     
-    // 吞吐量 = We / (areaPDF * dirPDF)
-    // 针孔相机：areaPDF = 1（单点）；薄透镜：areaPDF = 1/(π*r²)（圆盘均匀采样）
     float areaPDF = 1.0f;
     if (camera.cameraType == CameraType_Perspective && camera.lensRadius > 0.0f) {
         float lensArea = VLR_M_PI * camera.lensRadius * camera.lensRadius;
         areaPDF = 1.0f / lensArea;
     }
-    SampledSpectrum throughput = We / (areaPDF * dirPDF);
+    
+    float cosTheta = dot(rayDirection, camera.orientation.z);
+    if (cosTheta <= 0.0f) cosTheta = 1e-6f;
+    
+    SampledSpectrum throughput;
+    if (camera.lensRadius <= 0.0f) {
+        // 针孔相机：PDF 项抵消，throughput = 1（物理正确，输出为 radiance）
+        throughput = SampledSpectrum::One();
+    } else {
+        // 景深相机：使用完整公式
+        throughput = (We * cosTheta) / (areaPDF * dirPDF * selectWLPDF);
+    }
     
     // ========================================================================
     // 5. 初始化 PathState 所有字段

@@ -25,6 +25,7 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <chrono>
 
 namespace vlr {
 
@@ -623,6 +624,11 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     }
     wf.rngBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
+    // 初始化 RNG 缓冲区（为每个像素生成唯一的随机种子）
+    // 使用当前时间戳作为基础种子，确保每次运行都不同
+    uint64_t baseSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    initializeRNGBuffer(wf.rngBuffer->getDevicePointer(), numPixels, baseSeed, m_stream);
+    
     // 分配降噪缓冲区（可选）
     if (!wf.accumAlbedoBuffer) {
         wf.accumAlbedoBuffer = new cudau::Buffer<shared::DiscretizedSpectrum>();
@@ -819,11 +825,11 @@ void Context::setupWavefrontLaunchParams() {
         lp.progEvaluateIDF = -1;
     }
     
-    // 设置图像参数
+    // 设置图像参数（与原始 VLR 一致：numAccumFrames 用于多采样正确平均）
     lp.imageSize = make_uint2(wf.currentWidth, wf.currentHeight);
     lp.imageStrideInPixels = wf.currentWidth;
-    lp.numAccumFrames = 0;
-    lp.limitNumAccumFrames = 0;
+    lp.numAccumFrames = wf.numAccumFrames;
+    lp.limitNumAccumFrames = 0;  // 0 = 无限制
     
     // 设置 Wavefront 配置
     lp.maxPathLength = wf.maxPathLength;
@@ -882,8 +888,9 @@ void Context::setupWavefrontLaunchParams() {
         cudaMemcpyHostToDevice
     ));
     
-    // 更新 Miss 记录（2 条）
+    // 更新 Miss 记录（2 条）- 必须使用与 createWavefrontSBT 相同的 16 字节对齐 stride
     size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
+    missRecordSize = (missRecordSize + 15) & ~15;
     CUDA_CHECK(cudaMemcpy(
         static_cast<char*>(wf.missRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
         &sbtData,
@@ -897,8 +904,9 @@ void Context::setupWavefrontLaunchParams() {
         cudaMemcpyHostToDevice
     ));
     
-    // 更新 HitGroup 记录（2 条）
+    // 更新 HitGroup 记录（2 条）- 必须使用与 createWavefrontSBT 相同的 16 字节对齐 stride
     size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
+    hitgroupRecordSize = (hitgroupRecordSize + 15) & ~15;
     CUDA_CHECK(cudaMemcpy(
         static_cast<char*>(wf.hitgroupRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
         &sbtData,
@@ -1100,6 +1108,13 @@ void Context::renderWavefront(
         resizeWavefrontBuffers(width, height);
     }
 
+    // 与原始 VLR 一致：新渲染开始时清除累加缓冲区和帧计数
+    wf.numAccumFrames = 0;
+    if (wf.accumBuffer && wf.accumBuffer->size() > 0) {
+        wf.accumBuffer->clear(m_stream);
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+    }
+
     // 设置启动参数
     printf("[VLR] Setting launch parameters...\n");
     fflush(stdout);
@@ -1111,6 +1126,8 @@ void Context::renderWavefront(
     for (uint32_t sample = 0; sample < numSamples; ++sample) {
         printf("[VLR] Sample %u/%u\n", sample + 1, numSamples);
         fflush(stdout);
+        // 与原始 VLR 一致：在渲染前递增累加帧计数，供 accumulate 内核正确平均
+        ++wf.numAccumFrames;
         executeWavefrontRender(1);
     }
     
@@ -1130,7 +1147,11 @@ void Context::renderWavefront(
 
 void Context::executeWavefrontRender(uint32_t numSamples) {
     auto& wf = m_optix.wavefrontPathTracing;
-    
+
+#ifdef VLR_DEBUG_NAN_TRACKING
+    resetNanDebugCount();
+#endif
+
     uint32_t numPixels = wf.currentWidth * wf.currentHeight;
     
     // 重置队列
@@ -1152,6 +1173,17 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
     
     // 阶段 1: 生成初始光线
     launchGenerateRays(numPixels);
+    
+    // 与原始 VLR 一致：在主机端可靠设置活跃队列计数，避免 GPU 内核竞态
+    if (wf.queueCounters) {
+        CUDA_CHECK(cudaMemcpyAsync(
+            wf.queueCounters->getDevicePointerAt(0),
+            &numPixels,
+            sizeof(uint32_t),
+            cudaMemcpyHostToDevice,
+            m_stream
+        ));
+    }
     
         // 主 Wavefront 循环
         for (uint32_t depth = 0; depth < wf.maxPathLength; ++depth) {

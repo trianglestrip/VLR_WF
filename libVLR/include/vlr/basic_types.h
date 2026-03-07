@@ -46,6 +46,27 @@ namespace vlr {
 #define VLR_M_INV_2PI 0.15915494309189533577f
 #endif
 
+/// sincos：CUDA 设备端使用 sincosf，主机端使用 std::sin/cos
+/// 与原始 VLR common.h 保持一致，确保跨平台编译
+template <typename T>
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+void sincos(T angle, T* s, T* c) {
+    *s = std::sin(angle);
+    *c = std::cos(angle);
+}
+#if defined(__CUDACC__)
+template <>
+CUDA_DEVICE_FUNCTION CUDA_INLINE
+void sincos(float angle, float* s, float* c) {
+#ifdef __CUDA_ARCH__
+    ::sincosf(angle, s, c);
+#else
+    *s = std::sin(angle);
+    *c = std::cos(angle);
+#endif
+}
+#endif
+
 /// 设备端安全的 max/min（替代 std::max/min，避免 CUDA 设备代码中的链接问题）
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 float vlr_max(float a, float b) {
@@ -188,7 +209,19 @@ float length(const Vector3D& v) {
 
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 Vector3D normalize(const Vector3D& v) {
-    return v / length(v);
+    float len = length(v);
+    if (len < 1e-10f)
+        return Vector3D(0.0f, 0.0f, 1.0f);  // 零向量时返回默认，避免 NaN/Inf
+    return v / len;
+}
+
+/// 安全归一化：当向量长度过小时返回默认方向，避免产生 NaN/Inf
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+Vector3D safeNormalize(const Vector3D& v, const Vector3D& fallback = Vector3D(0.0f, 0.0f, 1.0f)) {
+    float len = length(v);
+    if (len < 1e-10f)
+        return fallback;
+    return v / len;
 }
 
 
@@ -552,6 +585,7 @@ struct GeometryInstance {
     union {
         struct {
             const Triangle* triangleBuffer;
+            uint32_t numTriangles;  ///< 三角形数量（用于区域光多三角形采样）
         } asTriMesh;
         
         struct {

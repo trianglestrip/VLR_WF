@@ -200,7 +200,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getGGXParams(
     *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;  // 避免除零
 }
 
-/// 从材质描述符获取镜面反射率
+/// 从材质描述符获取镜面反射率（简单镜面，无 Fresnel）
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getSpecularReflectance(
     const SurfaceMaterialDescriptor& matDesc,
     SampledSpectrum* reflectance) {
@@ -212,6 +212,34 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getSpecularReflectance(
     reflectance->values[1] = g;
     reflectance->values[2] = b;
     reflectance->values[3] = (r + g + b) / 3.0f;
+}
+
+/// 从材质描述符获取镜面导体参数（coeffR, eta, k）
+/// 与原始 VLR SpecularReflectionSurfaceMaterial 一致：coeff * FresnelConductor(eta, k)
+/// 当 eta、k 未设置（全为 0）时，使用完美镜面 F=1
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getSpecularConductorParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* coeffR,
+    SampledSpectrum* eta,
+    SampledSpectrum* kappa) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float cr = d[MaterialDataLayout::AlbedoR];
+    float cg = d[MaterialDataLayout::AlbedoG];
+    float cb = d[MaterialDataLayout::AlbedoB];
+    coeffR->values[0] = cr;
+    coeffR->values[1] = cg;
+    coeffR->values[2] = cb;
+    coeffR->values[3] = (cr + cg + cb) / 3.0f;
+    float er = d[MaterialDataLayout::EtaR];
+    float eg = d[MaterialDataLayout::EtaG];
+    float eb = d[MaterialDataLayout::EtaB];
+    float kr = d[MaterialDataLayout::KappaR];
+    float kg = d[MaterialDataLayout::KappaG];
+    float kb = d[MaterialDataLayout::KappaB];
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        eta->values[i] = (er + eg + eb) / 3.0f;
+        kappa->values[i] = (kr + kg + kb) / 3.0f;
+    }
 }
 
 /// 从材质描述符获取透射材质参数（IOR + 色散）
@@ -463,10 +491,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType 
     }
 }
 
-/// 检查 BSDF 类型是否为色散材质（透射且与波长相关）
-/// 色散材质需在首次采样后选择单一波长
-CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDispersiveBSDFType(BSDFType type) {
-    return type == BSDFType_SpecularTransmission || type == BSDFType_GGXTransmission;
+/// 检查 BSDF 类型是否为色散材质（透射且 dispersionStrength > 0）
+/// 仅当材质实际启用色散时才返回 true，否则会错误触发单波长选择导致 pdf 除以 4、throughput 爆炸
+CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDispersiveBSDFType(
+    BSDFType type,
+    const SurfaceMaterialDescriptor& matDesc) {
+    if (type != BSDFType_SpecularTransmission && type != BSDFType_GGXTransmission)
+        return false;
+    float ior, dispersionStrength;
+    getTransmissionParams(matDesc, &ior, &dispersionStrength);
+    return dispersionStrength > 0.0f;
 }
 
 /// 色散材质单波长选择逻辑：根据随机数或当前索引选择单一波长

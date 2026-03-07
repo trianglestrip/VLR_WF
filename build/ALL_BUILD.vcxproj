@@ -183,26 +183,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{A472DDEF-7C59-31A2-B897-378FBF797B9B}</Project>
       <Name>cornell_box_improved_test</Name>
     </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\cornell_box_test.vcxproj">
-      <Project>{217B6C2D-4424-3474-8322-B503D6EB0598}</Project>
-      <Name>cornell_box_test</Name>
-    </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\glass_spheres_test.vcxproj">
-      <Project>{24B55116-34BA-3EE7-BE3F-16A37E86ABF4}</Project>
-      <Name>glass_spheres_test</Name>
-    </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\multi_material_test.vcxproj">
-      <Project>{480DD8B3-6413-38C1-8BEF-31EF75AFA625}</Project>
-      <Name>multi_material_test</Name>
-    </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\optix_minimal_test.vcxproj">
-      <Project>{6333B3C5-8B68-373A-8519-0513964273B6}</Project>
-      <Name>optix_minimal_test</Name>
-    </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\simple_render_test.vcxproj">
-      <Project>{60F84C37-2E0B-3DEA-B1AC-0D04F903C8F7}</Project>
-      <Name>simple_render_test</Name>
-    </ProjectReference>
     <ProjectReference Include="F:\project\VLR_WF\build\libVLR\trace_rays_ptx.vcxproj">
       <Project>{6F5C7D06-6FDE-333A-800D-7387949D4F41}</Project>
       <Name>trace_rays_ptx</Name>

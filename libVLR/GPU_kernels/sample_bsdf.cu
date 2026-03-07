@@ -12,6 +12,7 @@
 
 #include "../shared/kernel_common.h"
 #include "../shared/path_types.h"
+#include "kernel_launch.h"
 #include "../shared/bsdf_common.h"
 #include "../shared/geometry_common.h"
 #include "../shared/material_types.h"
@@ -83,38 +84,67 @@ extern "C" __global__ void sampleBSDF(
     BSDFSampleResult result;
     sampleBSDFWithU2(bsdfCtx, dirInLocal, u0, u1, u2, &result);
 
-    // 检查采样结果是否有效
-    if (!result.isValid() || result.pdf <= 0.0f) {
+    // 与原始 VLR path_tracing.cu:243 完全一致：
+    // if (fs == SampledSpectrum::Zero() || fsResult.dirPDF == 0.0f) return;
+    // 仅检查 dirPDF == 0.0f，不使用 1e-10 等过严阈值，否则会错误终止有效路径
+#ifdef __CUDACC__
+    bool pdfInvalid = (result.pdf <= 0.0f || __isnanf(result.pdf) || __isinf(result.pdf));
+#else
+    bool pdfInvalid = (result.pdf <= 0.0f || !std::isfinite(result.pdf));
+#endif
+    if (result.f == SampledSpectrum::Zero() || pdfInvalid) {
         pathState.setTerminated();
         return;
     }
 
-    if (!result.f.hasNonZero()) {
+    // BSDF 值必须有限，避免 NaN/Inf 污染 throughput（原始 VLR 无此检查，作为额外防护）
+    if (!result.f.allFinite()) {
         pathState.setTerminated();
         return;
     }
 
     // ========================================================================
-    // 3. 处理色散材质
+    // 3. 处理色散材质（仅当 dispersionStrength > 0 时）
     // ========================================================================
-    // 色散材质（如玻璃透射）需在首次采样后选择单一波长，
-    // 并相应调整 PDF（除以光谱分量数）
-    if (isDispersiveBSDFType(result.sampledBSDFType) && !pathState.singleWlSelected()) {
+    // 与 libWR 对比：libWR 无光谱色散，玻璃使用 RGB 直接计算。
+    // isDispersiveBSDFType 内部已检查 dispersionStrength，仅实际启用色散时返回 true。
+    bool isDispersive = isDispersiveBSDFType(result.sampledBSDFType, matDesc);
+    
+    if (isDispersive && !pathState.singleWlSelected()) {
         result.pdf /= NumSpectralSamples;
         pathState.setSingleWlSelected();
     }
 
     // ========================================================================
-    // 4. 更新路径吞吐量：throughput *= fs / pdf
+    // 4. 更新路径吞吐量：throughput *= fs * |cos| / pdf
     // ========================================================================
-    // 渲染方程中的 cos 项：|cos(theta_out)|
+    // 与原始 VLR path_tracing.cu 完全一致：alpha *= fs * (|cosFactor| / dirPDF)
+    // 注意：禁止对 pdf 做 clamp，否则小 pdf 时 throughput 会爆炸产生洋红色
     float cosFactor = dot(result.dirLocal, geomNormalLocal);
-
-    // 避免除零与无效值
-    float pdfSafe = (result.pdf > 1e-8f) ? result.pdf : 1e-8f;
     float cosAbs = std::abs(cosFactor);
 
-    pathState.throughput *= result.f * (cosAbs / pdfSafe);
+    pathState.throughput *= result.f * (cosAbs / result.pdf);
+
+    // 与 libWR 一致：SpecularTransmission 折射时应用 adjoint BSDF 校正
+    // （Veach 5.3：当 shading normal != geometric normal 时，cosGeometric/cosShading）
+    if (result.sampledBSDFType == BSDFType_SpecularTransmission) {
+        float cosShading = std::abs(result.dirLocal.z);  // shading normal = (0,0,1) in local frame
+        float cosGeometric = std::abs(dot(result.dirLocal, geomNormalLocal));
+        if (cosShading >= 1e-6f && cosGeometric >= 1e-6f) {
+            float correction = cosGeometric / cosShading;
+            pathState.throughput *= SampledSpectrum(correction);
+        }
+    }
+
+#ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
+    // 调试：在指定像素处打印 SpecularTransmission 关键值（cmake -DVLR_DEBUG_SPECULAR_TRANSMISSION=ON）
+    if (getBSDFType(matDesc) == BSDFType_SpecularTransmission &&
+        pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 1) {
+        printf("[SpecTrans] px=(256,256) len=1 pdf=%.6f f=(%.4f,%.4f,%.4f) cosAbs=%.4f throughput=(%.4f,%.4f,%.4f)\n",
+               result.pdf, result.f.values[0], result.f.values[1], result.f.values[2],
+               cosAbs, pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
+    }
+#endif
 
     // 检查吞吐量有效性
     bool throughputValid = true;
@@ -127,6 +157,16 @@ extern "C" __global__ void sampleBSDF(
 #endif
     }
     if (!throughputValid) {
+#ifdef VLR_DEBUG_NAN_TRACKING
+        {
+            unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
+            if (idx < 5) {
+                printf("[NaN] sample_bsdf: px=(%u,%u) pathLen=%u throughput=(%.4f,%.4f,%.4f) op=throughput*=f*cos/pdf\n",
+                       pathState.pixelX, pathState.pixelY, pathState.pathLength,
+                       pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
+            }
+        }
+#endif
         pathState.setTerminated();
         return;
     }

@@ -190,6 +190,17 @@ uint32_t Scene::createMaterial(
     mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&emissionR);
     mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&emissionG);
     mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&emissionB);
+    // Specular 材质：与原始 VLR SpecularReflectionSurfaceMaterial 一致，默认 eta=1, k=0
+    if (bsdfType == static_cast<uint32_t>(BSDFType_Specular)) {
+        float one = 1.0f;
+        float zero = 0.0f;
+        mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&one);
+        mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&one);
+        mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&one);
+        mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&zero);
+        mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&zero);
+        mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&zero);
+    }
     m_materials.push_back(mat);
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
@@ -216,6 +227,16 @@ uint32_t Scene::createMaterialEx(
     mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&emissionR);
     mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&emissionG);
     mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&emissionB);
+    if (bsdfType == static_cast<uint32_t>(BSDFType_Specular)) {
+        float one = 1.0f;
+        float zero = 0.0f;
+        mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&one);
+        mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&one);
+        mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&one);
+        mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&zero);
+        mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&zero);
+        mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&zero);
+    }
     m_materials.push_back(mat);
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
@@ -318,6 +339,9 @@ void Scene::setInstanceTransform(uint32_t instanceId, const InstanceTransform& t
     if (instanceId >= m_instances.size()) return;
     m_instances[instanceId].transform = transformToReferenceFrame(transform);
     m_instances[instanceId].rotationPhi = transform.rotationRadians;
+    // 原始 VLR：IAS 构建使用 InstanceRecord.transform，必须同步更新
+    if (instanceId < m_instanceRecords.size())
+        m_instanceRecords[instanceId].transform = transform;
 }
 
 // ============================================================================
@@ -333,6 +357,9 @@ void Scene::addPointLight(const PointLightParams& params) {
 }
 
 void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
+    // 原始 VLR：环境光使用独立的 m_envInst 实例槽位（InfiniteSphereSurfaceNode）
+    // VLR_WF 简化实现：暂无 InfiniteSphere 环境实例，useConstant 时 envLightInstIndex 语义受限
+    // 待完善：添加专用环境实例后，应使 envLightInstIndex 指向该实例，并将该实例加入 lightInstIndices 首位
     if (params.useConstant)
         m_envLightInstIndex = 0;
     else
@@ -563,8 +590,13 @@ void Scene::updateToGPU() {
     m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTriangles.size());
     m_triangleBuffer->copyToDevice(allTriangles.data(), allTriangles.size(), m_stream);
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
-        uint32_t offset = geomInstTriangleOffsets[(std::min)(g, geomInstTriangleOffsets.size() - 1)];
+        // 每个 geometry instance 对应一个 instance，需用 meshId 查找该 mesh 的三角形偏移
+        // 原始 VLR：每个几何实例绑定到具体 mesh，triangleBuffer 必须指向正确 mesh 的三角形数据
+        uint32_t meshId = (g < m_instanceRecords.size()) ? m_instanceRecords[g].meshId : 0;
+        uint32_t offset = geomInstTriangleOffsets[(std::min)(meshId, static_cast<uint32_t>(geomInstTriangleOffsets.size() - 1))];
         m_geometryInstances[g].asTriMesh.triangleBuffer = m_triangleBuffer->getDevicePointer() + offset;
+        m_geometryInstances[g].asTriMesh.numTriangles = (meshId < m_meshes.size())
+            ? static_cast<uint32_t>(m_meshes[meshId].triangles.size()) : 0;
     }
     size_t totalGeomIndices = 0;
     for (const auto& rec : m_instanceRecords) totalGeomIndices += rec.geomInstIndices.size();

@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
     uint32_t width = 512;
     uint32_t height = 512;
     uint32_t numSamples = 1024;
-    const char* outputFile = "bin/cornell_box_improved.png";
+    const char* outputFile = "cornell_box_improved.png";
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
@@ -444,7 +444,7 @@ int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    savePNG(outputFile, width, height, outputBuffer, numSamples, 1.0f);  // 完全对标 VLR (brightnessCoeff = 1.0)
+    savePNG(outputFile, width, height, outputBuffer, numSamples, 0.5f);  // 降低曝光测试洋红色是否为过曝
     free(outputBuffer);
 
     printf("=== Test complete ===\n");

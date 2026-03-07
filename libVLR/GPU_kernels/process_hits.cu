@@ -11,6 +11,7 @@
 
 #include "../shared/path_types.h"
 #include "../shared/geometry_common.h"
+#include "kernel_launch.h"
 #include "../shared/geometry_types.h"
 #include "../shared/bsdf_common.h"
 #include "../shared/material_types.h"
@@ -51,6 +52,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeImplicitLightMISWeight(
     float cosTerm = std::abs(cosOutLocal);
     if (cosTerm < 1e-6f) return 1.0f;
     float pdfLight = hypAreaPDF / cosTerm;
+    if (pdfLight <= 0.0f || pdfLight >= 1e30f) return 1.0f;
 
     return powerHeuristicMIS(pdfBSDF, pdfLight);
 }
@@ -118,13 +120,26 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
         float bsdfPDF = pathState.prevDirPDF;
         float sinTheta = std::sin(theta);
         float sinThetaSafe = (sinTheta > 1e-6f) ? sinTheta : 1e-6f;
+        float cosOutSafe = (std::abs(dirOutLocal.z) > 1e-6f) ? std::abs(dirOutLocal.z) : 1e-6f;
         float envAreaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
-        float lightPDF = envAreaPDF / std::abs(dirOutLocal.z);
-        if (lightPDF > 0.0f)
+        float lightPDF = envAreaPDF / cosOutSafe;
+        if (lightPDF > 0.0f && lightPDF < 1e30f)
             MISWeight = powerHeuristicMIS(bsdfPDF, lightPDF);
     }
 
-    pathState.contribution += pathState.throughput * Le * MISWeight;
+    SampledSpectrum envContrib = pathState.throughput * Le * MISWeight;
+    if (envContrib.allFinite())
+        pathState.contribution += envContrib;
+#ifdef VLR_DEBUG_NAN_TRACKING
+    else {
+        unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
+        if (idx < 5) {
+            printf("[NaN] process_hits(env): px=(%u,%u) pathLen=%u envContrib=(%.4f,%.4f,%.4f) op=throughput*Le*MIS\n",
+                   pathState.pixelX, pathState.pixelY, pathState.pathLength,
+                   envContrib.values[0], envContrib.values[1], envContrib.values[2]);
+        }
+    }
+#endif
 }
 
 
@@ -157,7 +172,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     float MISWeight = computeImplicitLightMISWeight(pathState, hypAreaPDF, dirOutLocal.z);
 
     SampledSpectrum emissiveContrib = pathState.throughput * Le * MISWeight;
-    pathState.contribution += emissiveContrib;
+    if (emissiveContrib.allFinite())
+        pathState.contribution += emissiveContrib;
+#ifdef VLR_DEBUG_NAN_TRACKING
+    else {
+        unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
+        if (idx < 5) {
+            printf("[NaN] process_hits(emissive): px=(%u,%u) pathLen=%u emissiveContrib=(%.4f,%.4f,%.4f) op=throughput*Le*MIS\n",
+                   pathState.pixelX, pathState.pixelY, pathState.pathLength,
+                   emissiveContrib.values[0], emissiveContrib.values[1], emissiveContrib.values[2]);
+        }
+    }
+#endif
     pathState.setHitEmissive();
 }
 
@@ -248,7 +274,6 @@ extern "C" __global__ void processHits(
     } else {
         // 无顶点数据时：使用简化几何信息
         const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
-        const Instance& inst = wlp.instBuffer[hitInfo.instIndex];
 
         if (geomInst.geomType == GeometryType_TriangleMesh &&
             geomInst.asTriMesh.triangleBuffer != nullptr) {
@@ -256,14 +281,26 @@ extern "C" __global__ void processHits(
             const Triangle& tri = geomInst.asTriMesh.triangleBuffer[hitInfo.primIndex];
             hypAreaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
 
-            // 无法插值顶点属性时，使用三角形质心（需顶点位置，此处占位）
-            surfPt.position = Point3D(0, 0, 0);  // 占位，需从顶点插值
+            // 无法插值顶点属性时，使用光线参数计算交点：origin + direction * t
+            // 与原始 VLR 的射线-三角形求交逻辑一致
+            surfPt.position = Point3D(
+                pathState.origin.x + pathState.direction.x * hitInfo.t,
+                pathState.origin.y + pathState.direction.y * hitInfo.t,
+                pathState.origin.z + pathState.direction.z * hitInfo.t);
             surfPt.geometricNormal = Normal3D(0, 1, 0);
             surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
             surfPt.texCoord = TexCoord2D(hitInfo.u, hitInfo.v);
             surfPt.atInfinity = false;
         } else {
             hypAreaPDF = 1.0f;
+            // 非三角形网格：仍用光线参数计算交点
+            surfPt.position = Point3D(
+                pathState.origin.x + pathState.direction.x * hitInfo.t,
+                pathState.origin.y + pathState.direction.y * hitInfo.t,
+                pathState.origin.z + pathState.direction.z * hitInfo.t);
+            surfPt.geometricNormal = Normal3D(0, 1, 0);
+            surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
+            surfPt.texCoord = TexCoord2D(hitInfo.u, hitInfo.v);
             surfPt.atInfinity = false;
         }
     }

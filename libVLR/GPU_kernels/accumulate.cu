@@ -14,6 +14,7 @@
 #include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
 #include "../shared/kernel_common.h"
+#include "kernel_launch.h"
 
 #include <cuda_runtime.h>
 #include <cmath>
@@ -51,6 +52,16 @@ extern "C" __global__ void accumulateResults(
     // ========================================================================
     // 若贡献值含 NaN/Inf，则跳过累积，避免污染输出
     if (!pathState.contribution.allFinite()) {
+#ifdef VLR_DEBUG_NAN_TRACKING
+        {
+            unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
+            if (idx < 5) {
+                printf("[NaN] accumulate(pre): px=(%u,%u) pathLen=%u contribution=(%.4f,%.4f,%.4f) skipped\n",
+                       pathState.pixelX, pathState.pixelY, pathState.pathLength,
+                       pathState.contribution.values[0], pathState.contribution.values[1], pathState.contribution.values[2]);
+            }
+        }
+#endif
         return;
     }
 
@@ -65,20 +76,49 @@ extern "C" __global__ void accumulateResults(
     if (accum == nullptr)
         return;
 
-    // 首帧时重置累积缓冲区（由主机在 numAccumFrames == 1 时设定）
+    // 首帧时重置累积缓冲区（与原始 VLR path_tracing.cu 一致）
     if (wlp.numAccumFrames == 1) {
         accum[pixelIdx].r = 0.0f;
         accum[pixelIdx].g = 0.0f;
         accum[pixelIdx].b = 0.0f;
     }
 
-    // 将光谱贡献转换为 RGB 并累加
-    if (pathState.contribution.hasNonZero()) {
-        DiscretizedSpectrum contrib = pathState.contribution.toDiscretizedSpectrum(pathState.wls);
-        atomicAdd(&accum[pixelIdx].r, contrib.r);
-        atomicAdd(&accum[pixelIdx].g, contrib.g);
-        atomicAdd(&accum[pixelIdx].b, contrib.b);
+    // 将光谱贡献转换为 RGB 并累加（与原始 VLR 一致：始终 add，无 hasNonZero 条件）
+    // Wavefront 架构下每像素对应一条路径，无并发写，使用直接加法即可
+    DiscretizedSpectrum contrib = pathState.contribution.toDiscretizedSpectrum(pathState.wls);
+    accum[pixelIdx].r += contrib.r;
+    accum[pixelIdx].g += contrib.g;
+    accum[pixelIdx].b += contrib.b;
+
+    // 若累加结果含 NaN/Inf（理论上不应发生，因 contribution 已通过 allFinite 检查），
+    // 重置为 0 避免显示洋红色/黑色异常
+#ifdef __CUDACC__
+    bool hadNaN = __isnanf(accum[pixelIdx].r) || __isinf(accum[pixelIdx].r) ||
+                  __isnanf(accum[pixelIdx].g) || __isinf(accum[pixelIdx].g) ||
+                  __isnanf(accum[pixelIdx].b) || __isinf(accum[pixelIdx].b);
+    if (hadNaN) {
+#ifdef VLR_DEBUG_NAN_TRACKING
+        {
+            unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
+            if (idx < 5) {
+                printf("[NaN] accumulate(post): px=(%u,%u) accum=(%.4f,%.4f,%.4f) after add, reset to 0\n",
+                       pathState.pixelX, pathState.pixelY,
+                       accum[pixelIdx].r, accum[pixelIdx].g, accum[pixelIdx].b);
+            }
+        }
+#endif
+        accum[pixelIdx].r = 0.0f;
+        accum[pixelIdx].g = 0.0f;
+        accum[pixelIdx].b = 0.0f;
     }
+#else
+    if (!std::isfinite(accum[pixelIdx].r))
+        accum[pixelIdx].r = 0.0f;
+    if (!std::isfinite(accum[pixelIdx].g))
+        accum[pixelIdx].g = 0.0f;
+    if (!std::isfinite(accum[pixelIdx].b))
+        accum[pixelIdx].b = 0.0f;
+#endif
 
     // ========================================================================
     // 3. 更新 RNG 状态到 rngBuffer

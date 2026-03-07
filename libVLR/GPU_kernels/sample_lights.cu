@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include "../shared/kernel_common.h"
+#include "kernel_launch.h"
 #include "../shared/path_types.h"
 #include "../shared/render_common.h"
 #include "../shared/light_common.h"
@@ -118,8 +119,9 @@ extern "C" __global__ void sampleLights(
     // ========================================================================
     float u0 = pathState.rng.getFloat0cTo1o();
     float u1 = pathState.rng.getFloat0cTo1o();
+    float u2 = pathState.rng.getFloat0cTo1o();
     LightSampleResult sampleResult;
-    if (!sampleLight(selectResult.descriptor, surfPt.position, u0, u1, &sampleResult, wlp))
+    if (!sampleLight(selectResult.descriptor, surfPt.position, u0, u1, u2, &sampleResult, wlp))
         return;
 
     sampleResult.lightSelectProb = selectResult.selectProb;
@@ -167,27 +169,33 @@ extern "C" __global__ void sampleLights(
 
     // ========================================================================
     // 6. 光源 PDF 与 BSDF PDF（用于 MIS）
+    // 与原始 VLR path_tracing.cu 一致：使用面积 PDF
     // ========================================================================
-    float lightSolidAnglePDF = computeLightPDF(
-        selectResult.descriptor,
-        sampleResult.lightSurfPt,
-        surfPt.position,
-        dirToLight,
-        sampleResult.lightSelectProb,
-        sampleResult.areaPDF,
-        wlp);
+    // 光源面积 PDF = 选择概率 * 位置面积 PDF（原始 VLR: lightPDF = lightProb * lpResult.areaPDF）
+    float lightAreaPDF = sampleResult.lightSelectProb * sampleResult.areaPDF;
 
-    float bsdfPDF = getBSDFPDF(bsdfCtx, dirInLocal, dirOutLocal);
+    // BSDF 方向 PDF 需转换为面积 PDF 空间以与 lightAreaPDF 做 MIS
+    // 原始 VLR: bsdfPDF = bsdf.evaluatePDF() * cosLight * recSquaredDistance
+    float cosLight = absDot(-dirToLight, sampleResult.lightSurfPt.geometricNormal);
+    float squaredDistance = distance * distance;
+    float recSquaredDistance = (squaredDistance > 1e-12f) ? (1.0f / squaredDistance) : 0.0f;
+    float bsdfDirPDF = getBSDFPDF(bsdfCtx, dirInLocal, dirOutLocal);
+    float bsdfAreaPDF = bsdfDirPDF * cosLight * recSquaredDistance;
 
     // ========================================================================
     // 7. MIS 权重（Power Heuristic）
+    // 原始 VLR: MISWeight = (lightPDF^2) / (lightPDF^2 + bsdfPDF^2)
+    // 当光源为 delta 或 lightPDF 无穷大时，MISWeight = 1
     // ========================================================================
-    float MISWeight = computeMISWeight(lightSolidAnglePDF, bsdfPDF);
+    float MISWeight = 1.0f;
+    bool lightPDFInf = (lightAreaPDF != lightAreaPDF) || (lightAreaPDF >= 1e30f);
+    if (!selectResult.descriptor.isDelta() && !lightPDFInf && lightAreaPDF > 1e-10f)
+        MISWeight = computeMISWeight(lightAreaPDF, bsdfAreaPDF);
 
     // ========================================================================
     // 8. 几何项 G = cos(theta_shading) * cos(theta_light) / distance^2
+    // 原始 VLR: G = fractionalVisibility * absDot(...) * cosLight * recSquaredDistance
     // ========================================================================
-    float squaredDistance = distance * distance;
     float G = computeGeometryTerm(surfPt, sampleResult.lightSurfPt, dirToLight, squaredDistance);
     G *= fractionalVisibility;
 
@@ -196,27 +204,30 @@ extern "C" __global__ void sampleLights(
 
     // ========================================================================
     // 9. 累积直接光照贡献
+    // 原始 VLR: scalarCoeff = G * MISWeight / lightPDF
+    //          contribution += alpha * Le * fs * scalarCoeff
+    // 即: contribution = throughput * Le * fs * G * MISWeight / lightAreaPDF
     // ========================================================================
-    // 渲染方程 NEE 项: L = throughput * Le * fs * G * MISWeight / lightPDF
-    // lightPDF 为立体角 PDF；点光源（delta）时 PDF 无穷大，取 invLightPDF=1
     float invLightPDF = 1.0f;
-    // 使用设备端兼容的有限性检查（避免 std::isfinite）
-    bool lightPDFFinite = (lightSolidAnglePDF == lightSolidAnglePDF) &&
-        (lightSolidAnglePDF > -1e30f) && (lightSolidAnglePDF < 1e30f);
-    if (lightPDFFinite && lightSolidAnglePDF > 1e-10f)
-        invLightPDF = 1.0f / lightSolidAnglePDF;
+    if (!lightPDFInf && lightAreaPDF > 1e-10f)
+        invLightPDF = 1.0f / lightAreaPDF;
 
     SampledSpectrum contrib = pathState.throughput * emissionResult.Le * fs * G * MISWeight * invLightPDF;
 
-    // 检查贡献有效性（非零且有限）（使用设备端兼容的有限性检查）
-    bool isFinite = true;
-    for (int i = 0; i < NumSpectralSamples && isFinite; ++i) {
-        float v = contrib.values[i];
-        isFinite = isFinite && (v == v) && (v > -1e30f) && (v < 1e30f);
-    }
-    if (isFinite && contrib.hasNonZero()) {
+    // 与原始 VLR 一致：仅当贡献有限时才累加，避免 NaN/Inf 污染输出
+    if (contrib.allFinite() && contrib.hasNonZero()) {
         pathState.contribution += contrib;
     }
+#ifdef VLR_DEBUG_NAN_TRACKING
+    else if (!contrib.allFinite()) {
+        unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
+        if (idx < 5) {
+            printf("[NaN] sample_lights: px=(%u,%u) pathLen=%u contrib=(%.4f,%.4f,%.4f) op=throughput*Le*fs*G*MIS/invPDF\n",
+                   pathState.pixelX, pathState.pixelY, pathState.pathLength,
+                   contrib.values[0], contrib.values[1], contrib.values[2]);
+        }
+    }
+#endif
 
     // 可选：统计阴影光线数
     if (wlp.numShadowRays != nullptr) {

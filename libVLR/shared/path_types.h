@@ -25,12 +25,13 @@ namespace shared {
 
 #if defined(VLR_Device) || defined(__CUDACC__)
 /// Power Heuristic MIS: w = pdf1^2 / (pdf1^2 + pdf2^2)
+/// 与原始 VLR 一致：检查 NaN/Inf
 CUDA_DEVICE_FUNCTION CUDA_INLINE float powerHeuristicMIS(float pdf1, float pdf2) {
 #ifdef __CUDACC__
-    if (__isinf(pdf1) || __isinf(pdf2))
+    if (__isnanf(pdf1) || __isnanf(pdf2) || __isinf(pdf1) || __isinf(pdf2))
         return 1.0f;
 #else
-    if (std::isinf(pdf1) || std::isinf(pdf2))
+    if (std::isnan(pdf1) || std::isnan(pdf2) || std::isinf(pdf1) || std::isinf(pdf2))
         return 1.0f;
 #endif
     float a = pdf1 * pdf1;

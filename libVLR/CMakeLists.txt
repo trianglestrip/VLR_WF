@@ -147,6 +147,12 @@ if(OPTIX_FOUND)
     target_compile_definitions(VLR PRIVATE VLR_USE_OPTIX)
 endif()
 
+# NaN 调试追踪（cmake -DVLR_DEBUG_NAN_TRACKING=ON）
+if(VLR_DEBUG_NAN_TRACKING)
+    target_compile_definitions(VLR PRIVATE VLR_DEBUG_NAN_TRACKING)
+    message(STATUS "[libVLR] VLR_DEBUG_NAN_TRACKING 已启用")
+endif()
+
 # ----------------------------------------------------------------------------
 # PTX 输出：已通过 PTX_OUTPUT_DIR 直接输出到 bin/GPU_kernels/，无需复制
 # ----------------------------------------------------------------------------

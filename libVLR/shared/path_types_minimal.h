@@ -182,7 +182,7 @@ struct WavefrontLaunchParameters {
     WavefrontMaterialQueues materialQueues;
 
     ::vlr::optixu::NativeBlockBuffer2D<::vlr::KernelRNG> rngBuffer;
-    ::vlr::optixu::BlockBuffer2D<::vlr::DiscretizedSpectrum, 0> accumBuffer;
+    ::vlr::optixu::BlockBuffer2D<::vlr::SpectrumStorage, 0> accumBuffer;
     ::vlr::DiscretizedSpectrum* accumAlbedoBuffer;
     ::vlr::Normal3D* accumNormalBuffer;
 

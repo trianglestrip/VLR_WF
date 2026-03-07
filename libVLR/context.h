@@ -184,6 +184,9 @@ private:
             uint32_t currentWidth;
             uint32_t currentHeight;
             
+            // 累加帧计数（与原始 VLR 一致，用于多采样正确平均）
+            uint32_t numAccumFrames;
+            
             WavefrontPathTracing()
                 : pipeline(nullptr)
                 , module(nullptr)
@@ -224,6 +227,7 @@ private:
                 , isInitialized(false)
                 , currentWidth(0)
                 , currentHeight(0)
+                , numAccumFrames(0)
             {
                 for (int i = 0; i < shared::NumMaterialCategories; ++i) {
                     materialQueueIndices[i] = nullptr;

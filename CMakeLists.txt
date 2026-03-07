@@ -36,6 +36,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(VLR_CUDA_ARCH "75" CACHE STRING "CUDA 计算能力架构（如 75, 80, 86, 89）")
 set_property(CACHE VLR_CUDA_ARCH PROPERTY STRINGS "75" "80" "86" "89" "90")
 
+# 调试选项：NaN 追踪（启用时在 GPU 内核中打印 NaN 检测信息）
+set(VLR_DEBUG_NAN_TRACKING OFF CACHE BOOL "启用 NaN 调试追踪（每帧打印前 5 次 NaN 检测）")
+
 # OptiX SDK 路径（默认：ProgramData 安装位置）
 set(OPTIX_PATH "C:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0" CACHE PATH "OptiX SDK 安装路径")
 if(DEFINED ENV{OPTIX_PATH})
@@ -85,33 +88,14 @@ endforeach()
 add_subdirectory(libVLR)
 
 # ----------------------------------------------------------------------------
-# 简单渲染测试可执行文件
+# 测试可执行文件（仅包含存在的测试文件）
 # ----------------------------------------------------------------------------
-add_executable(simple_render_test test/simple_render_test.cpp)
-target_include_directories(simple_render_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
-target_link_libraries(simple_render_test PRIVATE VLR CUDA::cudart)
-
-# OptiX 最小测试
-add_executable(optix_minimal_test test/optix_minimal_test.cpp)
-target_include_directories(optix_minimal_test PRIVATE 
-    ${OPTIX_PATH}/include
-    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-target_link_libraries(optix_minimal_test PRIVATE CUDA::cudart CUDA::cuda_driver)
-
-# Cornell Box 测试场景
-add_executable(cornell_box_test test/cornell_box_test.cpp)
-target_include_directories(cornell_box_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
-target_link_libraries(cornell_box_test PRIVATE VLR CUDA::cudart)
-
-# Glass Spheres 测试场景
-add_executable(glass_spheres_test test/glass_spheres_test.cpp)
-target_include_directories(glass_spheres_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
-target_link_libraries(glass_spheres_test PRIVATE VLR CUDA::cudart)
-
-# Multi Material 测试场景
-add_executable(multi_material_test test/multi_material_test.cpp)
-target_include_directories(multi_material_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
-target_link_libraries(multi_material_test PRIVATE VLR CUDA::cudart)
+# 注释掉不存在的测试文件，避免 CMake 配置失败
+# add_executable(simple_render_test test/simple_render_test.cpp)
+# add_executable(optix_minimal_test test/optix_minimal_test.cpp)
+# add_executable(cornell_box_test test/cornell_box_test.cpp)
+# add_executable(glass_spheres_test test/glass_spheres_test.cpp)
+# add_executable(multi_material_test test/multi_material_test.cpp)
 
 # Cornell Box Improved 测试场景（完整材质）
 add_executable(cornell_box_improved_test test/cornell_box_improved_test.cpp)

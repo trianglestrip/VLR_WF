@@ -139,14 +139,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool selectLight(
 ///
 /// @param descriptor   [in]  光源描述符（来自 selectLight）
 /// @param refPosition  [in]  参考点位置（着色点）
-/// @param u0, u1       [in]  [0,1) 随机数
+/// @param u0, u1, u2   [in]  [0,1) 随机数（u0=三角形选择, u1,u2=重心坐标）
 /// @param result       [out] 采样结果（表面点、面积 PDF 等）
 /// @param wlp          [in]  启动参数
 /// @return 是否成功采样
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     const LightDescriptor& descriptor,
     const Point3D& refPosition,
-    float u0, float u1,
+    float u0, float u1, float u2,
     LightSampleResult* result,
     const WavefrontLaunchParameters& wlp) {
     
@@ -210,31 +210,51 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     
     case LightType_Area:
     default: {
-        // 区域光：三角形网格采样（当无 OptiX callable 时）
+        // 区域光：三角形网格采样（按面积加权采样所有三角形，与 libWR 一致）
         LightPosSample lightPosSample;
         if (geomInst.geomType == GeometryType_TriangleMesh &&
             geomInst.asTriMesh.triangleBuffer != nullptr &&
             wlp.vertexPositions != nullptr) {
-            // Uniform triangle sampling: sample first triangle as fallback
-            const Triangle& tri = geomInst.asTriMesh.triangleBuffer[0];
-            float u = u0, v = u1;
-            if (u + v > 1.0f) { u = 1.0f - u; v = 1.0f - v; }
-            float w = 1.0f - u - v;
+            uint32_t numTris = geomInst.asTriMesh.numTriangles;
+            if (numTris == 0) numTris = 1;  // 兼容旧数据
+
+            const Triangle* triBuf = geomInst.asTriMesh.triangleBuffer;
+            float totalArea = 0.0f;
+            for (uint32_t i = 0; i < numTris; ++i)
+                totalArea += triBuf[i].area;
+            if (totalArea < 1e-10f) totalArea = 1.0f;
+
+            // 按面积加权选择三角形（与 libWR emissiveTriangleCDF 等价）
+            float uTri = u0;
+            uint32_t triIdx = 0;
+            float acc = 0.0f;
+            for (uint32_t i = 0; i < numTris; ++i) {
+                acc += triBuf[i].area / totalArea;
+                if (uTri < acc) { triIdx = i; break; }
+                triIdx = i;
+            }
+
+            const Triangle& tri = triBuf[triIdx];
+            // 均匀三角形采样（与 libWR sampleTriangle 一致）：su=sqrt(u1), b0=1-su, b1=su*(1-u2), b2=su*u2
+            float su = (u1 < 1e-10f) ? 0.0f : std::sqrt(u1);
+            float b0 = 1.0f - su;
+            float b1 = su * (1.0f - u2);
+            float b2 = su * u2;
             Point3D p0 = wlp.vertexPositions[tri.indices[0]];
             Point3D p1 = wlp.vertexPositions[tri.indices[1]];
             Point3D p2 = wlp.vertexPositions[tri.indices[2]];
             Point3D posLocal = Point3D(
-                p0.x * w + p1.x * u + p2.x * v,
-                p0.y * w + p1.y * u + p2.y * v,
-                p0.z * w + p1.z * u + p2.z * v);
+                p0.x * b0 + p1.x * b1 + p2.x * b2,
+                p0.y * b0 + p1.y * b1 + p2.y * b2,
+                p0.z * b0 + p1.z * b1 + p2.z * b2);
             lightPosSample.surfPt.position = posLocal;
             Vector3D e1 = p1 - p0, e2 = p2 - p0;
             lightPosSample.surfPt.geometricNormal = normalize(cross(e1, e2));
             lightPosSample.surfPt.shadingFrame = ReferenceFrame(
                 Vector3D(1,0,0), lightPosSample.surfPt.geometricNormal);
-            lightPosSample.surfPt.texCoord = TexCoord2D(u, v);
+            lightPosSample.surfPt.texCoord = TexCoord2D(u1, u2);
             lightPosSample.surfPt.atInfinity = false;
-            lightPosSample.areaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
+            lightPosSample.areaPDF = 1.0f / totalArea;  // 面积 PDF = 1/总面积
         } else if (geomInst.progSampleLightPosition >= 0) {
             // OptiX callable would go here
             return false;
@@ -417,7 +437,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleAndEvaluateLight(
     if (!selectLight(uLight, selectResult, wlp))
         return false;
     
-    if (!sampleLight(selectResult->descriptor, refPosition, u0, u1, sampleResult, wlp))
+    if (!sampleLight(selectResult->descriptor, refPosition, u0, u1, u2, sampleResult, wlp))
         return false;
     
     Vector3D dirToShading = refPosition - sampleResult->lightSurfPt.position;

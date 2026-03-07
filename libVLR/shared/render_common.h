@@ -60,15 +60,20 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory classifyMaterial(
 
 /// Compute MIS weight using Power Heuristic (beta=2)
 /// This is the standard MIS weight computation used in path tracing
+/// 与原始 VLR 一致：检查 NaN/Inf，避免除零
 CUDA_DEVICE_FUNCTION CUDA_INLINE float computeMISWeight(
     float pdf1, float pdf2) {
-    
-    if (isinf(pdf1) || isinf(pdf2))
+#ifdef __CUDACC__
+    if (__isnanf(pdf1) || __isnanf(pdf2) || __isinf(pdf1) || __isinf(pdf2))
         return 1.0f;
-    
+#else
+    if (std::isnan(pdf1) || std::isnan(pdf2) || std::isinf(pdf1) || std::isinf(pdf2))
+        return 1.0f;
+#endif
     float pdf1Sq = pdf1 * pdf1;
     float pdf2Sq = pdf2 * pdf2;
-    return pdf1Sq / (pdf1Sq + pdf2Sq);
+    float sum = pdf1Sq + pdf2Sq;
+    return (sum > 1e-12f) ? (pdf1Sq / sum) : 1.0f;
 }
 
 
@@ -98,6 +103,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeMISWeight(
 
 /// Compute geometry term G(x <-> y) = cos(theta_x) * cos(theta_y) / distance^2
 /// This is used in light transport equations
+/// 避免 squaredDistance 过小导致数值溢出
 CUDA_DEVICE_FUNCTION CUDA_INLINE float computeGeometryTerm(
     const SurfacePoint& sp1,
     const SurfacePoint& sp2,
@@ -107,10 +113,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeGeometryTerm(
     if (sp1.atInfinity || sp2.atInfinity)
         return 1.0f;
     
+    float distSqSafe = (squaredDistance > 1e-12f) ? squaredDistance : 1e-12f;
     float cos1 = absDot(direction, sp1.geometricNormal);
     float cos2 = absDot(-direction, sp2.geometricNormal);
     
-    return (cos1 * cos2) / squaredDistance;
+    float G = (cos1 * cos2) / distSqSafe;
+#ifdef __CUDACC__
+    bool finite = !__isnanf(G) && !__isinf(G);
+    return (finite && G < 1e10f) ? G : 0.0f;
+#else
+    return (std::isfinite(G) && G < 1e10f) ? G : 0.0f;
+#endif
 }
 
 
@@ -124,7 +137,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float convertAreaPDFToSolidAnglePDF(
         return 0.0f;
     
     float distanceSq = distance * distance;
-    return areaPDF * distanceSq / abs(cosThetaLight);
+    return areaPDF * distanceSq / std::abs(cosThetaLight);
 }
 
 
@@ -144,7 +157,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool shouldTerminatePath(
     
     // Compute continuation probability
     float importance = pathState.throughput.importance(pathState.wls.selectedLambdaIndex());
-    float continueProb = min(importance / pathState.initImportance, 1.0f);
+    float continueProb = std::min(importance / pathState.initImportance, 1.0f);
     
     // Force termination if importance is too low
     if (continueProb < rrThreshold)
@@ -170,7 +183,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool shouldTerminatePathSimple(
         return false;
     
     float importance = pathState.throughput.importance(pathState.wls.selectedLambdaIndex());
-    float continueProb = min(importance / pathState.initImportance, 1.0f);
+    float continueProb = std::min(importance / pathState.initImportance, 1.0f);
     
     if (continueProb < rrThreshold)
         return true;
@@ -265,7 +278,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     surfPt.geometricNormal = -direction;
     
     float sinPhi, cosPhi;
-    sincos(phi, &sinPhi, &cosPhi);
+    ::vlr::sincos(phi, &sinPhi, &cosPhi);
     Vector3D texCoord0Dir = normalize(Vector3D(-cosPhi, 0.0f, -sinPhi));
     surfPt.shadingFrame = ReferenceFrame(texCoord0Dir, -direction);
     
@@ -298,7 +311,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
                 ? geomInst.importance : 1.0f;
             
             float bsdfPDF = pathState.prevDirPDF;
-            float lightPDF = instProb * geomInstProb * hypAreaPDF / abs(dirOutLocal.z);
+            float lightPDF = instProb * geomInstProb * hypAreaPDF / std::abs(dirOutLocal.z);
             
             MISWeight = computeMISWeight(bsdfPDF, lightPDF);
         }
@@ -346,7 +359,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
         float geomInstProb = (inst.numGeomInsts > 0 && geomInst.importance > 1e-8f)
             ? (geomInst.importance / inst.numGeomInsts) : 1.0f;
         
-        float cosTerm = abs(dirOutLocal.z);
+        float cosTerm = std::abs(dirOutLocal.z);
         float lightPDF = instProb * geomInstProb * hypAreaPDF / cosTerm;
         
         float bsdfPDF = pathState.prevDirPDF;
@@ -524,7 +537,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     lightSample->Le = spEmittance * edf.evaluate(feQuery, dirOutLocal);
     
     // Convert area PDF to solid angle PDF
-    float cosTerm = abs(dirOutLocal.z);
+    float cosTerm = std::abs(dirOutLocal.z);
     lightSample->lightPDF = convertAreaPDFToSolidAnglePDF(
         lightSample->lightPDF, dist, cosTerm);
     
@@ -629,7 +642,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool validatePathState(
     
     // Check direction is normalized
     float dirLenSq = dot(pathState.direction, pathState.direction);
-    if (abs(dirLenSq - 1.0f) > 0.001f)
+    if (std::abs(dirLenSq - 1.0f) > 0.001f)
         return false;
     
     // Check throughput is non-negative

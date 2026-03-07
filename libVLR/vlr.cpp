@@ -212,9 +212,10 @@ VLRResult vlrCreateMaterial(
     try {
         VLRSceneImpl* sceneImpl = TO_SCENE(scene);
         if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
-        float r = baseColor ? baseColor[0] : 0.7f;
-        float g = baseColor ? baseColor[1] : 0.7f;
-        float b = baseColor ? baseColor[2] : 0.7f;
+        // 与原始 VLR MatteSurfaceMaterial 一致，默认反照率 0.18
+        float r = baseColor ? baseColor[0] : 0.18f;
+        float g = baseColor ? baseColor[1] : 0.18f;
+        float b = baseColor ? baseColor[2] : 0.18f;
         float er = emissionColor ? emissionColor[0] : 0.0f;
         float eg = emissionColor ? emissionColor[1] : 0.0f;
         float eb = emissionColor ? emissionColor[2] : 0.0f;

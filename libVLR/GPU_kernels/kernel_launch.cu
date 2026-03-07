@@ -10,6 +10,22 @@
 // ============================================================================
 
 #include "kernel_launch.h"
+
+#ifdef VLR_DEBUG_NAN_TRACKING
+__device__ __managed__ unsigned int g_vlrNanPrintCount = 0;
+
+void resetNanDebugCount() {
+    g_vlrNanPrintCount = 0;
+}
+#endif
+
+// 通用调试计数器（不需要 VLR_DEBUG_NAN_TRACKING 宏）
+extern "C" __device__ __managed__ unsigned int g_vlrDebugPrintCount = 0;
+
+extern "C" void resetDebugCount() {
+    g_vlrDebugPrintCount = 0;
+}
+
 #include "../shared/path_types.h"
 #include "../utils/cuda_util.h"
 
@@ -107,6 +123,39 @@ void launchAccumulateKernel(
     if (gridSize == 0) return;
 
     accumulateResults<<<gridSize, blockSize, 0, stream>>>(d_params);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// ============================================================================
+// RNG 初始化 Kernel
+// ============================================================================
+
+__global__ void initializeRNGKernel(
+    shared::KernelRNG* rngBuffer,
+    uint32_t numPixels,
+    uint64_t baseSeed)
+{
+    uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numPixels) return;
+
+    // 为每个像素生成唯一的 RNG 种子
+    // 使用 PCG32 的初始化方式
+    uint64_t seed = baseSeed + idx;
+    rngBuffer[idx].state = seed ^ 0xda3e39cb94b95bdbULL;
+    rngBuffer[idx].inc = (idx << 1u) | 1u;  // 每个像素的 inc 必须是奇数且不同
+}
+
+void initializeRNGBuffer(
+    shared::KernelRNG* rngBuffer,
+    uint32_t numPixels,
+    uint64_t baseSeed,
+    cudaStream_t stream)
+{
+    constexpr uint32_t blockSize = 256;
+    uint32_t gridSize = (numPixels + blockSize - 1) / blockSize;
+    if (gridSize == 0) return;
+
+    initializeRNGKernel<<<gridSize, blockSize, 0, stream>>>(rngBuffer, numPixels, baseSeed);
     CUDA_CHECK(cudaGetLastError());
 }
 

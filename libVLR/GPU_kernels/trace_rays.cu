@@ -129,7 +129,7 @@ extern "C" __global__ void RT_RG_NAME(traceRays)() {
         wlp.topGroup,
         rayOrigin,
         rayDirection,
-        1e-5f,   // tmin：避免自相交
+        0.0f,    // tmin：与原始 VLR 一致，依赖 offsetRayOrigin 避免自相交
         FLT_MAX, // tmax
         0.0f,    // rayTime
         0xFF,    // visibilityMask
