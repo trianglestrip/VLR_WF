@@ -14,6 +14,42 @@
   - TODO/FIXME/NOTE 等标记
   - 函数、类、结构体的说明注释
 
+### 运行时输出语言 ⚠️ 重要
+- **所有运行时输出必须使用英文**
+- 包括但不限于：
+  - `printf`、`fprintf` 等打印语句
+  - `assert` 断言消息
+  - 异常消息 (`throw std::runtime_error(...)`)
+  - 日志输出
+  - 错误提示
+- **原因**：避免编码问题导致乱码或崩溃，特别是在 Windows 控制台和 CUDA/OptiX 运行时中
+
+### 示例对比
+
+#### 正确示例
+```cpp
+// 初始化波前路径追踪管线
+void Context::initializeWavefrontPipeline() {
+    printf("[Wavefront] Initializing pipeline...\n");
+    
+    if (!m_optix.context) {
+        throw std::runtime_error("OptiX context not initialized");
+    }
+}
+```
+
+#### 错误示例（避免）
+```cpp
+// 初始化波前路径追踪管线
+void Context::initializeWavefrontPipeline() {
+    printf("[Wavefront] 开始初始化管线...\n");  // ❌ 运行时输出不要用中文
+    
+    if (!m_optix.context) {
+        throw std::runtime_error("OptiX 上下文未初始化");  // ❌ 异常消息不要用中文
+    }
+}
+```
+
 ### 示例
 
 #### C++/CUDA 注释
