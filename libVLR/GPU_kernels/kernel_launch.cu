@@ -79,7 +79,8 @@ void launchProcessHitsKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    constexpr uint32_t blockSize = 256;
+    // 优化：processHits 寄存器使用较多，使用较小的 block size 以提高 occupancy
+    constexpr uint32_t blockSize = 128;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
@@ -92,6 +93,7 @@ void launchSampleLightsKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
+    // 优化：sampleLights 计算密集，使用较大的 block size
     constexpr uint32_t blockSize = 256;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
@@ -105,7 +107,8 @@ void launchSampleBSDFKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    constexpr uint32_t blockSize = 256;
+    // 优化：sampleBSDF 是最复杂的 kernel，使用中等 block size 平衡寄存器和 occupancy
+    constexpr uint32_t blockSize = 192;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 

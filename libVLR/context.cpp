@@ -629,6 +629,13 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     uint64_t baseSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     initializeRNGBuffer(wf.rngBuffer->getDevicePointer(), numPixels, baseSeed, m_stream);
     
+    // 创建性能测量事件
+    if (!wf.eventsCreated) {
+        CUDA_CHECK(cudaEventCreate(&wf.startEvent));
+        CUDA_CHECK(cudaEventCreate(&wf.endEvent));
+        wf.eventsCreated = true;
+    }
+    
     // 分配降噪缓冲区（可选）
     if (!wf.accumAlbedoBuffer) {
         wf.accumAlbedoBuffer = new cudau::Buffer<shared::DiscretizedSpectrum>();
@@ -1006,6 +1013,13 @@ void Context::cleanupWavefrontResources() {
     delete wf.sceneBoundsBuffer;
     wf.sceneBoundsBuffer = nullptr;
     
+    // 销毁 CUDA 事件
+    if (wf.eventsCreated) {
+        cudaEventDestroy(wf.startEvent);
+        cudaEventDestroy(wf.endEvent);
+        wf.eventsCreated = false;
+    }
+    
     // 释放 CUB 临时存储
     delete wf.cubTempStorage;
     delete wf.sortedPathIndices;
@@ -1123,6 +1137,10 @@ void Context::renderWavefront(
     // 执行渲染
     printf("[VLR] Starting render loop...\n");
     fflush(stdout);
+    
+    // 记录开始时间
+    CUDA_CHECK(cudaEventRecord(wf.startEvent, m_stream));
+    
     for (uint32_t sample = 0; sample < numSamples; ++sample) {
         printf("[VLR] Sample %u/%u\n", sample + 1, numSamples);
         fflush(stdout);
@@ -1130,6 +1148,19 @@ void Context::renderWavefront(
         ++wf.numAccumFrames;
         executeWavefrontRender(1);
     }
+    
+    // 记录结束时间并计算渲染时间
+    CUDA_CHECK(cudaEventRecord(wf.endEvent, m_stream));
+    CUDA_CHECK(cudaEventSynchronize(wf.endEvent));
+    
+    float renderTimeMs = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(&renderTimeMs, wf.startEvent, wf.endEvent));
+    
+    printf("[VLR] Render completed in %.2f ms (%.2f ms/sample, %.2f Msamples/s)\n",
+           renderTimeMs,
+           renderTimeMs / numSamples,
+           (width * height * numSamples) / (renderTimeMs * 1000.0f));
+    fflush(stdout);
     
     // 将结果复制到输出缓冲区
     if (outputBuffer && wf.accumBuffer) {
@@ -1186,18 +1217,23 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
     }
     
         // 主 Wavefront 循环
+        // 优化：减少同步频率，每 4 个深度同步一次以检查活跃路径数
+        constexpr uint32_t SYNC_INTERVAL = 4;
+        uint32_t numActivePaths = numPixels;  // 初始时所有路径都活跃
+        
         for (uint32_t depth = 0; depth < wf.maxPathLength; ++depth) {
         wf.launchParams.currentDepth = depth;
         
-        // 获取活跃路径数量
-        uint32_t numActivePaths = 0;
-        if (wf.queueCounters) {
-            wf.queueCounters->copyToHost(&numActivePaths, 1, m_stream);
-            CUDA_CHECK(cudaStreamSynchronize(m_stream));
-        }
-        
-        if (numActivePaths == 0) {
-            break;  // 所有路径已终止
+        // 只在同步间隔时检查活跃路径数
+        if (depth % SYNC_INTERVAL == 0 && depth > 0) {
+            if (wf.queueCounters) {
+                wf.queueCounters->copyToHost(&numActivePaths, 1, m_stream);
+                CUDA_CHECK(cudaStreamSynchronize(m_stream));
+            }
+            
+            if (numActivePaths == 0) {
+                break;  // 所有路径已终止
+            }
         }
         
         // 阶段 2: 光线追踪
@@ -1226,8 +1262,13 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
         }
         
+        // 优化：只在路径数下降超过阈值时才执行压缩
+        constexpr float COMPRESSION_THRESHOLD = 0.75f;  // 路径数下降超过 25% 时才压缩
+        float compressionRatio = (numActivePaths > 0) ? 
+            static_cast<float>(numNextPaths) / numActivePaths : 0.0f;
+        bool shouldCompress = (compressionRatio < COMPRESSION_THRESHOLD) && (numNextPaths > 0);
         
-        if (wf.useStreamCompaction && numNextPaths > 0) {
+        if (wf.useStreamCompaction && shouldCompress) {
             // 使用 CUB Stream Compaction 移除已终止路径
             CUDA_CHECK(shared::compactPathsCUB(
                 static_cast<uint32_t*>(wf.nextActivePathIndices->getDevicePointer()),

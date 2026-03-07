@@ -165,6 +165,11 @@ private:
             shared::WavefrontPerformanceStats perfStats;
             cudau::Buffer<uint32_t>* perfStatsBuffer;
             
+            // CUDA 事件（用于性能测量）
+            cudaEvent_t startEvent;
+            cudaEvent_t endEvent;
+            bool eventsCreated;
+            
             // CUB 临时存储（用于排序和压缩）
             cudau::Buffer<uint8_t>* cubTempStorage;
             size_t cubTempStorageBytes;
@@ -214,6 +219,9 @@ private:
                 , sceneBoundsBuffer(nullptr)
                 , launchParamsBuffer(nullptr)
                 , perfStatsBuffer(nullptr)
+                , startEvent(nullptr)
+                , endEvent(nullptr)
+                , eventsCreated(false)
                 , cubTempStorage(nullptr)
                 , cubTempStorageBytes(0)
                 , sortedPathIndices(nullptr)
