@@ -167,6 +167,45 @@ void myKernel(float* data) { ... }
 
 ## OptiX 编译规则
 
+### 0. ⚠️ 关键 API 使用要求
+
+#### optixSbtRecordPackHeader 必须使用主机内存
+
+**重要**：`optixSbtRecordPackHeader` 函数**必须**在主机内存上操作，不能直接使用设备内存。
+
+**错误用法**（会崩溃）：
+```cpp
+void* record;
+cudaMalloc(&record, OPTIX_SBT_RECORD_HEADER_SIZE);
+optixSbtRecordPackHeader(programGroup, record);  // 访问冲突崩溃！
+```
+
+**正确用法**：
+```cpp
+// 1. 在主机内存上打包
+void* hostRecord = malloc(OPTIX_SBT_RECORD_HEADER_SIZE);
+optixSbtRecordPackHeader(programGroup, hostRecord);
+
+// 2. 复制到设备内存
+void* deviceRecord;
+cudaMalloc(&deviceRecord, OPTIX_SBT_RECORD_HEADER_SIZE);
+cudaMemcpy(deviceRecord, hostRecord, OPTIX_SBT_RECORD_HEADER_SIZE, cudaMemcpyHostToDevice);
+free(hostRecord);
+```
+
+#### OptixBuildInput.triangleArray.flags 不能为 nullptr
+
+**错误用法**：
+```cpp
+triangleInput.triangleArray.flags = nullptr;  // 导致崩溃
+```
+
+**正确用法**：
+```cpp
+static const uint32_t triangleInputFlags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+triangleInput.triangleArray.flags = triangleInputFlags;
+```
+
 ### 1. OptiX 头文件包含
 ```cpp
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
