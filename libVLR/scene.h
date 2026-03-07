@@ -168,6 +168,17 @@ public:
         float ior,
         float emissionR = 0.0f, float emissionG = 0.0f, float emissionB = 0.0f);
 
+    /// 创建导体微表面反射材质（MicrofacetReflection）
+    uint32_t createMaterialConductor(
+        float etaR, float etaG, float etaB,
+        float kappaR, float kappaG, float kappaB,
+        float roughness);
+
+    /// 创建微表面散射材质（电介质，反射+折射）
+    uint32_t createMaterialMicrofacetScattering(
+        float ior,
+        float roughness);
+
     /// 创建棋盘格材质（Lambert + 8x8 黑白棋盘格）
     /// @param color0 第一种颜色 RGB（如黑色）
     /// @param color1 第二种颜色 RGB（如白色）
@@ -203,6 +214,9 @@ public:
 
     /// 添加点光源
     void addPointLight(const PointLightParams& params);
+
+    /// 添加方向光（平行光）
+    void addDirectionalLight(const Vector3D& direction, const SampledSpectrum& radiance);
 
     /// 设置环境光
     void setEnvironmentLight(const EnvironmentLightParams& params);

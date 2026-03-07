@@ -596,6 +596,7 @@ enum GeometryType : uint32_t {
     GeometryType_TriangleMesh = 0,
     GeometryType_InfiniteSphere,
     GeometryType_Point,
+    GeometryType_Directional,
     NumGeometryTypes
 };
 

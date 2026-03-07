@@ -273,6 +273,54 @@ VLRResult vlrCreateMaterialEx(
     }
 }
 
+VLRResult vlrCreateMaterialConductor(
+    VLRScene scene,
+    const float eta[3],
+    const float kappa[3],
+    float roughness,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !eta || !kappa || !outMaterial) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialConductor(
+            eta[0], eta[1], eta[2],
+            kappa[0], kappa[1], kappa[2],
+            roughness);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrCreateMaterialMicrofacetScattering(
+    VLRScene scene,
+    float ior,
+    float roughness,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !outMaterial) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialMicrofacetScattering(ior, roughness);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrCreateMaterialCheckerboard(
     VLRScene scene,
     const float color0[3],
@@ -351,6 +399,29 @@ VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance) {
         params.geomInstIndex = 0;
         params.radiance = vlr::SampledSpectrum(1.0f);
         sceneImpl->scene->addAreaLight(params);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrAddDirectionalLight(
+    VLRScene scene,
+    const float direction[3],
+    const float radiance[3])
+{
+    if (!scene || !direction || !radiance) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        
+        vlr::Vector3D dir(direction[0], direction[1], direction[2]);
+        vlr::SampledSpectrum rad;
+        rad.values[0] = radiance[0];
+        rad.values[1] = radiance[1];
+        rad.values[2] = radiance[2];
+        
+        sceneImpl->scene->addDirectionalLight(dir, rad);
         return static_cast<VLRResult>(VLRResult_Success);
     } catch (...) {
         return translateException();

@@ -177,6 +177,31 @@ VLR_API VLRResult vlrCreateMaterialEx(
     const float* emissionColor,
     VLRMaterial* outMaterial);
 
+/// 创建导体微表面反射材质（MicrofacetReflection）
+/// @param scene 所属场景
+/// @param eta 折射率实部 RGB（如铝 [1.28, 0.94, 0.57]）
+/// @param kappa 折射率虚部 RGB（如铝 [7.30, 6.33, 5.17]）
+/// @param roughness 粗糙度 [0..1]（0=完美镜面，1=完全粗糙）
+/// @param outMaterial 输出材质句柄
+VLR_API VLRResult vlrCreateMaterialConductor(
+    VLRScene scene,
+    const float eta[3],
+    const float kappa[3],
+    float roughness,
+    VLRMaterial* outMaterial);
+
+/// 创建微表面散射材质（电介质，反射+折射）
+/// @param scene 所属场景
+/// @param ior 折射率（如玻璃 1.5）
+/// @param roughness 粗糙度 [0..1]（0=完美镜面，1=完全粗糙）
+/// @param outMaterial 输出材质句柄
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrCreateMaterialMicrofacetScattering(
+    VLRScene scene,
+    float ior,
+    float roughness,
+    VLRMaterial* outMaterial);
+
 /// 创建棋盘格材质（用于地板等）
 /// @param scene 所属场景
 /// @param color0 第一种颜色 RGB [0..1]（如黑色）
@@ -217,6 +242,16 @@ VLR_API void vlrDestroyInstance(VLRInstance instance);
 /// @param instance 发光几何的实例句柄（其材质需设置 emissionColor）
 /// @return VLRResult_Success 或错误码
 VLR_API VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance);
+
+/// 添加方向光（平行光，如太阳光）
+/// @param scene 所属场景
+/// @param direction 光线方向（归一化，指向场景）
+/// @param radiance 辐射度 RGB [0..∞]（W/(m²·sr)）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrAddDirectionalLight(
+    VLRScene scene,
+    const float direction[3],
+    const float radiance[3]);
 
 /// 设置场景相机
 /// @param scene 场景句柄

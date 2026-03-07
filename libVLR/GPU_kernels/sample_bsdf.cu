@@ -16,8 +16,10 @@
 #include "../shared/bsdf_common.h"
 #include "../shared/geometry_common.h"
 #include "../shared/material_types.h"
+#include "../shared/performance_config.h"
 #include "../include/vlr/basic_types.h"
 #include "warp_utils.cuh"
+#include "shared_memory_cache.cuh"
 
 #include <cuda_runtime.h>
 #include <cmath>
@@ -42,6 +44,21 @@ extern "C" __global__ void sampleBSDF(
     WavefrontLaunchParameters& wlp = *params;
 
 #ifdef __CUDACC__
+    // 优化：Shared Memory 缓存材质数据
+    #if PerformanceConfig::UseMaterialCache
+    __shared__ MaterialCache<PerformanceConfig::MaterialCacheSize> materialCache;
+    if (threadIdx.x == 0) {
+        uint32_t numMaterials = wlp.numMaterials;
+        if (numMaterials > PerformanceConfig::MaterialCacheSize)
+            numMaterials = PerformanceConfig::MaterialCacheSize;
+        for (uint32_t i = 0; i < numMaterials; ++i) {
+            materialCache.materials[i] = wlp.materialDescriptorBuffer[i];
+        }
+        materialCache.numMaterials = numMaterials;
+    }
+    __syncthreads();
+    #endif
+
     // 工作索引：每个线程处理一条活跃路径
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
     if (workIndex >= wlp.activePathQueue.size())
@@ -75,7 +92,13 @@ extern "C" __global__ void sampleBSDF(
     // 1. 获取材质和 BSDF 上下文
     // ========================================================================
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
+    
+    #if PerformanceConfig::UseMaterialCache
+    const SurfaceMaterialDescriptor& matDesc = *materialCache.get(
+        geomInst.materialIndex, wlp.materialDescriptorBuffer);
+    #else
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
+    #endif
 
     // 构造 BSDF 采样所需参数：入射方向（局部）、几何法线
     // 入射方向 = 光线到达表面的方向 = -pathState.direction

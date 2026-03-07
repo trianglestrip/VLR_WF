@@ -19,8 +19,10 @@
 #include "../shared/bsdf_common.h"
 #include "../shared/geometry_common.h"
 #include "../shared/material_types.h"
+#include "../shared/performance_config.h"
 #include "../include/vlr/basic_types.h"
 #include "warp_utils.cuh"
+#include "shared_memory_cache.cuh"
 
 #include <cuda_runtime.h>
 #include <cfloat>
@@ -81,6 +83,21 @@ extern "C" __global__ void sampleLights(
     WavefrontLaunchParameters& wlp = *params;
 
 #ifdef __CUDACC__
+    // 优化：Shared Memory 缓存光源数据
+    #if PerformanceConfig::UseLightCache
+    __shared__ LightCache<PerformanceConfig::LightCacheSize> lightCache;
+    if (threadIdx.x == 0) {
+        uint32_t numLights = wlp.numLights;
+        if (numLights > PerformanceConfig::LightCacheSize)
+            numLights = PerformanceConfig::LightCacheSize;
+        for (uint32_t i = 0; i < numLights; ++i) {
+            lightCache.lights[i] = wlp.geomInstBuffer[wlp.lightIndices[i]];
+        }
+        lightCache.numLights = numLights;
+    }
+    __syncthreads();
+    #endif
+
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
     
     if (workIndex >= wlp.activePathQueue.size())

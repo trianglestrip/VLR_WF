@@ -241,6 +241,52 @@ uint32_t Scene::createMaterialEx(
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
+uint32_t Scene::createMaterialConductor(
+    float etaR, float etaG, float etaB,
+    float kappaR, float kappaG, float kappaB,
+    float roughness)
+{
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_MicrofacetReflection);
+    mat.bsdfProcedureSetIndex = bsdfType;
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
+    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
+    mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&etaR);
+    mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&etaG);
+    mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&etaB);
+    mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&kappaR);
+    mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&kappaG);
+    mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&kappaB);
+    float zero = 0.0f;
+    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
+    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
+    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
+    m_materials.push_back(mat);
+    return static_cast<uint32_t>(m_materials.size() - 1);
+}
+
+uint32_t Scene::createMaterialMicrofacetScattering(
+    float ior,
+    float roughness)
+{
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_MicrofacetScattering);
+    mat.bsdfProcedureSetIndex = bsdfType;
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
+    mat.data[MaterialDataLayout::IOR] = *reinterpret_cast<uint32_t*>(&ior);
+    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
+    float zero = 0.0f;
+    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
+    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
+    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
+    m_materials.push_back(mat);
+    return static_cast<uint32_t>(m_materials.size() - 1);
+}
+
 uint32_t Scene::createMaterialCheckerboard(
     float color0R, float color0G, float color0B,
     float color1R, float color1G, float color1B,
@@ -354,6 +400,52 @@ void Scene::addAreaLight(const AreaLightParams& params) {
 
 void Scene::addPointLight(const PointLightParams& params) {
     (void)params;
+}
+
+void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum& radiance) {
+    // 创建方向光材质
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
+    mat.bsdfProcedureSetIndex = bsdfType;
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<const uint32_t*>(&bsdfType);
+    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<const uint32_t*>(&radiance.values[0]);
+    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<const uint32_t*>(&radiance.values[1]);
+    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<const uint32_t*>(&radiance.values[2]);
+    uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
+    m_materials.push_back(mat);
+    
+    // 创建方向光几何实例
+    GeometryInstance geomInst;
+    memset(&geomInst, 0, sizeof(geomInst));
+    geomInst.geomType = GeometryType_Directional;
+    geomInst.materialIndex = materialIndex;
+    uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
+    m_geometryInstances.push_back(geomInst);
+    
+    // 创建方向光实例（方向存储在 transform.z 中）
+    Instance inst;
+    memset(&inst, 0, sizeof(inst));
+    inst.geomInstIndices = nullptr;
+    inst.numGeomInsts = 1;
+    Vector3D dir = normalize(direction);
+    inst.transform = ReferenceFrame(Vector3D(1, 0, 0), Normal3D(dir.x, dir.y, dir.z));
+    inst.rotationPhi = 0.0f;
+    inst.lightGeomInstDistribution = 0;
+    uint32_t instIndex = static_cast<uint32_t>(m_instances.size());
+    m_instances.push_back(inst);
+    
+    InstanceRecord rec;
+    rec.meshId = 0;
+    rec.materialId = materialIndex;
+    rec.geomInstIndex = geomInstIndex;
+    rec.transform = InstanceTransform();
+    rec.geomInstIndices.push_back(geomInstIndex);
+    m_instanceRecords.push_back(rec);
+    
+    // 添加到光源列表
+    m_lightInstIndices.push_back(instIndex);
 }
 
 void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {

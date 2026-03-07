@@ -24,6 +24,7 @@ namespace shared {
 enum LightType : uint32_t {
     LightType_Area = 0,        // 区域光（基于几何的表面光源）
     LightType_Point,           // 点光源（Delta 光源）
+    LightType_Directional,     // 方向光（平行光，如太阳光）
     LightType_Environment,     // 环境光（IBL，无穷远球面）
     NumLightTypes
 };
@@ -49,11 +50,11 @@ struct LightDescriptor {
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDelta() const {
-        return type == LightType_Point;
+        return type == LightType_Point || type == LightType_Directional;
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool isInfinity() const {
-        return type == LightType_Environment;
+        return type == LightType_Environment || type == LightType_Directional;
     }
 };
 
@@ -95,7 +96,25 @@ struct PointLight {
 
 
 // ============================================================================
-// 5. 环境光（Environment Light）
+// 5. 方向光（Directional Light）
+// ============================================================================
+
+/// 方向光：平行光源（如太阳光），从无穷远处沿固定方向照射
+/// 对应 GeometryType_Directional，采样时方向固定，位置在无穷远
+struct DirectionalLight {
+    Vector3D direction;            // 光线方向（归一化，指向场景）
+    SampledSpectrum radiance;      // 辐射度（W/(m²·sr)）
+    uint32_t instIndex;            // 实例索引（用于材质/EDF 评估）
+    uint32_t geomInstIndex;        // 几何实例索引
+    
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isValid() const {
+        return geomInstIndex != 0xFFFFFFFF;
+    }
+};
+
+
+// ============================================================================
+// 6. 环境光（Environment Light）
 // ============================================================================
 
 /// 环境光：基于无穷远球面的 IBL

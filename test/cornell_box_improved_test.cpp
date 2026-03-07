@@ -293,17 +293,17 @@ int main(int argc, char** argv) {
     res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, lightEmission, &matLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light material\n"); goto cleanup; }
 
-    // Glass sphere: IOR 2.4 (diamond)
+    // Rough glass sphere: MicrofacetScattering, IOR 1.5, roughness 0.1
     VLRMaterial matGlass = nullptr;
-    float glassColor[] = { 0.999f, 0.999f, 0.999f };
-    res = vlrCreateMaterialEx(scene, 4 /* SpecularTransmission */, glassColor, 0.0f, 0.0f, 2.4f, nullptr, &matGlass);
+    res = vlrCreateMaterialMicrofacetScattering(scene, 1.5f, 0.1f, &matGlass);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Glass material\n"); goto cleanup; }
 
-    // Gold metal box: GGX, roughness 0.10
-    VLRMaterial matGold = nullptr;
-    float goldColor[] = { 1.0f, 0.782f, 0.344f };
-    res = vlrCreateMaterialEx(scene, 2 /* GGX */, goldColor, 0.10f, 1.0f, 1.0f, nullptr, &matGold);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Gold material\n"); goto cleanup; }
+    // Aluminum metal box: MicrofacetReflection, roughness 0.15
+    VLRMaterial matAluminum = nullptr;
+    float etaAluminum[] = { 1.27579f, 0.940922f, 0.574879f };
+    float kappaAluminum[] = { 7.30257f, 6.33458f, 5.16694f };
+    res = vlrCreateMaterialConductor(scene, etaAluminum, kappaAluminum, 0.15f, &matAluminum);
+    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Aluminum material\n"); goto cleanup; }
 
     // ========================================================================
     // Geometry
@@ -343,7 +343,7 @@ int main(int argc, char** argv) {
 
     VLRTriangleMesh meshBox = nullptr;
     res = vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),
-                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox);
+                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matAluminum, &meshBox);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box mesh\n"); goto cleanup; }
 
     // ========================================================================
@@ -388,6 +388,12 @@ int main(int argc, char** argv) {
 
     res = vlrAddAreaLight(scene, instLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add area light\n"); goto cleanup; }
+
+    // 添加方向光（从右上方照射，模拟太阳光）
+    float dirLightDir[] = { -0.3f, -0.8f, -0.2f };  // 从右上方向下照射
+    float dirLightRadiance[] = { 2.0f, 2.0f, 2.0f };  // 较弱的白光
+    res = vlrAddDirectionalLight(scene, dirLightDir, dirLightRadiance);
+    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add directional light\n"); goto cleanup; }
 
     // ========================================================================
     // Camera: position (0, 1.5, 6.0), target (0, 1.5, 0), fovY 40°

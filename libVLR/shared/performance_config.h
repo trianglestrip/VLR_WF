@@ -77,7 +77,18 @@ struct PerformanceConfig {
     
     /// 是否使用 shared memory 缓存材质数据
     /// 注意：需要足够的 shared memory
-    static constexpr bool UseMaterialCache = false;  // 暂时禁用，需要更多测试
+    static constexpr bool UseMaterialCache = true;
+    
+    /// Shared Memory 材质缓存大小
+    /// 推荐值：8-32（取决于场景材质数量）
+    static constexpr uint32_t MaterialCacheSize = 16;
+    
+    /// 是否使用 shared memory 缓存光源数据
+    static constexpr bool UseLightCache = true;
+    
+    /// Shared Memory 光源缓存大小
+    /// 推荐值：4-16（取决于场景光源数量）
+    static constexpr uint32_t LightCacheSize = 8;
     
     // ========================================================================
     // 高级优化

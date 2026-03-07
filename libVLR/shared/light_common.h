@@ -117,6 +117,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool selectLight(
             result->descriptor.type = LightType_Environment;
         } else if (geomInst.geomType == GeometryType_Point) {
             result->descriptor.type = LightType_Point;
+        } else if (geomInst.geomType == GeometryType_Directional) {
+            result->descriptor.type = LightType_Directional;
         } else {
             result->descriptor.type = LightType_Area;
         }
@@ -203,6 +205,30 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
         surfPt.texCoord = TexCoord2D(0, 0);
         
         transformSurfacePoint(inst.transform, surfPt, &result->lightSurfPt);
+        result->areaPDF = 1.0f;  // Delta 光源
+        result->isValid = true;
+        break;
+    }
+    
+    case LightType_Directional: {
+        // 方向光：平行光，从无穷远处沿固定方向照射
+        // 方向存储在实例变换中，或从材质数据中读取
+        Vector3D lightDir = normalize(Vector3D(0, -1, 0));  // 默认向下
+        
+        // 从实例变换中提取方向（假设存储在 transform.z 中）
+        if (inst.transform.z.x != 0.0f || inst.transform.z.y != 0.0f || inst.transform.z.z != 0.0f) {
+            lightDir = normalize(inst.transform.z);
+        }
+        
+        // 光源位置在无穷远处，沿光线方向的反方向
+        SurfacePoint surfPt;
+        surfPt.position = refPosition - lightDir * 1e10f;  // 无穷远点
+        surfPt.atInfinity = true;
+        surfPt.geometricNormal = Normal3D(lightDir.x, lightDir.y, lightDir.z);
+        surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
+        surfPt.texCoord = TexCoord2D(0, 0);
+        
+        result->lightSurfPt = surfPt;
         result->areaPDF = 1.0f;  // Delta 光源
         result->isValid = true;
         break;
@@ -315,6 +341,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool evaluateLightEmission(
         return false;
     }
     
+    // 方向光：delta 分布，辐射度与方向无关
+    if (descriptor.type == LightType_Directional) {
+        result->Le = spEmittance;
+        result->isValid = true;
+        return true;
+    }
+    
     // Lambertian 发光：辐射度与方向无关，仅当着色点在发光半球内有效
     // dirToShading = 从光源指向着色点；发光方向即 dirToShading，需 dot(dirToShading, normal) > 0
     float cosLight = dot(dirToShading, lightSurfPt.geometricNormal);
@@ -361,12 +394,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeLightPDF(
     
     switch (descriptor.type) {
     case LightType_Point:
-        // 点光源：立体角上为 delta，PDF 无穷大（MIS 时通常取 1 或特殊处理）
-#ifdef __CUDACC__
-        return __int_as_float(0x7F800000);  // +inf
-#else
-        return 1e30f;  // 近似无穷大
-#endif
+    case LightType_Directional:
+        // Delta 光源：PDF 为 0（在立体角测度下）
+        // MIS 权重计算时应特殊处理 delta 光源
+        return 0.0f;
     
     case LightType_Environment: {
         // 环境光：从立体角转回 (theta, phi) 评估 PDF

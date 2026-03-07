@@ -41,7 +41,9 @@ enum MaterialCategory : uint32_t {
 enum BSDFType : uint32_t {
     BSDFType_Lambert = 0,              ///< Lambert 漫反射
     BSDFType_LambertCheckerboard,      ///< Lambert 漫反射 + 棋盘格纹理
-    BSDFType_GGX,                      ///< GGX 微表面镜面反射
+    BSDFType_GGX,                      ///< GGX 微表面镜面反射（电介质）
+    BSDFType_MicrofacetReflection,     ///< GGX 微表面反射（导体，Fresnel）
+    BSDFType_MicrofacetScattering,     ///< GGX 微表面散射（电介质，反射+折射）
     BSDFType_Specular,                 ///< 完美镜面反射
     BSDFType_SpecularTransmission,      ///< 完美镜面透射（支持色散）
     BSDFType_GGXTransmission,           ///< 粗糙透射（GGX 微表面透射）
@@ -242,6 +244,45 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getSpecularConductorParams(
     }
 }
 
+/// 从材质描述符获取导体微表面反射参数（eta, kappa, roughness）
+/// 用于 BSDFType_MicrofacetReflection
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetReflectionParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* eta,
+    SampledSpectrum* kappa,
+    float* roughness) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float er = d[MaterialDataLayout::EtaR];
+    float eg = d[MaterialDataLayout::EtaG];
+    float eb = d[MaterialDataLayout::EtaB];
+    float kr = d[MaterialDataLayout::KappaR];
+    float kg = d[MaterialDataLayout::KappaG];
+    float kb = d[MaterialDataLayout::KappaB];
+    eta->values[0] = er;
+    eta->values[1] = eg;
+    eta->values[2] = eb;
+    eta->values[3] = (er + eg + eb) / 3.0f;
+    kappa->values[0] = kr;
+    kappa->values[1] = kg;
+    kappa->values[2] = kb;
+    kappa->values[3] = (kr + kg + kb) / 3.0f;
+    *roughness = d[MaterialDataLayout::Roughness];
+    *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;
+}
+
+/// 从材质描述符获取微表面散射参数（IOR + roughness）
+/// 用于 MicrofacetScattering（电介质，反射+折射）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetScatteringParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    float* ior,
+    float* roughness) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    *ior = d[MaterialDataLayout::IOR];
+    *ior = (*ior < 1.0f) ? 1.0f : *ior;
+    *roughness = d[MaterialDataLayout::Roughness];
+    *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;
+}
+
 /// 从材质描述符获取透射材质参数（IOR + 色散）
 /// dispersionStrength: 色散强度，0=无色散，>0 时 n(λ) 随波长变化（Cauchy 近似）
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getTransmissionParams(
@@ -435,6 +476,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     case BSDFType_FresnelBlend:
         return MaterialCategory_Diffuse;
     case BSDFType_GGX:
+    case BSDFType_MicrofacetReflection:
     case BSDFType_UE4BRDF:
     case BSDFType_FrostbiteBRDF:
         return MaterialCategory_Glossy;
@@ -442,6 +484,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     case BSDFType_SpecularTransmission:
         return MaterialCategory_Specular;
     case BSDFType_GGXTransmission:
+    case BSDFType_MicrofacetScattering:
         return MaterialCategory_Transmissive;
     case BSDFType_MixedBSDF:
         return MaterialCategory_Mixed;
@@ -455,6 +498,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool materialHasNonDelta(
     const SurfaceMaterialDescriptor& matDesc) {
     BSDFType type = getBSDFType(matDesc);
     return type == BSDFType_Lambert || type == BSDFType_LambertCheckerboard || type == BSDFType_GGX
+        || type == BSDFType_MicrofacetReflection || type == BSDFType_MicrofacetScattering
         || type == BSDFType_FresnelBlend || type == BSDFType_UE4BRDF
         || type == BSDFType_FrostbiteBRDF || type == BSDFType_GGXTransmission
         || type == BSDFType_MixedBSDF;
@@ -475,6 +519,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType 
     case BSDFType_FresnelBlend:
         return DirectionType::Reflection();
     case BSDFType_GGX:
+    case BSDFType_MicrofacetReflection:
     case BSDFType_UE4BRDF:
     case BSDFType_FrostbiteBRDF:
         return DirectionType::HighFreq() | DirectionType::Reflection();
@@ -483,6 +528,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType 
     case BSDFType_SpecularTransmission:
         return DirectionType::Delta0D() | DirectionType::Transmission();
     case BSDFType_GGXTransmission:
+    case BSDFType_MicrofacetScattering:
         return DirectionType::HighFreq() | DirectionType::Transmission();
     case BSDFType_MixedBSDF:
         return DirectionType::HighFreq() | DirectionType::Reflection();
