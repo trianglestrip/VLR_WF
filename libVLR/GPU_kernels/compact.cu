@@ -126,8 +126,9 @@ cudaError_t compactPathsCUB(
     if (err != cudaSuccess)
         return err;
 
-    // 总临时存储 = CUB 工作空间 + flags 缓冲区
-    const size_t totalTempBytes = cubTempBytes + flagsBytes;
+    // 总临时存储 = CUB 工作空间（对齐到16字节） + flags 缓冲区
+    size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
+    const size_t totalTempBytes = alignedCubTempBytes + flagsBytes;
     tempStorageBytes = totalTempBytes;
 
     // 若仅为查询大小，直接返回
@@ -137,9 +138,9 @@ cudaError_t compactPathsCUB(
     if (tempStorageBytes < totalTempBytes)
         return cudaErrorInvalidValue;
 
-    // 2. 分区：d_cubTemp 供 CUB 使用，d_flags 在末尾
+    // 2. 分区：d_cubTemp 供 CUB 使用，d_flags 在末尾（对齐后）
     void* d_cubTemp = d_tempStorage;
-    uint8_t* d_flags = static_cast<uint8_t*>(d_tempStorage) + cubTempBytes;
+    uint8_t* d_flags = static_cast<uint8_t*>(d_tempStorage) + alignedCubTempBytes;
 
     // 3. Kernel 填充活跃标志（flags[i] = 1 表示 pathIndicesIn[i] 对应的路径活跃）
     constexpr uint32_t blockSize = 256;
@@ -178,13 +179,21 @@ __global__ void fillMaterialKeysKernel(
     const uint32_t* __restrict__ pathIndices,
     const WavefrontPathState* __restrict__ pathStates,
     uint32_t* __restrict__ keys,
-    uint32_t numPaths)
+    uint32_t numPaths,
+    uint32_t maxPathIndex)  // 添加最大索引参数用于边界检查
 {
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numPaths)
         return;
 
     uint32_t pathIndex = pathIndices[idx];
+    
+    // 边界检查（虽然通常不需要，但为了安全）
+    if (pathIndex >= maxPathIndex) {
+        keys[idx] = 0xFF;  // 无效路径使用最大值
+        return;
+    }
+    
     keys[idx] = pathStates[pathIndex].materialCategory;
 }
 
@@ -225,14 +234,15 @@ cudaError_t sortPathsByMaterial(
         static_cast<const uint32_t*>(nullptr),
         static_cast<uint32_t*>(nullptr),
         numPaths,
-        0, 8 * sizeof(uint32_t),  // 仅排序 materialCategory 的 8 位（0~255 足够）
+        0, 8,  // 仅排序 materialCategory 的低 8 位（0~255 足够）
         stream);
 
     if (err != cudaSuccess)
         return err;
 
-    // 总临时存储 = CUB 工作空间 + 键缓冲区（输入/输出可复用）
-    const size_t totalTempBytes = cubTempBytes + keysBytes;
+    // 总临时存储 = CUB 工作空间（对齐到16字节） + 键缓冲区
+    size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
+    const size_t totalTempBytes = alignedCubTempBytes + keysBytes;
     tempStorageBytes = totalTempBytes;
 
     if (!d_tempStorage || totalTempBytes == 0)
@@ -241,19 +251,21 @@ cudaError_t sortPathsByMaterial(
     if (tempStorageBytes < totalTempBytes)
         return cudaErrorInvalidValue;
 
-    // 2. 分区：d_cubTemp 供 CUB 使用，d_keys 在末尾（CUB 返回的 temp 大小通常已对齐）
+    // 2. 分区：d_cubTemp 供 CUB 使用，d_keys 在末尾（使用已对齐的偏移）
     void* d_cubTemp = d_tempStorage;
-    uint32_t* d_keys = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(d_tempStorage) + cubTempBytes);
+    uint32_t* d_keys = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(d_tempStorage) + alignedCubTempBytes);
 
     // 3. Kernel 提取材质类别键
     constexpr uint32_t blockSize = 256;
     uint32_t numBlocks = (numPaths + blockSize - 1) / blockSize;
+    
     fillMaterialKeysKernel<<<numBlocks, blockSize, 0, stream>>>(
         d_pathIndicesIn,
         pathStates,
         d_keys,
-        numPaths);
-
+        numPaths,
+        0xFFFFFFFF);  // 最大索引（暂时使用最大值）
+    
     err = cudaGetLastError();
     if (err != cudaSuccess)
         return err;
@@ -269,7 +281,7 @@ cudaError_t sortPathsByMaterial(
         d_pathIndicesOut,
         numPaths,
         0,
-        sizeof(uint32_t) * 8,  // 排序完整 32 位键
+        8,  // 排序低 8 位（与查询时一致）
         stream);
 
     return err;
@@ -278,9 +290,10 @@ cudaError_t sortPathsByMaterial(
 
 // ============================================================================
 // 临时存储大小查询
+// 注意：这些函数需要从主机代码调用，确保正确导出
 // ============================================================================
 
-size_t compactPathsCUBTempStorageBytes(uint32_t numPaths) {
+__host__ size_t compactPathsCUBTempStorageBytes(uint32_t numPaths) {
     size_t cubTempBytes = 0;
     const size_t flagsBytes = numPaths * sizeof(uint8_t);
 
@@ -294,11 +307,13 @@ size_t compactPathsCUBTempStorageBytes(uint32_t numPaths) {
         numPaths,
         0);
 
-    return cubTempBytes + flagsBytes;
+    // 对齐到 16 字节边界
+    size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
+    return alignedCubTempBytes + flagsBytes;
 }
 
 
-size_t sortPathsByMaterialTempStorageBytes(uint32_t numPaths) {
+__host__ size_t sortPathsByMaterialTempStorageBytes(uint32_t numPaths) {
     if (numPaths == 0)
         return 0;
 
@@ -312,10 +327,12 @@ size_t sortPathsByMaterialTempStorageBytes(uint32_t numPaths) {
         static_cast<uint32_t*>(nullptr),
         numPaths,
         0,
-        sizeof(uint32_t) * 8,  // 排序完整 32 位键
+        8,  // 排序低 8 位（与实际调用一致）
         0);
 
-    return cubTempBytes + numPaths * sizeof(uint32_t);
+    // 对齐到 16 字节边界
+    size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
+    return alignedCubTempBytes + numPaths * sizeof(uint32_t);
 }
 
 } // namespace shared

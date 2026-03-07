@@ -84,6 +84,8 @@ public:
     // 配置
     void setMaxPathLength(uint32_t maxLength);
     void setWavefrontConfig(const WavefrontConfig& config);
+    void setWavefrontPathSorting(bool enable);
+    void setWavefrontStreamCompaction(bool enable);
     
     // 统计信息
     const shared::WavefrontPerformanceStats& getPerformanceStats() const;
@@ -163,6 +165,13 @@ private:
             shared::WavefrontPerformanceStats perfStats;
             cudau::Buffer<uint32_t>* perfStatsBuffer;
             
+            // CUB 临时存储（用于排序和压缩）
+            cudau::Buffer<uint8_t>* cubTempStorage;
+            size_t cubTempStorageBytes;
+            cudau::Buffer<uint32_t>* sortedPathIndices;  // 排序后的路径索引
+            cudau::Buffer<uint32_t>* compactedPathIndices;  // 压缩后的路径索引
+            cudau::Buffer<uint32_t>* numCompactedPaths;  // CUB 输出的压缩后路径数
+            
             // 配置
             uint32_t maxPathLength;
             uint32_t maxNumPaths;
@@ -202,6 +211,11 @@ private:
                 , sceneBoundsBuffer(nullptr)
                 , launchParamsBuffer(nullptr)
                 , perfStatsBuffer(nullptr)
+                , cubTempStorage(nullptr)
+                , cubTempStorageBytes(0)
+                , sortedPathIndices(nullptr)
+                , compactedPathIndices(nullptr)
+                , numCompactedPaths(nullptr)
                 , maxPathLength(shared::WavefrontConfig::DefaultMaxPathLength)
                 , maxNumPaths(0)
                 , usePathSorting(shared::WavefrontConfig::UsePathSorting)

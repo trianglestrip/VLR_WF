@@ -216,6 +216,23 @@ VLR_API void* vlrGetOutputBuffer(VLRContext context);
 
 
 // ============================================================================
+// Wavefront 优化配置
+// ============================================================================
+
+/// 设置 Wavefront 路径排序（按材质类别）
+/// @param context 上下文句柄
+/// @param enable 是否启用排序（1=启用，0=禁用）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrContextSetWavefrontPathSorting(VLRContext context, int enable);
+
+/// 设置 Wavefront Stream Compaction（移除已终止路径）
+/// @param context 上下文句柄
+/// @param enable 是否启用压缩（1=启用，0=禁用）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrContextSetWavefrontStreamCompaction(VLRContext context, int enable);
+
+
+// ============================================================================
 // 版本与工具
 // ============================================================================
 

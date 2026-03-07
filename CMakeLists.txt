@@ -98,5 +98,22 @@ target_include_directories(optix_minimal_test PRIVATE
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 target_link_libraries(optix_minimal_test PRIVATE CUDA::cudart CUDA::cuda_driver)
 
+# Cornell Box 测试场景
+add_executable(cornell_box_test test/cornell_box_test.cpp)
+target_include_directories(cornell_box_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
+target_link_libraries(cornell_box_test PRIVATE VLR CUDA::cudart)
+
+# CUB 测试
+add_executable(cub_test test/cub_test.cu)
+set_target_properties(cub_test PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    CUDA_ARCHITECTURES "75"
+)
+target_include_directories(cub_test PRIVATE
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+)
+target_link_libraries(cub_test PRIVATE CUDA::cudart)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

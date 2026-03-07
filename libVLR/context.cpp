@@ -11,6 +11,7 @@
 #include "context.h"
 #include "scene.h"
 #include "GPU_kernels/kernel_launch.h"
+#include "GPU_kernels/compact.h"
 #include "utils/cuda_util.h"
 #include "utils/optix_util.h"
 #ifdef _WIN32
@@ -615,6 +616,51 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     }
     wf.perfStatsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 16);
     
+    // 分配 CUB 临时存储（用于排序和压缩）
+    if (wf.usePathSorting || wf.useStreamCompaction) {
+        // 查询所需临时存储大小
+        size_t sortBytes = 0;
+        size_t compactBytes = 0;
+        
+        if (wf.usePathSorting) {
+            sortBytes = shared::sortPathsByMaterialTempStorageBytes(numPixels);
+            printf("[VLR] CUB sort temp storage: %.2f KB\n", sortBytes / 1024.0f);
+        }
+        
+        if (wf.useStreamCompaction) {
+            compactBytes = shared::compactPathsCUBTempStorageBytes(numPixels);
+            printf("[VLR] CUB compact temp storage: %.2f KB\n", compactBytes / 1024.0f);
+        }
+        
+        // 取最大值（两个操作不会同时使用临时存储）
+        wf.cubTempStorageBytes = std::max(sortBytes, compactBytes);
+        
+        if (wf.cubTempStorageBytes > 0) {
+            if (!wf.cubTempStorage) {
+                wf.cubTempStorage = new cudau::Buffer<uint8_t>();
+            }
+            wf.cubTempStorage->initialize(m_cudaContext, cudau::BufferType::Device, wf.cubTempStorageBytes);
+            
+            // 分配排序/压缩辅助缓冲区
+            if (!wf.sortedPathIndices) {
+                wf.sortedPathIndices = new cudau::Buffer<uint32_t>();
+            }
+            wf.sortedPathIndices->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
+            
+            if (!wf.compactedPathIndices) {
+                wf.compactedPathIndices = new cudau::Buffer<uint32_t>();
+            }
+            wf.compactedPathIndices->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
+            
+            if (!wf.numCompactedPaths) {
+                wf.numCompactedPaths = new cudau::Buffer<uint32_t>();
+            }
+            wf.numCompactedPaths->initialize(m_cudaContext, cudau::BufferType::Device, 1);
+            
+            printf("[VLR] CUB buffers allocated (temp: %.2f KB)\n", wf.cubTempStorageBytes / 1024.0f);
+        }
+    }
+    
     // 更新配置
     wf.maxNumPaths = numPixels;
     wf.currentWidth = width;
@@ -859,6 +905,16 @@ void Context::cleanupWavefrontResources() {
     delete wf.sceneBoundsBuffer;
     wf.sceneBoundsBuffer = nullptr;
     
+    // 释放 CUB 临时存储
+    delete wf.cubTempStorage;
+    delete wf.sortedPathIndices;
+    delete wf.compactedPathIndices;
+    delete wf.numCompactedPaths;
+    wf.cubTempStorage = nullptr;
+    wf.sortedPathIndices = nullptr;
+    wf.compactedPathIndices = nullptr;
+    wf.numCompactedPaths = nullptr;
+    
     for (int i = 0; i < shared::NumMaterialCategories; ++i) {
         delete wf.materialQueueIndices[i];
         wf.materialQueueIndices[i] = nullptr;
@@ -1017,13 +1073,121 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         // 阶段 5: 采样 BSDF
         launchSampleBSDF(numActivePaths);
         
-        // 交换当前队列与下一队列
-        std::swap(wf.activePathIndices, wf.nextActivePathIndices);
-        
-        // 重置下一队列计数
+        // 阶段 6: 路径压缩和排序
+        // 获取下一轮路径数量
+        uint32_t numNextPaths = 0;
         if (wf.queueCounters) {
+            CUDA_CHECK(cudaMemcpyAsync(
+                &numNextPaths,
+                wf.queueCounters->getDevicePointerAt(1),
+                sizeof(uint32_t),
+                cudaMemcpyDeviceToHost,
+                m_stream
+            ));
+            CUDA_CHECK(cudaStreamSynchronize(m_stream));
+        }
+        
+        
+        if (wf.useStreamCompaction && numNextPaths > 0) {
+            // 使用 CUB Stream Compaction 移除已终止路径
+            CUDA_CHECK(shared::compactPathsCUB(
+                static_cast<uint32_t*>(wf.nextActivePathIndices->getDevicePointer()),
+                numNextPaths,
+                wf.pathStateBuffer->getDevicePointer(),
+                static_cast<uint32_t*>(wf.activePathIndices->getDevicePointer()),
+                static_cast<uint32_t*>(wf.queueCounters->getDevicePointerAt(0)),
+                wf.cubTempStorage->getDevicePointer(),
+                wf.cubTempStorageBytes,
+                m_stream
+            ));
+            
+            // 重置下一队列计数
             uint32_t zero = 0;
-            wf.queueCounters->copyToDevice(&zero, 1, m_stream);
+            CUDA_CHECK(cudaMemcpyAsync(
+                wf.queueCounters->getDevicePointerAt(1),
+                &zero,
+                sizeof(uint32_t),
+                cudaMemcpyHostToDevice,
+                m_stream
+            ));
+        } else if (wf.usePathSorting && numNextPaths > 0 && depth > 0) {
+            // 使用 CUB RadixSort 按材质排序
+            // 注意：仅在深度>0时排序，因为深度0时materialCategory未初始化
+            // 注意：临时存储大小需要与实际路径数匹配
+            size_t requiredTempBytes = shared::sortPathsByMaterialTempStorageBytes(numNextPaths);
+            
+            if (requiredTempBytes > wf.cubTempStorageBytes) {
+                fprintf(stderr, "[VLR] Warning: CUB temp storage insufficient (%zu > %zu), using simple swap\n",
+                        requiredTempBytes, wf.cubTempStorageBytes);
+                fflush(stderr);
+                
+                // 回退到简单交换
+                std::swap(wf.activePathIndices, wf.nextActivePathIndices);
+                CUDA_CHECK(cudaMemcpyAsync(
+                    wf.queueCounters->getDevicePointerAt(0),
+                    wf.queueCounters->getDevicePointerAt(1),
+                    sizeof(uint32_t),
+                    cudaMemcpyDeviceToDevice,
+                    m_stream
+                ));
+                uint32_t zero = 0;
+                CUDA_CHECK(cudaMemcpyAsync(
+                    wf.queueCounters->getDevicePointerAt(1),
+                    &zero,
+                    sizeof(uint32_t),
+                    cudaMemcpyHostToDevice,
+                    m_stream
+                ));
+            } else {
+                size_t tempBytes = wf.cubTempStorageBytes;
+                CUDA_CHECK(shared::sortPathsByMaterial(
+                    static_cast<uint32_t*>(wf.nextActivePathIndices->getDevicePointer()),
+                    numNextPaths,
+                    wf.pathStateBuffer->getDevicePointer(),
+                    static_cast<uint32_t*>(wf.activePathIndices->getDevicePointer()),
+                    wf.cubTempStorage->getDevicePointer(),
+                    tempBytes,
+                    m_stream
+                ));
+
+                
+                // 同步队列计数器：counters[0] = counters[1], counters[1] = 0
+                CUDA_CHECK(cudaMemcpyAsync(
+                    wf.queueCounters->getDevicePointerAt(0),
+                    wf.queueCounters->getDevicePointerAt(1),
+                    sizeof(uint32_t),
+                    cudaMemcpyDeviceToDevice,
+                    m_stream
+                ));
+                uint32_t zero = 0;
+                CUDA_CHECK(cudaMemcpyAsync(
+                    wf.queueCounters->getDevicePointerAt(1),
+                    &zero,
+                    sizeof(uint32_t),
+                    cudaMemcpyHostToDevice,
+                    m_stream
+                ));
+            }
+        } else {
+            // 简单队列交换（默认）
+            std::swap(wf.activePathIndices, wf.nextActivePathIndices);
+            
+            // 同步队列计数器：counters[0] = counters[1], counters[1] = 0
+            CUDA_CHECK(cudaMemcpyAsync(
+                wf.queueCounters->getDevicePointerAt(0),
+                wf.queueCounters->getDevicePointerAt(1),
+                sizeof(uint32_t),
+                cudaMemcpyDeviceToDevice,
+                m_stream
+            ));
+            uint32_t zero = 0;
+            CUDA_CHECK(cudaMemcpyAsync(
+                wf.queueCounters->getDevicePointerAt(1),
+                &zero,
+                sizeof(uint32_t),
+                cudaMemcpyHostToDevice,
+                m_stream
+            ));
         }
     }
     
@@ -1112,6 +1276,14 @@ void Context::launchSampleBSDF(uint32_t numActivePaths) {
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
     launchSampleBSDFKernel(d_params, numActivePaths, m_stream);
+}
+
+void Context::setWavefrontPathSorting(bool enable) {
+    m_optix.wavefrontPathTracing.usePathSorting = enable;
+}
+
+void Context::setWavefrontStreamCompaction(bool enable) {
+    m_optix.wavefrontPathTracing.useStreamCompaction = enable;
 }
 
 void Context::launchAccumulate(uint32_t numPaths) {

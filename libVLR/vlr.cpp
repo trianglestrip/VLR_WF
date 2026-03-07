@@ -359,4 +359,28 @@ void vlrGetVersion(uint32_t* major, uint32_t* minor, uint32_t* patch) {
     if (patch) *patch = vlr::VLR_VERSION.patch;
 }
 
+VLRResult vlrContextSetWavefrontPathSorting(VLRContext context, int enable) {
+    if (!context) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        impl->ctx->setWavefrontPathSorting(enable != 0);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrContextSetWavefrontStreamCompaction(VLRContext context, int enable) {
+    if (!context) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        impl->ctx->setWavefrontStreamCompaction(enable != 0);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 }  // extern "C"
