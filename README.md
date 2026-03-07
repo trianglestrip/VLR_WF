@@ -230,18 +230,6 @@ VLR_WF 实现了多阶段性能优化，累计实现 2.5x 加速。
 
 #### Stage 4: Early Termination (additional 16.5%)
 
-**Memory Access Optimization**
-- 使用 `__restrict__` 指针提示编译器优化
-- 减少内存别名，提高缓存命中率
-- 效果：降低内存延迟
-
-**Configurable Performance**
-- 集中式配置文件 `shared/performance_config.h`
-- 可针对不同 GPU 架构调整参数
-- 支持运行时性能分析和调优
-
-#### Stage 4: Early Termination (additional 16.5%)
-
 **Dynamic Path Termination**
 - 问题：大部分路径终止后，仍继续执行完整深度循环
 - 优化：当活跃路径数 < 1% 且深度 > 10 时，提前终止
