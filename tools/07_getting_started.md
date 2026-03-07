@@ -178,12 +178,40 @@ dir ..\bin
 # 进入bin目录
 cd ..\bin
 
-# 运行测试程序
+# 运行测试程序（使用默认配置）
 .\cornell_box_improved_test.exe
 
-# 或者带参数运行
-.\cornell_box_improved_test.exe --width 512 --height 512 --samples 64
+# 或者使用预设配置
+.\cornell_box_improved_test.exe config_presets\preview.ini      # 快速预览
+.\cornell_box_improved_test.exe config_presets\benchmark.ini    # 性能测试
+.\cornell_box_improved_test.exe config_presets\high_quality.ini # 高质量
+
+# 或者使用自定义配置
+.\cornell_box_improved_test.exe my_config.ini
 ```
+
+### 配置文件说明
+
+项目支持通过INI配置文件调整所有渲染和性能参数，无需重新编译：
+
+**预设配置**：
+
+| 配置文件 | 用途 | 分辨率 | 采样 | 时间 |
+|---------|------|--------|------|------|
+| preview.ini | 快速预览 | 512×512 | 16 | ~0.2秒 |
+| benchmark.ini | 性能测试 | 512×512 | 1024 | ~8秒 |
+| high_quality.ini | 高质量渲染 | 1920×1080 | 2048 | ~120秒 |
+| debug.ini | 调试 | 256×256 | 4 | ~0.05秒 |
+
+**可配置参数**：
+- 图像分辨率、采样数、深度
+- CPU-GPU同步间隔（SyncInterval）
+- 路径压缩阈值（CompressionThreshold）
+- Kernel线程块大小（BlockSize）
+- 早期终止参数（EarlyTermination）
+- 所有优化开关（排序、压缩、融合kernel等）
+
+📖 **完整配置指南**: [../docs/CONFIGURATION_GUIDE.md](../docs/CONFIGURATION_GUIDE.md)
 
 ### 预期输出
 

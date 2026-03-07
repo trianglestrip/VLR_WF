@@ -68,6 +68,11 @@ cmake_install.cmake
 
 # 输出目录
 bin/
+# 但保留配置文件
+!bin/*.ini
+!bin/config_presets/
+!bin/config_presets/*.ini
+!bin/config_presets/*.md
 
 # IDE 配置
 .idea/

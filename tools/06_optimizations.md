@@ -1589,6 +1589,28 @@ void autoTuneConfig(WavefrontConfig& config, int computeCapability) {
 - **CUB集成**: `libVLR/GPU_kernels/compact.cu`
 - **性能报告**: `docs/PERFORMANCE_REPORT.md`
 - **渲染循环**: `libVLR/context.cpp:1180-1379`
+- **配置系统**: `libVLR/config_loader.h` ⭐ 新增
+- **配置指南**: `docs/CONFIGURATION_GUIDE.md` ⭐ 新增
+
+### 配置系统
+
+所有性能参数现已支持通过INI配置文件调整，无需重新编译：
+
+- **主配置**: `bin/render_config.ini`
+- **预设配置**: `bin/config_presets/`
+  - `preview.ini`: 快速预览
+  - `high_quality.ini`: 高质量渲染
+  - `benchmark.ini`: 性能测试
+  - `debug.ini`: 调试配置
+
+**可配置参数包括**：
+- SyncInterval（CPU-GPU同步间隔）
+- CompressionThreshold（路径压缩阈值）
+- BlockSize（各kernel的线程块大小）
+- EarlyTermination（早期终止参数）
+- 所有优化开关（排序、压缩、融合kernel等）
+
+📖 **完整配置指南**: [../docs/CONFIGURATION_GUIDE.md](../docs/CONFIGURATION_GUIDE.md)
 
 ---
 

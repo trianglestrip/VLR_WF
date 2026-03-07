@@ -124,6 +124,51 @@ vlrDestroyScene(scene);
 vlrDestroyContext(context);
 ```
 
+### Configuration-Based Usage
+
+```cpp
+#include "config_loader.h"
+
+int main(int argc, char* argv[]) {
+    // 1. 加载配置文件
+    vlr::RenderConfig config;
+    std::string configFile = (argc > 1) ? argv[1] : "render_config.ini";
+    
+    if (!vlr::ConfigLoader::loadRenderConfig(configFile, config)) {
+        fprintf(stderr, "Failed to load config, using defaults\n");
+    }
+    
+    // 2. 打印配置摘要
+    vlr::ConfigLoader::printConfigSummary(config);
+    
+    // 3. 创建上下文并应用配置
+    VLRContext ctx = nullptr;
+    vlrCreateContext(nullptr, config.deviceID, &ctx);
+    vlrSetPerformanceConfig(ctx, &config.perfConfig);
+    
+    // 4. 渲染
+    vlrRender(ctx, scene, config.width, config.height, 
+              config.samples, VLRRenderer_WavefrontPathTracing);
+    
+    return 0;
+}
+```
+
+**使用预设配置**：
+
+```bash
+# 快速预览
+.\cornell_box_improved_test.exe config_presets\preview.ini
+
+# 高质量渲染
+.\cornell_box_improved_test.exe config_presets\high_quality.ini
+
+# 性能测试
+.\cornell_box_improved_test.exe config_presets\benchmark.ini
+```
+
+📖 **详细配置指南**: [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md)
+
 ---
 
 ## Architecture
@@ -323,13 +368,25 @@ Three colored boxes demonstrating material handling:
 
 ## Documentation
 
-### User Documentation
+### 📖 教学文档（推荐初学者）
+
+- **[tools/README.md](tools/README.md)**: 完整的教学文档导航 ⭐
+- **[tools/00_overview.md](tools/00_overview.md)**: 渲染器总览和基础概念
+- **[tools/07_getting_started.md](tools/07_getting_started.md)**: 入门教程和实践指南
+
+### ⚙️ 配置和调优
+
+- **[docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md)**: 完整的配置参数和调优指南 ⭐
+- **[bin/config_presets/](bin/config_presets/)**: 预设配置文件（preview、benchmark、high_quality、debug）
+- **[scripts/README.md](scripts/README.md)**: 自动调优脚本使用指南
+
+### 📚 技术文档
 
 - **[API Reference](docs/WAVEFRONT_API.md)**: Complete API documentation
 - **[Getting Started](docs_wavefront/GETTING_STARTED.md)**: Quick start guide
 - **[Test Report](docs/STAGE6_TEST_REPORT.md)**: Comprehensive test results
 
-### Developer Documentation
+### 🔧 开发文档
 
 - **[Implementation Details](docs/WAVEFRONT_IMPLEMENTATION.md)**: Architecture and implementation
 - **[Performance Report](docs/PERFORMANCE_REPORT.md)**: Optimization details and benchmarks

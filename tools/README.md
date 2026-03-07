@@ -927,8 +927,18 @@ graph TB
 - **WAVEFRONT_IMPLEMENTATION.md**: 实现细节和代码分析
 - **PERFORMANCE_REPORT.md**: 性能优化报告和bug修复
 - **wavefront_design.md**: 原始设计文档
+- **CONFIGURATION_GUIDE.md**: 完整的配置参数和调优指南 ⭐ 新增
 
-这些文档更偏向开发者，包含更多技术细节。
+### 配置系统
+
+- **bin/render_config.ini**: 主配置文件（可调整所有性能参数）
+- **bin/config_presets/**: 预设配置文件
+  - `preview.ini`: 快速预览（~0.2秒）
+  - `high_quality.ini`: 高质量渲染（~120秒）
+  - `benchmark.ini`: 性能测试（~8秒）
+  - `debug.ini`: 调试配置
+
+📖 **配置指南**: [../docs/CONFIGURATION_GUIDE.md](../docs/CONFIGURATION_GUIDE.md)
 
 ### 项目README
 
