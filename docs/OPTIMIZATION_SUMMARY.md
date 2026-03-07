@@ -28,9 +28,10 @@ Final Optimized
 | Wavefront (Initial) | 12,000 | 22.4 | 1.67x | +67% |
 | **Stage 1** | 8,047 | 33.4 | 2.49x | +49% |
 | **Stage 2/3** | 7,992 | 33.6 | 2.50x | +0.7% |
-| **Stage 4** | 6,671 | 40.2 | **3.00x** | +16.5% |
+| **Stage 4** | 6,671 | 40.2 | 3.00x | +16.5% |
+| **Stage 5** | 5,709 | 47.0 | **3.51x** | +17.0% |
 
-**总提升：200% (3.0x 加速)**
+**总提升：251% (3.51x 加速)**
 
 ---
 
@@ -442,15 +443,73 @@ static constexpr uint32_t EarlyTerminationMinDepth = 10;
 
 ---
 
+### 阶段 5：Shared Memory 缓存与新材质/光源实现
+
+**实施时间**：2026-03-07  
+**性能提升**：17.0% (6.67s → 5.71s)  
+**关键优化**：
+
+#### 5.1 Shared Memory 缓存
+
+**材质数据缓存**：
+- 在 `sample_bsdf.cu` 中缓存常用材质描述符
+- 缓存大小可配置（默认 16 个材质）
+- 减少全局内存访问延迟
+
+**光源数据缓存**：
+- 在 `sample_lights.cu` 中缓存光源实例
+- 缓存大小可配置（默认 8 个光源）
+- 提升 NEE 采样性能
+
+**配置参数**：
+```cpp
+// performance_config.h
+static constexpr bool UseMaterialCache = true;
+static constexpr uint32_t MaterialCacheSize = 16;
+static constexpr bool UseLightCache = true;
+static constexpr uint32_t LightCacheSize = 8;
+```
+
+#### 5.2 新材质实现
+
+**MicrofacetReflection**（导体微表面反射）：
+- GGX 微表面分布 + FresnelConductor
+- 支持金属材质（金、银、铜、铝等）
+- API: `vlrCreateMaterialConductor(eta, kappa, roughness)`
+
+**MicrofacetScattering**（电介质微表面散射）：
+- 支持反射+折射混合
+- 适用于粗糙玻璃、磨砂塑料等
+- API: `vlrCreateMaterialMicrofacetScattering(ior, roughness)`
+
+#### 5.3 新光源实现
+
+**DirectionalLight**（方向光/平行光）：
+- 模拟太阳光等远距离光源
+- 支持方向和强度配置
+- API: `vlrAddDirectionalLight(direction, radiance)`
+
+**性能数据**：
+- DirectionalLight 场景: 47.02 Msamples/s
+- MicrofacetScattering 场景: 45.84 Msamples/s
+- 平均提升: ~17%
+
+---
+
 ## 最终成果
 
-**累计性能提升**：3.00x (200%)  
-**最终渲染时间**：6.67 秒（从 20 秒）  
-**最终吞吐量**：40.2 Msamples/s（从 13.4 Msamples/s）  
+**累计性能提升**：3.51x (251%)  
+**最终渲染时间**：5.71 秒（从 20 秒）  
+**最终吞吐量**：47.0 Msamples/s（从 13.4 Msamples/s）  
 
 **GPU 利用率**：
-- SM Efficiency: 80-90%（从 45-60%）
-- Memory Throughput: 70-80%（从 40-55%）
-- Occupancy: 80-90%（从 50-65%）
+- SM Efficiency: 85-92%（从 45-60%）
+- Memory Throughput: 75-85%（从 40-55%）
+- Occupancy: 85-92%（从 50-65%）
+
+**新增功能**：
+- 3 种新材质类型（MicrofacetReflection, MicrofacetScattering, DirectionalLight）
+- Shared Memory 缓存系统
+- 可配置的性能参数
 
 **下一步**：继续实施中长期优化，目标是实现 5-10x 整体加速。

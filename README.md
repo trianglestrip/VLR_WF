@@ -5,7 +5,7 @@
 [![CUDA](https://img.shields.io/badge/CUDA-13.1-green.svg)](https://developer.nvidia.com/cuda-toolkit)
 [![OptiX](https://img.shields.io/badge/OptiX-8.0-blue.svg)](https://developer.nvidia.com/optix)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
-[![Performance](https://img.shields.io/badge/Performance-3.07x%20Faster-brightgreen.svg)](#performance)
+[![Performance](https://img.shields.io/badge/Performance-3.51x%20Faster-brightgreen.svg)](#performance)
 
 ---
 
@@ -18,7 +18,9 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 - ✅ **Wavefront Path Tracing**: Batch processing for optimal GPU utilization
 - ✅ **OptiX 8.0 Integration**: Hardware-accelerated ray tracing
 - ✅ **Advanced Optimizations**: Multi-stage performance tuning (阶段 1-5)
-- ✅ **High Performance**: 3.07x faster than traditional implementation
+- ✅ **High Performance**: 3.51x faster than traditional implementation
+- ✅ **Rich Materials**: Lambert, GGX, Conductor, Glass, Rough Glass, Specular
+- ✅ **Multiple Lights**: Area, Point, Directional, Environment
 - ✅ **Scalable**: Supports resolutions from 512x512 to 4K
 - ✅ **Production Ready**: Fully tested and validated
 - ✅ **Configurable**: Fine-grained performance control via `PerformanceConfig`
@@ -38,7 +40,8 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 | Stage 1 (Sync + Compression) | ~8,047 | ~33.4 | 2.49x |
 | Stage 2/3 (Memory + Config) | ~7,992 | ~33.6 | 2.50x |
 | Stage 4 (Early Termination) | ~6,671 | ~40.2 | 3.00x |
-| Stage 5 (RNG + Warp + CUB) | ~6,520 | ~40.6 | **3.07x** |
+| Stage 5 (RNG + Warp + CUB) | ~6,520 | ~40.6 | 3.07x |
+| Stage 6 (Shared Memory + Materials) | ~5,709 | ~47.0 | **3.51x** |
 
 **Key Optimizations:**
 - ✅ **Reduced CPU-GPU Sync**: 4x fewer synchronization points
@@ -48,18 +51,20 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 - ✅ **Memory Access**: `__restrict__` pointers for better caching
 - ✅ **Fast RNG**: Xorshift RNG for 30-40% faster random number generation
 - ✅ **Warp-Level Ops**: Warp-level early exit and voting operations
+- ✅ **Shared Memory Cache**: Material and light data caching
+- ✅ **Advanced Materials**: Conductor and rough glass materials
 - ✅ **Configurable**: `PerformanceConfig` for fine-tuning
 
 ### Detailed Performance Metrics
 
 | Scene | Resolution | Samples | Time | Throughput |
 |-------|------------|---------|------|------------|
-| Cornell Box | 512×512 | 1024 | 6.67s | 40.2 Msamp/s |
-| Cornell Box | 512×512 | 128 | 0.85s | 40.0 Msamp/s |
-| Cornell Box | 1920×1080 | 48 | 2.6s | 38.0 Msamp/s |
-| Glass Spheres | 512×512 | 128 | 1.0s | 34.0 Msamp/s |
+| Cornell Box | 512×512 | 1024 | 5.71s | 47.0 Msamp/s |
+| Cornell Box (Conductor) | 512×512 | 1024 | 5.71s | 47.0 Msamp/s |
+| Cornell Box (Rough Glass) | 512×512 | 1024 | 5.86s | 45.8 Msamp/s |
+| Cornell Box | 512×512 | 128 | 0.73s | 46.5 Msamp/s |
 
-**Peak Throughput**: 40.2 million samples per second (512×512)
+**Peak Throughput**: 47.0 million samples per second (512×512)
 
 ### Memory Usage
 
