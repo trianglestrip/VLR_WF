@@ -86,106 +86,79 @@ struct alignas(16) WavefrontPathState {
     // bit 4: hitEmissive - 是否击中发光表面
     // bit 5-7: 保留
     
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isActive() const {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool isActive() const {
         return flags & 0x1;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isTerminated() const {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool isTerminated() const {
         return flags & 0x2;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setActive(bool active) {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setActive(bool active) {
         if (active) flags |= 0x1;
         else flags &= ~0x1;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setTerminated() {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setTerminated() {
         flags |= 0x2;
         flags &= ~0x1;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool maxLengthReached() const {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool maxLengthReached() const {
         return flags & 0x4;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setMaxLengthReached() {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setMaxLengthReached() {
         flags |= 0x4;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool singleWlSelected() const {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool singleWlSelected() const {
         return flags & 0x8;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setSingleWlSelected() {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setSingleWlSelected() {
         flags |= 0x8;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitEmissive() const {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool hitEmissive() const {
         return flags & 0x10;
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setHitEmissive() {
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setHitEmissive() {
         flags |= 0x10;
     }
 };
 
-static_assert(sizeof(WavefrontPathState) == 144, "PathState 大小必须为 144 字节");
-
+#if !defined(__CUDACC__)
+static_assert(sizeof(WavefrontPathState) == 144, "PathState size must be 144 bytes");
+#endif
 
 /// 击中信息：存储光线相交结果
 /// 大小：32 字节（针对内存带宽优化）
 struct alignas(16) WavefrontHitInfo {
-    // === 击中几何信息（16 字节）===
-    uint32_t instIndex;                // 实例索引（4 字节）
-    uint32_t geomInstIndex;            // 几何实例索引（4 字节）
-    uint32_t primIndex;                // 图元索引（4 字节）
-    uint32_t hitFlags;                 // 击中标志位（4 字节）
-    
-    // === 参数坐标（16 字节）===
-    float u, v;                        // 重心坐标或参数坐标（8 字节）
-    float t;                           // 光线参数 t（4 字节）
-    float _padding;                    // 对齐填充（4 字节）
-    
-    // === 总大小：32 字节 ===
-    
-    // 击中标志位定义：
-    // bit 0: hasHit - 是否击中任何几何体
-    // bit 1: hitInfinity - 是否击中无穷远（环境）
-    // bit 2: hitEmissive - 是否击中发光表面
-    // bit 3: hitTransmissive - 是否击中透射表面
-    // bit 4-7: 保留
-    
+    uint32_t instIndex;
+    uint32_t geomInstIndex;
+    uint32_t primIndex;
+    uint32_t hitFlags;
+    float u, v;
+    float t;
+    float _padding;
+
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasHit() const {
         return hitFlags & 0x1;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitInfinity() const {
         return hitFlags & 0x2;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitEmissive() const {
         return hitFlags & 0x4;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitTransmissive() const {
         return hitFlags & 0x8;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE void setHasHit(bool hit) {
         if (hit) hitFlags |= 0x1;
         else hitFlags &= ~0x1;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE void setHitInfinity(bool inf) {
         if (inf) hitFlags |= 0x2;
         else hitFlags &= ~0x2;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE void setHitEmissive(bool emissive) {
         if (emissive) hitFlags |= 0x4;
         else hitFlags &= ~0x4;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE void reset() {
         instIndex = 0xFFFFFFFF;
         geomInstIndex = 0xFFFFFFFF;
@@ -195,46 +168,45 @@ struct alignas(16) WavefrontHitInfo {
     }
 };
 
-static_assert(sizeof(WavefrontHitInfo) == 32, "HitInfo 大小必须为 32 字节");
-
+#if !defined(__CUDACC__)
+static_assert(sizeof(WavefrontHitInfo) == 32, "HitInfo size must be 32 bytes");
+#endif
 
 // ============================================================================
 // 2. 工作队列管理
 // ============================================================================
 
 /// 工作队列：管理活跃路径的索引
-/// 使用原子操作实现线程安全的入队/出队
 struct WavefrontWorkQueue {
-    uint32_t* pathIndices;             // 路径索引数组（GPU 内存）
-    uint32_t* counter;                 // 原子计数器（GPU 内存）
-    uint32_t capacity;                 // 队列容量
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t size() const {
+    uint32_t* pathIndices;
+    uint32_t* counter;
+    uint32_t capacity;
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t size() {
         return *counter;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t enqueue(uint32_t pathIndex) {
-#ifdef __CUDACC__
         uint32_t slot = atomicAdd(counter, 1u);
-#else
-        atomicAdd(counter, 1u);
-        uint32_t slot = (*counter) - 1;
-#endif
         if (slot < capacity) {
             pathIndices[slot] = pathIndex;
             return slot;
         }
-        return 0xFFFFFFFF; // 队列已满
+        return 0xFFFFFFFF;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t dequeue() {
-        uint32_t slot = atomicSub(counter, 1);
+#ifdef __CUDACC__
+        // CUDA 11+: atomicSub(unsigned*) 返回 void，改用 atomicAdd(counter, -1) 获取旧值
+        uint32_t slot = atomicAdd(counter, 0xFFFFFFFFu);
+#else
+        uint32_t oldVal = *counter;
+        *counter = (oldVal > 0) ? (oldVal - 1) : 0;
+        uint32_t slot = oldVal;
+#endif
         if (slot > 0 && slot <= capacity) {
             return pathIndices[slot - 1];
         }
-        return 0xFFFFFFFF; // 队列为空
+        return 0xFFFFFFFF;
     }
-    
     CUDA_DEVICE_FUNCTION CUDA_INLINE void reset() {
         *counter = 0;
     }
@@ -243,15 +215,15 @@ struct WavefrontWorkQueue {
 
 /// 材质队列集：按材质类型分类的工作队列
 struct WavefrontMaterialQueues {
-    WavefrontWorkQueue queues[NumMaterialCategories];
-    
+    WavefrontWorkQueue queues[::vlr::shared::NumMaterialCategories];
+
     CUDA_DEVICE_FUNCTION CUDA_INLINE void enqueueByCategory(
-        uint32_t pathIndex, MaterialCategory category) {
+        uint32_t pathIndex, ::vlr::shared::MaterialCategory category) {
         queues[category].enqueue(pathIndex);
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE void resetAll() {
-        for (int i = 0; i < NumMaterialCategories; ++i) {
+            for (int i = 0; i < ::vlr::shared::NumMaterialCategories; ++i) {
             queues[i].reset();
         }
     }
@@ -348,7 +320,8 @@ struct WavefrontLaunchParameters {
     int32_t probePixY;                 // 探测像素 Y
     uint32_t debugMode;                // 调试模式
     
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void print() const {
+#if !defined(__CUDACC__)
+    void print() {
         printf("=== Wavefront Launch Parameters ===\n");
         printf("Image Size: %ux%u\n", imageSize.x, imageSize.y);
         printf("Max Path Length: %u\n", maxPathLength);
@@ -357,6 +330,7 @@ struct WavefrontLaunchParameters {
         printf("Num Accum Frames: %u\n", numAccumFrames);
         printf("Active Path Queue Size: %u\n", activePathQueue.size());
     }
+#endif
 };
 
 
@@ -372,7 +346,7 @@ struct WFTracePayload {
     // 总计：28 字节（7 个双字）
 };
 
-using WFTracePayloadSignature = optixu::PayloadSignature<WFTracePayload>;
+using WFTracePayloadSignature = ::vlr::optixu::PayloadSignature<WFTracePayload>;
 
 
 /// 阴影光线载荷（重用现有的 ShadowPayloadSignature）
@@ -499,7 +473,7 @@ struct WavefrontPerformanceStats {
 // ============================================================================
 
 /// 波前调试模式
-enum WavefrontDebugMode : uint32_t {
+enum WavefrontDebugMode {
     WFDebug_None = 0,
     WFDebug_PathLength,                // 可视化路径长度
     WFDebug_MaterialCategory,          // 可视化材质分类
@@ -512,7 +486,7 @@ enum WavefrontDebugMode : uint32_t {
 
 
 /// 路径终止原因
-enum PathTerminationReason : uint32_t {
+enum PathTerminationReason {
     TerminationReason_None = 0,
     TerminationReason_MaxLength,       // 达到最大长度
     TerminationReason_RussianRoulette, // 俄罗斯轮盘赌
@@ -589,7 +563,7 @@ struct WavefrontPathStateBuffers_SoA {
     
     // 访问接口
     CUDA_DEVICE_FUNCTION CUDA_INLINE void load(
-        uint32_t index, WavefrontPathState* state) const {
+        uint32_t index, WavefrontPathState* state) {
         state->origin = origins[index];
         state->direction = directions[index];
         state->throughput = throughputs[index];
@@ -634,7 +608,7 @@ struct WavefrontPathStateBuffers_SoA {
 struct PathIsActivePredicate {
     WavefrontPathState* pathStates;
     
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool operator()(uint32_t pathIndex) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool operator()(uint32_t pathIndex) {
         return pathStates[pathIndex].isActive();
     }
 };
@@ -645,7 +619,7 @@ struct MaterialCategoryComparator {
     WavefrontPathState* pathStates;
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool operator()(
-        uint32_t pathIndex1, uint32_t pathIndex2) const {
+        uint32_t pathIndex1, uint32_t pathIndex2) {
         return pathStates[pathIndex1].materialCategory < 
                pathStates[pathIndex2].materialCategory;
     }

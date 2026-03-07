@@ -90,15 +90,35 @@ VLRResult vlrCreateContext(void* cudaStream, int enableLogging, VLRContext* outC
     if (!outContext) return static_cast<VLRResult>(VLRResult_InvalidArgument);
     *outContext = nullptr;
     try {
+        printf("[VLR] vlrCreateContext: start\n");
+        fflush(stdout);
+        
         cudaStream_t stream = static_cast<cudaStream_t>(cudaStream);
         if (!stream) {
+            printf("[VLR] Creating CUDA stream...\n");
+            fflush(stdout);
             cudaStreamCreate(&stream);
         }
+        
+        printf("[VLR] Allocating VLRContextImpl...\n");
+        fflush(stdout);
         VLRContextImpl* impl = new VLRContextImpl();
+        
+        printf("[VLR] Creating vlr::Context...\n");
+        fflush(stdout);
         impl->ctx = new vlr::Context(stream, enableLogging != 0);
+        
+        printf("[VLR] Context created successfully\n");
+        fflush(stdout);
         *outContext = FROM_CTX(impl);
         return static_cast<VLRResult>(VLRResult_Success);
+    } catch (const std::exception& e) {
+        printf("[VLR] Exception in vlrCreateContext: %s\n", e.what());
+        fflush(stdout);
+        return translateException();
     } catch (...) {
+        printf("[VLR] Unknown exception in vlrCreateContext\n");
+        fflush(stdout);
         return translateException();
     }
 }

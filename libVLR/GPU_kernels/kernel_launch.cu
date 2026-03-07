@@ -9,8 +9,8 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#include "wavefront_launch.h"
-#include "../shared/wavefront_types.h"
+#include "kernel_launch.h"
+#include "../shared/path_types.h"
 #include "../utils/cuda_util.h"
 
 #include <cuda_runtime.h>
@@ -21,19 +21,19 @@ namespace vlr {
 // CUDA Kernel 外部声明（实现在各 kernel .cu 文件中）
 // ============================================================================
 
-extern "C" __global__ void wavefrontGenerateRays(
+extern "C" __global__ void generateRays(
     shared::WavefrontLaunchParameters* params);
 
-extern "C" __global__ void wavefrontProcessHits(
+extern "C" __global__ void processHits(
     shared::WavefrontLaunchParameters* params);
 
-extern "C" __global__ void wavefrontSampleLights(
+extern "C" __global__ void sampleLights(
     shared::WavefrontLaunchParameters* params);
 
-extern "C" __global__ void wavefrontSampleBSDF(
+extern "C" __global__ void sampleBSDF(
     shared::WavefrontLaunchParameters* params);
 
-extern "C" __global__ void wavefrontAccumulateResults(
+extern "C" __global__ void accumulateResults(
     shared::WavefrontLaunchParameters* params);
 
 // ============================================================================
@@ -54,7 +54,7 @@ void launchGenerateRaysKernel(
         (width + blockWidth - 1) / blockWidth,
         (height + blockHeight - 1) / blockHeight);
 
-    wavefrontGenerateRays<<<gridDim, blockDim, 0, stream>>>(d_params);
+    generateRays<<<gridDim, blockDim, 0, stream>>>(d_params);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -67,7 +67,7 @@ void launchProcessHitsKernel(
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
-    wavefrontProcessHits<<<gridSize, blockSize, 0, stream>>>(d_params);
+    processHits<<<gridSize, blockSize, 0, stream>>>(d_params);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -80,7 +80,7 @@ void launchSampleLightsKernel(
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
-    wavefrontSampleLights<<<gridSize, blockSize, 0, stream>>>(d_params);
+    sampleLights<<<gridSize, blockSize, 0, stream>>>(d_params);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -93,7 +93,7 @@ void launchSampleBSDFKernel(
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
-    wavefrontSampleBSDF<<<gridSize, blockSize, 0, stream>>>(d_params);
+    sampleBSDF<<<gridSize, blockSize, 0, stream>>>(d_params);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -106,7 +106,7 @@ void launchAccumulateKernel(
     uint32_t gridSize = (numPaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
 
-    wavefrontAccumulateResults<<<gridSize, blockSize, 0, stream>>>(d_params);
+    accumulateResults<<<gridSize, blockSize, 0, stream>>>(d_params);
     CUDA_CHECK(cudaGetLastError());
 }
 

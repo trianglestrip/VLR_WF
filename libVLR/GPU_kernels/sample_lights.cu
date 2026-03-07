@@ -11,8 +11,8 @@
 // ============================================================================
 
 #include "../shared/kernel_common.h"
-#include "../shared/wavefront_types.h"
-#include "../shared/wavefront_common.h"
+#include "../shared/path_types.h"
+#include "../shared/render_common.h"
 #include "../shared/light_common.h"
 #include "../shared/light_types.h"
 #include "../shared/bsdf_common.h"
@@ -109,7 +109,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float testVisibility(
 // 对活跃队列中的每条路径执行 Next Event Estimation
 // 调用顺序：ProcessHits -> SampleLights -> SampleBSDF
 
-extern "C" __global__ void wavefrontSampleLights(
+extern "C" __global__ void sampleLights(
     vlr::shared::WavefrontLaunchParameters* params) {
     using namespace vlr::shared;
     WavefrontLaunchParameters& wlp = *params;

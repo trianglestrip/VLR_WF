@@ -9,7 +9,7 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#include "../shared/wavefront_types.h"
+#include "../shared/path_types.h"
 #include "../shared/geometry_common.h"
 #include "../shared/geometry_types.h"
 #include "../shared/bsdf_common.h"
@@ -168,7 +168,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
 // ProcessHits Kernel
 // ============================================================================
 
-extern "C" __global__ void wavefrontProcessHits(
+extern "C" __global__ void processHits(
     vlr::shared::WavefrontLaunchParameters* params) {
 
     using namespace vlr::shared;
@@ -314,7 +314,7 @@ extern "C" __global__ void wavefrontProcessHits(
     MaterialCategory category = bsdfTypeToMaterialCategory(getBSDFType(matDesc));
     pathState.materialCategory = category;
 
-    // 若 wavefront_common 的 classifyMaterial 可用（依赖 BSDF），可替换为：
+    // 若 render_common 的 classifyMaterial 可用（依赖 BSDF），可替换为：
     // BSDF<TransportMode::Radiance> bsdf(&matDesc);
     // category = classifyMaterial(bsdf);
     // 当前使用 material_types 的 bsdfTypeToMaterialCategory 保持兼容

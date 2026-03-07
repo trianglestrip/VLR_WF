@@ -24,7 +24,7 @@ if(OPTIX_FOUND)
 endif()
 
 # ----------------------------------------------------------------------------
-# PTX 编译：OptiX 内核（wavefront_trace_rays.cu 含 RG/CH/MS/AH 程序）
+# PTX 编译：OptiX 内核（trace_rays.cu 含 RG/CH/MS/AH 程序）
 # 输出到 bin/GPU_kernels/ 目录
 # ----------------------------------------------------------------------------
 set(PTX_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/bin/GPU_kernels)
@@ -32,7 +32,7 @@ file(MAKE_DIRECTORY ${PTX_OUTPUT_DIR})
 
 if(OPTIX_FOUND)
     add_custom_command(
-        OUTPUT ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx
+        OUTPUT ${PTX_OUTPUT_DIR}/trace_rays.ptx
         COMMAND ${CUDAToolkit_NVCC_EXECUTABLE}
             -ptx
             -std=c++17
@@ -45,31 +45,31 @@ if(OPTIX_FOUND)
             -I${CMAKE_CURRENT_SOURCE_DIR}/shared
             -I${CMAKE_CURRENT_SOURCE_DIR}/include
             -I${OPTIX_INCLUDE_DIR}
-            ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/wavefront_trace_rays.cu
-            -o ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/wavefront_trace_rays.cu
-        COMMENT "编译 wavefront_trace_rays.cu -> PTX (OptiX) -> bin/GPU_kernels/"
+            ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/trace_rays.cu
+            -o ${PTX_OUTPUT_DIR}/trace_rays.ptx
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/trace_rays.cu
+        COMMENT "编译 trace_rays.cu -> PTX (OptiX) -> bin/GPU_kernels/"
         VERBATIM
     )
-    add_custom_target(wavefront_trace_rays_ptx ALL
-        DEPENDS ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx
+    add_custom_target(trace_rays_ptx ALL
+        DEPENDS ${PTX_OUTPUT_DIR}/trace_rays.ptx
     )
-    message(STATUS "[libVLR] OptiX PTX 目标已启用：wavefront_trace_rays.ptx -> bin/GPU_kernels/")
+    message(STATUS "[libVLR] OptiX PTX 目标已启用：trace_rays.ptx -> bin/GPU_kernels/")
 endif()
 
 # ----------------------------------------------------------------------------
-# 可选：生成光线 PTX（wavefront_generate_rays - 当前作为 CUDA 内核链接）
+# 可选：生成光线 PTX（generate_rays - 当前作为 CUDA 内核链接）
 # 若需单独 PTX 可取消注释
 # ----------------------------------------------------------------------------
 # add_custom_command(
-#     OUTPUT ${PTX_OUTPUT_DIR}/wavefront_generate_rays.ptx
+#     OUTPUT ${PTX_OUTPUT_DIR}/generate_rays.ptx
 #     COMMAND ${CUDAToolkit_NVCC_EXECUTABLE}
 #         -ptx -std=c++17 -arch=sm_${VLR_CUDA_ARCH}
 #         -DVLR_Device -I${CMAKE_CURRENT_SOURCE_DIR}/shared -I${CMAKE_CURRENT_SOURCE_DIR}/include
-#         ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/wavefront_generate_rays.cu
-#         -o ${PTX_OUTPUT_DIR}/wavefront_generate_rays.ptx
-#     DEPENDS wavefront_generate_rays.cu
-#     COMMENT "编译 wavefront_generate_rays.cu -> PTX"
+#         ${CMAKE_CURRENT_SOURCE_DIR}/GPU_kernels/generate_rays.cu
+#         -o ${PTX_OUTPUT_DIR}/generate_rays.ptx
+#     DEPENDS generate_rays.cu
+#     COMMENT "编译 generate_rays.cu -> PTX"
 # )
 
 # ----------------------------------------------------------------------------
@@ -85,16 +85,16 @@ set(LIBVLR_CPP_SOURCES
 # CUDA 源文件（含设备端内核，编译为对象文件并链接入库）
 # ----------------------------------------------------------------------------
 set(LIBVLR_CUDA_SOURCES
-    GPU_kernels/wavefront_generate_rays.cu
-    GPU_kernels/wavefront_process_hits.cu
-    GPU_kernels/wavefront_sample_lights.cu
-    GPU_kernels/wavefront_sample_bsdf.cu
-    GPU_kernels/wavefront_compact.cu
-    GPU_kernels/wavefront_accumulate.cu
-    GPU_kernels/wavefront_launch.cu
+    GPU_kernels/generate_rays.cu
+    GPU_kernels/process_hits.cu
+    GPU_kernels/sample_lights.cu
+    GPU_kernels/sample_bsdf.cu
+    GPU_kernels/compact.cu
+    GPU_kernels/accumulate.cu
+    GPU_kernels/kernel_launch.cu
 )
 
-# 注意：wavefront_trace_rays.cu 仅编译为 PTX，供 OptiX 运行时加载，不参与库链接
+# 注意：trace_rays.cu 仅编译为 PTX，供 OptiX 运行时加载，不参与库链接
 
 # ----------------------------------------------------------------------------
 # 创建 libVLR 库
@@ -103,7 +103,7 @@ add_library(VLR SHARED ${LIBVLR_CPP_SOURCES} ${LIBVLR_CUDA_SOURCES})
 
 # 确保 PTX 在复制前已构建
 if(OPTIX_FOUND)
-    add_dependencies(VLR wavefront_trace_rays_ptx)
+    add_dependencies(VLR trace_rays_ptx)
 endif()
 
 # 设置目标属性
@@ -115,7 +115,7 @@ target_include_directories(VLR PUBLIC
 
 target_compile_options(VLR PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
-    $<$<COMPILE_LANGUAGE:CUDA>:-DVLR_Device --expt-relaxed-constexpr>
+    $<$<COMPILE_LANGUAGE:CUDA>:-DVLR_Device --expt-relaxed-constexpr -Xcompiler=/utf-8>
 )
 
 # CUDA 架构
@@ -137,15 +137,10 @@ if(OPTIX_FOUND)
 endif()
 
 # ----------------------------------------------------------------------------
-# PTX 输出：构建后将 PTX 复制到库输出目录，便于运行时加载
+# PTX 输出：已通过 PTX_OUTPUT_DIR 直接输出到 bin/GPU_kernels/，无需复制
 # ----------------------------------------------------------------------------
-if(OPTIX_FOUND)
-    add_custom_command(TARGET VLR POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:VLR>/GPU_kernels
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx $<TARGET_FILE_DIR:VLR>/GPU_kernels/
-        COMMENT "复制 PTX 到库输出目录"
-    )
-endif()
+# PTX 文件已通过 add_custom_command 直接输出到 ${CMAKE_SOURCE_DIR}/bin/GPU_kernels/
+# 运行时从该目录加载即可
 
 # ----------------------------------------------------------------------------
 # 安装规则
@@ -163,7 +158,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/vlr
 
 # 安装 PTX 到 lib/vlr 或 bin/GPU_kernels
 if(OPTIX_FOUND)
-    install(FILES ${PTX_OUTPUT_DIR}/wavefront_trace_rays.ptx
+    install(FILES ${PTX_OUTPUT_DIR}/trace_rays.ptx
         DESTINATION bin/GPU_kernels
         OPTIONAL
     )

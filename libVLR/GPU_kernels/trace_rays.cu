@@ -9,7 +9,7 @@
 // 环境：CUDA 13.1, OptiX 7/8, VS2022
 // ============================================================================
 
-#include "../shared/wavefront_types_minimal.h"
+#include "../shared/path_types_minimal.h"
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
 #ifndef _WIN64
@@ -94,7 +94,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setShadowPayloadOccluded() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_RG_NAME(wavefrontTraceRays)() {
+extern "C" __global__ void RT_RG_NAME(traceRays)() {
     using namespace vlr::shared;
 
     // 工作索引：每个线程处理活跃队列中的一个路径
@@ -117,15 +117,9 @@ extern "C" __global__ void RT_RG_NAME(wavefrontTraceRays)() {
 
     unsigned int pd[7];
     packWFTracePayload(payload, pd);
-    optixSetPayload_0(pd[0]);
-    optixSetPayload_1(pd[1]);
-    optixSetPayload_2(pd[2]);
-    optixSetPayload_3(pd[3]);
-    optixSetPayload_4(pd[4]);
-    optixSetPayload_5(pd[5]);
-    optixSetPayload_6(pd[6]);
 
     // OptiX 8 optixTrace: (handle, float3 origin, float3 direction, tmin, tmax, rayTime, mask, flags, sbtOffset, sbtStride, missSbtIndex, payload&...)
+    // 注意：在 RayGen 中，payload 通过 optixTrace 的参数传递，不使用 optixSetPayload
     float3 rayOrigin = make_float3(pathState.origin.x, pathState.origin.y, pathState.origin.z);
     float3 rayDirection = make_float3(pathState.direction.x, pathState.direction.y, pathState.direction.z);
     optixTrace(
@@ -150,7 +144,7 @@ extern "C" __global__ void RT_RG_NAME(wavefrontTraceRays)() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_CH_NAME(wavefrontClosestHit)() {
+extern "C" __global__ void RT_CH_NAME(closestHit)() {
     using namespace vlr::shared;
 
     unsigned int pd[7];
@@ -197,7 +191,7 @@ extern "C" __global__ void RT_CH_NAME(wavefrontClosestHit)() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_MS_NAME(wavefrontMiss)() {
+extern "C" __global__ void RT_MS_NAME(miss)() {
     using namespace vlr::shared;
 
     unsigned int pd[7];
@@ -226,7 +220,7 @@ extern "C" __global__ void RT_MS_NAME(wavefrontMiss)() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_AH_NAME(wavefrontAnyHitWithAlpha)() {
+extern "C" __global__ void RT_AH_NAME(anyHitWithAlpha)() {
     using namespace vlr::shared;
 
     const float alphaThreshold = 0.5f;
@@ -240,7 +234,7 @@ extern "C" __global__ void RT_AH_NAME(wavefrontAnyHitWithAlpha)() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_MS_NAME(wavefrontShadowMiss)() {
+extern "C" __global__ void RT_MS_NAME(shadowMiss)() {
     using namespace vlr::shared;
     setShadowPayloadVisible();
 }
@@ -251,7 +245,7 @@ extern "C" __global__ void RT_MS_NAME(wavefrontShadowMiss)() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_AH_NAME(wavefrontShadowAnyHit)() {
+extern "C" __global__ void RT_AH_NAME(shadowAnyHit)() {
     using namespace vlr::shared;
     setShadowPayloadOccluded();
     optixTerminateRay();
@@ -263,7 +257,7 @@ extern "C" __global__ void RT_AH_NAME(wavefrontShadowAnyHit)() {
 // ============================================================================
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __global__ void RT_AH_NAME(wavefrontShadowAnyHitWithAlpha)() {
+extern "C" __global__ void RT_AH_NAME(shadowAnyHitWithAlpha)() {
     using namespace vlr::shared;
     const float alphaThreshold = 0.5f;
     (void)alphaThreshold;

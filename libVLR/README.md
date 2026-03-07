@@ -100,8 +100,8 @@ WavefrontHitInfo:
 
 ```cpp
 // 在kernel文件中
-#include "shared/wavefront_types.h"
-#include "shared/wavefront_common.h"
+#include "shared/path_types.h"
+#include "shared/render_common.h"
 
 // 在主机端代码中
 #include "vlr/public_types.h"

@@ -183,9 +183,9 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{60F84C37-2E0B-3DEA-B1AC-0D04F903C8F7}</Project>
       <Name>simple_render_test</Name>
     </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\libVLR\wavefront_trace_rays_ptx.vcxproj">
-      <Project>{A6A17D17-836F-3209-86C5-F5B044487996}</Project>
-      <Name>wavefront_trace_rays_ptx</Name>
+    <ProjectReference Include="F:\project\VLR_WF\build\libVLR\trace_rays_ptx.vcxproj">
+      <Project>{6F5C7D06-6FDE-333A-800D-7387949D4F41}</Project>
+      <Name>trace_rays_ptx</Name>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </ProjectReference>

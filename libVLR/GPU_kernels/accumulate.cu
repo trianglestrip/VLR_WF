@@ -11,7 +11,7 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#include "../shared/wavefront_types.h"
+#include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
 #include "../shared/kernel_common.h"
 
@@ -31,7 +31,7 @@ using namespace vlr::shared;
 // 将本轮渲染的所有路径贡献值累加到输出缓冲区，并更新 RNG 状态。
 // 每个像素对应一条路径，pathIndex = pixelY * imageSize.x + pixelX。
 
-extern "C" __global__ void wavefrontAccumulateResults(
+extern "C" __global__ void accumulateResults(
     vlr::shared::WavefrontLaunchParameters* params) {
     using namespace vlr::shared;
     WavefrontLaunchParameters& wlp = *params;

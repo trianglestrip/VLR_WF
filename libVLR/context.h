@@ -11,11 +11,15 @@
 #pragma once
 
 #include "include/vlr/public_types.h"
-#include "shared/wavefront_types.h"
+#include "shared/path_types.h"
 
 // 前向声明 Scene（避免循环依赖）
 namespace vlr { class Scene; }
 #include <cuda_runtime.h>
+#ifdef _WIN32
+#undef max
+#undef min
+#endif
 #include <optix.h>
 #include <memory>
 #include <vector>

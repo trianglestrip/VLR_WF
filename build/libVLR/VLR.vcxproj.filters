@@ -12,25 +12,25 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_generate_rays.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\generate_rays.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_process_hits.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\process_hits.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_sample_lights.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_lights.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_sample_bsdf.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_bsdf.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_compact.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\compact.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_accumulate.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\accumulate.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_launch.cu">
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\kernel_launch.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
   </ItemGroup>

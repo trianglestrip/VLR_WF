@@ -15,8 +15,8 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#include "wavefront_compact.h"
-#include "../shared/wavefront_types.h"
+#include "compact.h"
+#include "../shared/path_types.h"
 #include "../shared/material_types.h"
 
 #include <cuda_runtime.h>

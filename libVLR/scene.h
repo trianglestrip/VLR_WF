@@ -15,7 +15,7 @@
 #include "shared/geometry_types.h"
 #include "shared/material_types.h"
 #include "shared/light_types.h"
-#include "shared/wavefront_types.h"
+#include "shared/path_types.h"
 #include <optix.h>
 #include <cuda_runtime.h>
 #include <vector>

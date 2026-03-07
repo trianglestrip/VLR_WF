@@ -152,7 +152,7 @@ struct TextureSampler {
 
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     bool isValid() const {
-        return tex.isValid();
+        return tex.data != nullptr && tex.width > 0 && tex.height > 0;
     }
 };
 

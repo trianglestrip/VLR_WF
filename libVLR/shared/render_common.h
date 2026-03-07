@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "wavefront_types.h"
+#include "path_types.h"
 #include "kernel_common.h"
 #include "geometry_common.h"
 #include "light_common.h"

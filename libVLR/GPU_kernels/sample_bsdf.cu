@@ -11,7 +11,7 @@
 // ============================================================================
 
 #include "../shared/kernel_common.h"
-#include "../shared/wavefront_types.h"
+#include "../shared/path_types.h"
 #include "../shared/bsdf_common.h"
 #include "../shared/geometry_common.h"
 #include "../shared/material_types.h"
@@ -34,7 +34,7 @@ using namespace vlr::shared;
 // 更新路径吞吐量，并将路径加入下一轮活跃队列。
 // 调用顺序：ProcessHits -> SampleLights -> SampleBSDF
 
-extern "C" __global__ void wavefrontSampleBSDF(
+extern "C" __global__ void sampleBSDF(
     vlr::shared::WavefrontLaunchParameters* params) {
     using namespace vlr::shared;
     WavefrontLaunchParameters& wlp = *params;

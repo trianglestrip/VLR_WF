@@ -21,7 +21,7 @@ namespace shared {
 // ============================================================================
 
 /// 材质类别：用于路径分类、排序和 BSDF 分发
-/// 与 wavefront_types.h 中的 MaterialCategory 保持一致
+/// 与 path_types.h 中的 MaterialCategory 保持一致
 enum MaterialCategory : uint32_t {
     MaterialCategory_Diffuse = 0,      ///< 漫反射材质（Lambert）
     MaterialCategory_Glossy,            ///< 光滑反射材质（GGX）
@@ -113,7 +113,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedo(
     float b = d[MaterialDataLayout::AlbedoB];
     // 简化为均匀光谱（可扩展为波长相关）
     for (int i = 0; i < NumSpectralSamples; ++i)
-        albedo->values[i] = (r + g + b) / 3.0f * ::vlr::VLR_M_INV_PI;
+        albedo->values[i] = (r + g + b) / 3.0f * VLR_M_INV_PI;
 }
 
 /// 从材质描述符获取 GGX 参数

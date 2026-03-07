@@ -3,10 +3,10 @@
 //
 // 本文件测试 Wavefront 数据结构的编译和大小。
 //
-// 编译命令：nvcc -std=c++17 -arch=sm_75 wavefront_types_test.cu -o test.exe
+// 编译命令：nvcc -std=c++17 -arch=sm_75 path_types_test.cu -o test.exe
 // ============================================================================
 
-#include "wavefront_types.h"
+#include "path_types.h"
 #include <stdio.h>
 
 using namespace vlr::shared;
@@ -22,42 +22,42 @@ __global__ void testKernel() {
 }
 
 int main() {
-    printf("=== VLR Wavefront 数据结构大小验证 ===\n\n");
+    printf("=== VLR Wavefront Data Structure Size Verification ===\n\n");
 
     // 测试 WavefrontPathState
-    printf("WavefrontPathState：\n");
-    printf("  大小：%zu 字节（期望：144 字节）\n", sizeof(WavefrontPathState));
-    printf("  对齐：%zu 字节\n", alignof(WavefrontPathState));
+    printf("WavefrontPathState:\n");
+    printf("  Size: %zu bytes (expected: 144 bytes)\n", sizeof(WavefrontPathState));
+    printf("  Alignment: %zu bytes\n", alignof(WavefrontPathState));
 
     if (sizeof(WavefrontPathState) == 144) {
-        printf("  ✓ 大小正确！\n");
+        printf("  [OK] Size correct!\n");
     } else {
-        printf("  ✗ 大小不匹配！\n");
+        printf("  [FAIL] Size mismatch!\n");
     }
     printf("\n");
 
     // 测试 WavefrontHitInfo
-    printf("WavefrontHitInfo：\n");
-    printf("  大小：%zu 字节（期望：32 字节）\n", sizeof(WavefrontHitInfo));
-    printf("  对齐：%zu 字节\n", alignof(WavefrontHitInfo));
+    printf("WavefrontHitInfo:\n");
+    printf("  Size: %zu bytes (expected: 32 bytes)\n", sizeof(WavefrontHitInfo));
+    printf("  Alignment: %zu bytes\n", alignof(WavefrontHitInfo));
 
     if (sizeof(WavefrontHitInfo) == 32) {
-        printf("  ✓ 大小正确！\n");
+        printf("  [OK] Size correct!\n");
     } else {
-        printf("  ✗ 大小不匹配！\n");
+        printf("  [FAIL] Size mismatch!\n");
     }
     printf("\n");
 
     // 测试 WavefrontWorkQueue
-    printf("WavefrontWorkQueue：\n");
-    printf("  大小：%zu 字节\n", sizeof(WavefrontWorkQueue));
-    printf("  对齐：%zu 字节\n", alignof(WavefrontWorkQueue));
+    printf("WavefrontWorkQueue:\n");
+    printf("  Size: %zu bytes\n", sizeof(WavefrontWorkQueue));
+    printf("  Alignment: %zu bytes\n", alignof(WavefrontWorkQueue));
     printf("\n");
 
     // 测试 WavefrontMaterialQueues
-    printf("WavefrontMaterialQueues：\n");
-    printf("  大小：%zu 字节\n", sizeof(WavefrontMaterialQueues));
-    printf("  类别数量：%d\n", NumMaterialCategories);
+    printf("WavefrontMaterialQueues:\n");
+    printf("  Size: %zu bytes\n", sizeof(WavefrontMaterialQueues));
+    printf("  Category count: %d\n", NumMaterialCategories);
     printf("\n");
 
     // 测试 WavefrontLaunchParameters

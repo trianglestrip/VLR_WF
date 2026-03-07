@@ -9,13 +9,13 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#include "../shared/wavefront_types.h"
+#include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
 
 #include <cuda_runtime.h>
 
 // 启动参数说明：
-// 1. 直接 CUDA 调用：使用 wavefrontGenerateRays(params) 传入设备端参数指针
+// 1. 直接 CUDA 调用：使用 generateRays(params) 传入设备端参数指针
 // 2. OptiX 管线：因 WavefrontLaunchParameters 含非平凡类型，无法使用 __constant__
 //    需将 kernel 作为 Ray Gen 时，需通过 pipeline 的 launch params 机制或 wrapper 适配
 
@@ -73,7 +73,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
 // ============================================================================
 // 启动参数通过参数传入，避免 __constant__ 对含非平凡类型 struct 的限制
 
-extern "C" __global__ void wavefrontGenerateRays(
+extern "C" __global__ void generateRays(
     vlr::shared::WavefrontLaunchParameters* params) {
     using namespace vlr::shared;
     WavefrontLaunchParameters& wlp = *params;

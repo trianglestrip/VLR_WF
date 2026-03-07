@@ -10,9 +10,13 @@
 
 #include "context.h"
 #include "scene.h"
-#include "GPU_kernels/wavefront_launch.h"
+#include "GPU_kernels/kernel_launch.h"
 #include "utils/cuda_util.h"
 #include "utils/optix_util.h"
+#ifdef _WIN32
+#undef max
+#undef min
+#endif
 #include <optix_function_table_definition.h>  // OptiX: 提供 g_optixFunctionTable 定义
 #include <optix_stack_size.h>                 // OptiX: optixUtilAccumulateStackSizes, optixUtilComputeStackSizes
 #include <cstring>
@@ -32,6 +36,9 @@ namespace {
 /// 从 libVLR/GPU_kernels/ 或 build/Release 目录加载 PTX 文件内容
 /// 尝试多个路径以支持不同构建/运行目录布局（含 build/Release 运行时）
 std::vector<char> loadPTXFile(const char* filename) {
+    fprintf(stderr, "DEBUG: loadPTXFile START for: %s\n", filename);
+    fflush(stderr);
+    
     // 候选路径：项目根、libVLR、build/Release、build/Debug 等
     const char* searchPaths[] = {
         "GPU_kernels/",                    // build/Release 或 build/Debug 运行时
@@ -45,25 +52,36 @@ std::vector<char> loadPTXFile(const char* filename) {
         "build/Release/GPU_kernels/",
         "build/Debug/GPU_kernels/",
     };
-    
+
     for (const char* basePath : searchPaths) {
         std::string path = std::string(basePath) + filename;
+        fprintf(stderr, "DEBUG: Trying path: %s\n", path.c_str());
+        fflush(stderr);
+        
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (file.is_open()) {
+            fprintf(stderr, "DEBUG: File opened: %s\n", path.c_str());
+            fflush(stderr);
+            
             std::streamsize size = file.tellg();
             file.seekg(0, std::ios::beg);
             std::vector<char> buffer(static_cast<size_t>(size) + 1);
             if (file.read(buffer.data(), size)) {
                 buffer[static_cast<size_t>(size)] = '\0';
+                fprintf(stderr, "DEBUG: PTX loaded, size: %lld\n", (long long)size);
+                fflush(stderr);
                 return buffer;
             }
             file.close();
         }
     }
     
+    fprintf(stderr, "DEBUG: PTX file not found in any search path\n");
+    fflush(stderr);
+    
     throw std::runtime_error(
-        std::string("无法加载 PTX 文件: ") + filename +
-        "。请确保文件位于 GPU_kernels/ 或 libVLR/GPU_kernels/，从 build/Release 运行时 PTX 应在 build/Release/GPU_kernels/。");
+        std::string("Failed to load PTX file: ") + filename +
+        ". Ensure the file is in GPU_kernels/ or libVLR/GPU_kernels/; when running from build/Release, PTX should be in build/Release/GPU_kernels/.");
 }
 
 }  // 匿名命名空间
@@ -72,23 +90,79 @@ std::vector<char> loadPTXFile(const char* filename) {
 // 构造函数与析构函数
 // ============================================================================
 
+// OptiX 日志回调函数
+static void optixLogCallback(unsigned int level, const char* tag, const char* message, void* cbdata) {
+    printf("[OptiX][%s] %s\n", tag, message);
+}
+
 Context::Context(cudaStream_t cudaStream, bool enableLogging)
     : m_stream(cudaStream)
     , m_cudaContext(nullptr)
     , m_sceneSource(nullptr)
 {
+    // 第一行输出 - 如果这个都不输出，说明崩溃在初始化列表或更早
+    fprintf(stderr, "DEBUG: Context constructor body entered\n");
+    fflush(stderr);
+    
     // 初始化 CUDA 上下文
+    fprintf(stderr, "DEBUG: About to create cudau::Context\n");
+    fflush(stderr);
     m_cudaContext = new cudau::Context();
+    fprintf(stderr, "DEBUG: cudau::Context created\n");
+    fflush(stderr);
     
     // 初始化 OptiX 上下文
+    fprintf(stderr, "DEBUG: Setting OptiX members\n");
+    fflush(stderr);
     m_optix.stream = cudaStream;
     m_optix.enableLogging = enableLogging;
+    m_optix.context = nullptr;
     
-    optixu::Context optixContext(enableLogging);
-    m_optix.context = optixContext.get();
+    // 直接初始化 OptiX，不使用局部 optixu::Context 对象
+    fprintf(stderr, "DEBUG: Calling optixInit\n");
+    fflush(stderr);
+    OptixResult optixRes = optixInit();
+    if (optixRes != OPTIX_SUCCESS) {
+        fprintf(stderr, "ERROR: optixInit failed: %d\n", optixRes);
+        fflush(stderr);
+        throw std::runtime_error("Failed to initialize OptiX");
+    }
+    fprintf(stderr, "DEBUG: optixInit success\n");
+    fflush(stderr);
+    
+    CUcontext cuContext = nullptr;
+    fprintf(stderr, "DEBUG: Getting CUDA context\n");
+    fflush(stderr);
+    CUresult cuRes = cuCtxGetCurrent(&cuContext);
+    if (cuRes != CUDA_SUCCESS || !cuContext) {
+        fprintf(stderr, "ERROR: cuCtxGetCurrent failed: %d\n", cuRes);
+        fflush(stderr);
+        throw std::runtime_error("Failed to get CUDA context");
+    }
+    fprintf(stderr, "DEBUG: CUDA context obtained\n");
+    fflush(stderr);
+    
+    OptixDeviceContextOptions options = {};
+    options.logCallbackFunction = enableLogging ? &optixLogCallback : nullptr;
+    options.logCallbackLevel = 4;
+    
+    fprintf(stderr, "DEBUG: Creating OptiX device context\n");
+    fflush(stderr);
+    optixRes = optixDeviceContextCreate(cuContext, &options, &m_optix.context);
+    if (optixRes != OPTIX_SUCCESS) {
+        fprintf(stderr, "ERROR: optixDeviceContextCreate failed: %d\n", optixRes);
+        fflush(stderr);
+        throw std::runtime_error("Failed to create OptiX device context");
+    }
+    fprintf(stderr, "DEBUG: OptiX device context created\n");
+    fflush(stderr);
     
     // 初始化 Wavefront 管线
+    fprintf(stderr, "DEBUG: About to initialize pipeline\n");
+    fflush(stderr);
     initializeWavefrontPipeline();
+    fprintf(stderr, "DEBUG: Pipeline initialized\n");
+    fflush(stderr);
 }
 
 Context::~Context() {
@@ -114,23 +188,32 @@ Context::~Context() {
 // ============================================================================
 
 void Context::initializeWavefrontPipeline() {
+    fprintf(stderr, "DEBUG: initWavefrontPipeline START\n");
+    fflush(stderr);
+    
     auto& wf = m_optix.wavefrontPathTracing;
     
+    fprintf(stderr, "DEBUG: Got wf reference\n");
+    fflush(stderr);
+    
     if (wf.isInitialized) {
+        fprintf(stderr, "DEBUG: Already initialized\n");
+        fflush(stderr);
         return;
     }
     
-    printf("[Wavefront] 开始初始化 Pipeline...\n");
+    fprintf(stderr, "DEBUG: About to load PTX\n");
+    fflush(stderr);
     
     // ------------------------------------------------------------------------
     // 1. 加载 PTX 文件
     // ------------------------------------------------------------------------
     std::vector<char> ptxCode;
     try {
-        ptxCode = loadPTXFile("wavefront_trace_rays.ptx");
-        printf("[Wavefront] PTX 加载成功，大小: %zu 字节\n", ptxCode.size() - 1);
+        ptxCode = loadPTXFile("trace_rays.ptx");
+        printf("[VLR] PTX loaded successfully, size: %zu bytes\n", ptxCode.size() - 1);
     } catch (const std::exception& e) {
-        fprintf(stderr, "[Wavefront] 错误: PTX 加载失败 - %s\n", e.what());
+        fprintf(stderr, "[VLR] Error: PTX load failed - %s\n", e.what());
         throw;
     }
     
@@ -167,14 +250,14 @@ void Context::initializeWavefrontPipeline() {
         &wf.module
     );
     if (moduleRes != OPTIX_SUCCESS) {
-        fprintf(stderr, "[Wavefront] 错误: optixModuleCreate 失败 - %s (%d)\n", optixGetErrorName(moduleRes), moduleRes);
+        fprintf(stderr, "[VLR] Error: optixModuleCreate failed - %s (%d)\n", optixGetErrorName(moduleRes), moduleRes);
         if (moduleLogSize > 1) {
-            fprintf(stderr, "[Wavefront] 模块编译日志:\n%.*s\n", static_cast<int>(moduleLogSize), moduleLog);
+            fprintf(stderr, "[VLR] Module compile log:\n%.*s\n", static_cast<int>(moduleLogSize), moduleLog);
         }
         throw std::runtime_error(
-            std::string("OptiX 模块创建失败: ") + optixGetErrorName(moduleRes) + " (" + std::to_string(moduleRes) + ")");
+            std::string("OptiX module creation failed: ") + optixGetErrorName(moduleRes) + " (" + std::to_string(moduleRes) + ")");
     }
-    printf("[Wavefront] OptiX 模块创建成功\n");
+    printf("[VLR] OptiX module created successfully\n");
     
     // ------------------------------------------------------------------------
     // 4. 创建程序组（RayGen、Miss、HitGroup、ShadowMiss、ShadowHitGroup）
@@ -182,7 +265,7 @@ void Context::initializeWavefrontPipeline() {
     try {
         createWavefrontPrograms();
     } catch (const std::exception& e) {
-        fprintf(stderr, "[Wavefront] 错误: createWavefrontPrograms 失败 - %s\n", e.what());
+        fprintf(stderr, "[VLR] Error: createWavefrontPrograms failed - %s\n", e.what());
         if (wf.module) {
             optixModuleDestroy(wf.module);
             wf.module = nullptr;
@@ -196,7 +279,7 @@ void Context::initializeWavefrontPipeline() {
     try {
         createWavefrontSBT();
     } catch (const std::exception& e) {
-        fprintf(stderr, "[Wavefront] 错误: createWavefrontSBT 失败 - %s\n", e.what());
+        fprintf(stderr, "[VLR] Error: createWavefrontSBT failed - %s\n", e.what());
         cleanupWavefrontResources();
         throw;
     }
@@ -215,7 +298,7 @@ void Context::initializeWavefrontPipeline() {
     
     OptixPipelineLinkOptions pipelineLinkOptions = {};
     pipelineLinkOptions.maxTraceDepth = 2;  // 主光线 + 阴影光线
-    pipelineLinkOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
+    // OptiX 8: OptixPipelineLinkOptions 仅包含 maxTraceDepth，无 debugLevel
     
     char pipelineLog[2048];
     size_t pipelineLogSize = sizeof(pipelineLog);
@@ -230,15 +313,15 @@ void Context::initializeWavefrontPipeline() {
         &wf.pipeline
     );
     if (pipelineRes != OPTIX_SUCCESS) {
-        fprintf(stderr, "[Wavefront] 错误: optixPipelineCreate 失败 - %s (%d)\n", optixGetErrorName(pipelineRes), pipelineRes);
+        fprintf(stderr, "[VLR] Error: optixPipelineCreate failed - %s (%d)\n", optixGetErrorName(pipelineRes), pipelineRes);
         if (pipelineLogSize > 1) {
-            fprintf(stderr, "[Wavefront] 管线链接日志:\n%.*s\n", static_cast<int>(pipelineLogSize), pipelineLog);
+            fprintf(stderr, "[VLR] Pipeline link log:\n%.*s\n", static_cast<int>(pipelineLogSize), pipelineLog);
         }
         cleanupWavefrontResources();
         throw std::runtime_error(
-            std::string("OptiX Pipeline 创建失败: ") + optixGetErrorName(pipelineRes) + " (" + std::to_string(pipelineRes) + ")");
+            std::string("OptiX pipeline creation failed: ") + optixGetErrorName(pipelineRes) + " (" + std::to_string(pipelineRes) + ")");
     }
-    printf("[Wavefront] OptiX Pipeline 创建成功\n");
+    printf("[VLR] OptiX pipeline created successfully\n");
     
     // 设置栈大小（使用 OptiX 工具计算）
     const uint32_t maxTraceDepth = 2;  // 主光线 + 阴影光线
@@ -246,7 +329,7 @@ void Context::initializeWavefrontPipeline() {
     for (OptixProgramGroup pg : programGroups) {
         OptixResult accRes = optixUtilAccumulateStackSizes(pg, &stackSizes, wf.pipeline);
         if (accRes != OPTIX_SUCCESS) {
-            fprintf(stderr, "[Wavefront] 警告: optixUtilAccumulateStackSizes 失败 - %s (%d)\n",
+            fprintf(stderr, "[VLR] Warning: optixUtilAccumulateStackSizes failed - %s (%d)\n",
                     optixGetErrorName(accRes), accRes);
         }
     }
@@ -272,12 +355,12 @@ void Context::initializeWavefrontPipeline() {
         );
     }
     if (stackRes != OPTIX_SUCCESS) {
-        fprintf(stderr, "[Wavefront] 警告: 栈大小设置失败 - %s (%d)，可能影响渲染\n",
+        fprintf(stderr, "[VLR] Warning: stack size setup failed - %s (%d), may affect rendering\n",
                 optixGetErrorName(stackRes), stackRes);
     }
     
     wf.isInitialized = true;
-    printf("[Wavefront] Pipeline 初始化完成\n");
+    printf("[VLR] Pipeline initialization complete\n");
 }
 
 
@@ -301,48 +384,48 @@ void Context::createWavefrontPrograms() {
         );
         if (res != OPTIX_SUCCESS) {
             throw std::runtime_error(
-                std::string("程序组创建失败: ") + optixGetErrorName(res) +
-                "\n日志:\n" + std::string(logBuffer, logSize));
+                std::string("Program group creation failed: ") + optixGetErrorName(res) +
+                "\nLog:\n" + std::string(logBuffer, logSize));
         }
         if (logSize > 1) {
-            printf("[OptiX] 程序组日志:\n%.*s\n", static_cast<int>(logSize), logBuffer);
+            printf("[OptiX] Program group log:\n%.*s\n", static_cast<int>(logSize), logBuffer);
         }
         return pg;
     };
     
     // ========================================================================
-    // 1. Ray Generation Program - wavefrontTraceRays
+    // 1. Ray Generation Program - traceRays
     // 从活跃队列读取路径，发射光线进行求交
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
         desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
         desc.raygen.module = wf.module;
-        desc.raygen.entryFunctionName = "__raygen__wavefrontTraceRays";
+        desc.raygen.entryFunctionName = "__raygen__traceRays";
         wf.raygenProgram = createProgramGroup(desc);
     }
     
     // ========================================================================
-    // 2. Miss Program - wavefrontMiss
+    // 2. Miss Program - miss
     // 主光线未击中几何体时（命中环境光/天空）
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
         desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
         desc.miss.module = wf.module;
-        desc.miss.entryFunctionName = "__miss__wavefrontMiss";
+        desc.miss.entryFunctionName = "__miss__miss";
         wf.missProgram = createProgramGroup(desc);
     }
     
     // ========================================================================
     // 3. Hit Group - Closest Hit（默认，无 Alpha 测试）
-    // wavefrontClosestHit 填充命中信息到 hitInfoBuffer
+    // closestHit 填充命中信息到 hitInfoBuffer
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
         desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
         desc.hitgroup.moduleCH = wf.module;
-        desc.hitgroup.entryFunctionNameCH = "__closesthit__wavefrontClosestHit";
+        desc.hitgroup.entryFunctionNameCH = "__closesthit__closestHit";
         desc.hitgroup.moduleAH = nullptr;
         desc.hitgroup.entryFunctionNameAH = nullptr;
         desc.hitgroup.moduleIS = nullptr;
@@ -351,19 +434,19 @@ void Context::createWavefrontPrograms() {
     }
     
     // ========================================================================
-    // 4. Shadow Miss Program - wavefrontShadowMiss
+    // 4. Shadow Miss Program - shadowMiss
     // 阴影光线未击中，光源可见
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
         desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
         desc.miss.module = wf.module;
-        desc.miss.entryFunctionName = "__miss__wavefrontShadowMiss";
+        desc.miss.entryFunctionName = "__miss__shadowMiss";
         wf.shadowMissProgram = createProgramGroup(desc);
     }
     
     // ========================================================================
-    // 5. Shadow Hit Group - wavefrontShadowAnyHit
+    // 5. Shadow Hit Group - shadowAnyHit
     // 阴影光线击中几何体，光源被遮挡，立即终止
     // ========================================================================
     {
@@ -372,13 +455,13 @@ void Context::createWavefrontPrograms() {
         desc.hitgroup.moduleCH = nullptr;
         desc.hitgroup.entryFunctionNameCH = nullptr;
         desc.hitgroup.moduleAH = wf.module;
-        desc.hitgroup.entryFunctionNameAH = "__anyhit__wavefrontShadowAnyHit";
+        desc.hitgroup.entryFunctionNameAH = "__anyhit__shadowAnyHit";
         desc.hitgroup.moduleIS = nullptr;
         desc.hitgroup.entryFunctionNameIS = nullptr;
         wf.shadowHitGroupProgram = createProgramGroup(desc);
     }
     
-    printf("Wavefront 程序组创建完成（RayGen、Miss、HitGroup、ShadowMiss、ShadowHitGroup）\n");
+    printf("[VLR] Program groups created (RayGen, Miss, HitGroup, ShadowMiss, ShadowHitGroup)\n");
 }
 
 
@@ -393,7 +476,7 @@ void Context::createWavefrontSBT() {
     // 1. RayGen 记录（无附加数据）
     wf.raygenRecord = optixu::createSBTRecord(wf.raygenProgram);
     
-    // 2. Miss 记录 - 需要 2 条（RayType 0: wavefrontMiss, RayType 1: wavefrontShadowMiss）
+    // 2. Miss 记录 - 需要 2 条（RayType 0: miss, RayType 1: shadowMiss）
     wf.missRecord = optixu::createSBTRecord(wf.missProgram);
     wf.shadowMissRecord = optixu::createSBTRecord(wf.shadowMissProgram);
     
@@ -417,7 +500,7 @@ void Context::createWavefrontSBT() {
     wf.sbt.missRecordStrideInBytes = static_cast<uint32_t>(missRecordSize);
     wf.sbt.missRecordCount = 2;  // Closest + Shadow
     
-    // 注意：Miss 区需要连续内存存放 [wavefrontMiss, wavefrontShadowMiss]
+    // 注意：Miss 区需要连续内存存放 [miss, shadowMiss]
     // 当前分别分配，需确保布局正确。OptiX 要求 missRecordBase 指向的缓冲区
     // 包含 numRayTypes 条记录。我们分配一个连续的 miss 缓冲区。
     {
@@ -467,7 +550,7 @@ void Context::createWavefrontSBT() {
         wf.sbt.hitgroupRecordCount = 2;
     }
     
-    printf("Wavefront SBT 创建完成（RayGen、Miss×2、HitGroup×2）\n");
+    printf("[VLR] SBT created (RayGen, Miss x2, HitGroup x2)\n");
 }
 
 
@@ -563,7 +646,7 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     wf.currentWidth = width;
     wf.currentHeight = height;
     
-    printf("Wavefront buffers allocated: %ux%u (%u paths, ~%.2f MB)\n",
+    printf("[VLR] Buffers allocated: %ux%u (%u paths, ~%.2f MB)\n",
            width, height, numPixels,
            (numPixels * (sizeof(shared::WavefrontPathState) + 
                         sizeof(shared::WavefrontHitInfo) +
@@ -869,25 +952,42 @@ void Context::renderWavefront(
     void* outputBuffer)
 {
     auto& wf = m_optix.wavefrontPathTracing;
-    
+
+    printf("[VLR] renderWavefront started: %ux%u, %u samples\n", width, height, numSamples);
+    fflush(stdout);
+
     // 若有外部场景则构建加速结构并上传到设备
     if (m_sceneSource) {
+        printf("[VLR] Building acceleration structure...\n");
+        fflush(stdout);
         const_cast<Scene*>(m_sceneSource)->buildAccelerationStructure();
+        printf("[VLR] Uploading scene data to GPU...\n");
+        fflush(stdout);
         const_cast<Scene*>(m_sceneSource)->updateToGPU();
         m_scene.camera = m_sceneSource->getCamera();
         m_scene.bounds = m_sceneSource->getSceneBounds();
+        printf("[VLR] Scene ready\n");
+        fflush(stdout);
     }
-    
+
     // 确保缓冲区已分配
     if (wf.currentWidth != width || wf.currentHeight != height) {
+        printf("[VLR] Resizing buffers...\n");
+        fflush(stdout);
         resizeWavefrontBuffers(width, height);
     }
-    
+
     // 设置启动参数
+    printf("[VLR] Setting launch parameters...\n");
+    fflush(stdout);
     setupWavefrontLaunchParams();
-    
+
     // 执行渲染
+    printf("[VLR] Starting render loop...\n");
+    fflush(stdout);
     for (uint32_t sample = 0; sample < numSamples; ++sample) {
+        printf("[VLR] Sample %u/%u\n", sample + 1, numSamples);
+        fflush(stdout);
         executeWavefrontRender(1);
     }
     
@@ -968,7 +1068,7 @@ void Context::launchGenerateRays(uint32_t numPaths) {
     auto& wf = m_optix.wavefrontPathTracing;
     if (!wf.launchParamsBuffer) return;
 
-    // 根据图像尺寸计算 grid/block，调用 wavefrontGenerateRays CUDA kernel
+    // 根据图像尺寸计算 grid/block，调用 generateRays CUDA kernel
     uint32_t width = wf.currentWidth;
     uint32_t height = wf.currentHeight;
     if (width == 0 || height == 0) return;
@@ -984,7 +1084,7 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
 
     // 使用 optixLaunch 启动 OptiX Ray Generation 程序，传入 SBT 和 launchParams
     if (!wf.pipeline) {
-        throw std::runtime_error("launchTraceRays: OptiX pipeline 未初始化，请先调用 createWavefrontPrograms");
+        throw std::runtime_error("launchTraceRays: OptiX pipeline not initialized, call createWavefrontPrograms first");
     }
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
@@ -1009,7 +1109,7 @@ void Context::launchProcessHits(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 调用 wavefrontProcessHits CUDA kernel
+    // 调用 processHits CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1021,7 +1121,7 @@ void Context::launchSampleLights(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 调用 wavefrontSampleLights CUDA kernel
+    // 调用 sampleLights CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1033,7 +1133,7 @@ void Context::launchSampleBSDF(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 调用 wavefrontSampleBSDF CUDA kernel
+    // 调用 sampleBSDF CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1045,7 +1145,7 @@ void Context::launchAccumulate(uint32_t numPaths) {
     if (!wf.launchParamsBuffer) return;
     if (numPaths == 0) return;
 
-    // 调用 wavefrontAccumulateResults CUDA kernel
+    // 调用 accumulateResults CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 

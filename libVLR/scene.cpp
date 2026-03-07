@@ -228,7 +228,7 @@ uint32_t Scene::createInstance(uint32_t meshId, uint32_t materialId,
     const InstanceTransform& transform)
 {
     if (meshId >= m_meshes.size() || materialId >= m_materials.size())
-        throw std::runtime_error("createInstance: 无效的 meshId 或 materialId");
+        throw std::runtime_error("createInstance: invalid meshId or materialId");
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_TriangleMesh;

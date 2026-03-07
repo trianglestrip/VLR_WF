@@ -25,7 +25,7 @@ static void savePPM(const char* filename, uint32_t width, uint32_t height,
                     const float* rgb) {
     FILE* fp = fopen(filename, "wb");
     if (!fp) {
-        fprintf(stderr, "[错误] 无法创建输出文件: %s\n", filename);
+        fprintf(stderr, "[Error] Cannot create output file: %s\n", filename);
         return;
     }
     fprintf(fp, "P6\n%u %u\n255\n", width, height);
@@ -52,7 +52,7 @@ static void savePPM(const char* filename, uint32_t width, uint32_t height,
         fputc(ub, fp);
     }
     fclose(fp);
-    printf("[完成] 已保存图像: %s (%u x %u)\n", filename, width, height);
+    printf("[Done] Image saved: %s (%u x %u)\n", filename, width, height);
 }
 
 // ============================================================================
@@ -94,6 +94,10 @@ static const uint32_t kLightIndices[] = { 0, 1, 2,  0, 2, 3 };
 // ============================================================================
 
 int main(int argc, char** argv) {
+    // 立即输出，检测崩溃位置
+    printf("=== VLR Simple Render Test START ===\n");
+    fflush(stdout);
+    
     // 默认参数
     uint32_t width = 512;
     uint32_t height = 512;
@@ -111,33 +115,40 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             outputFile = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-?") == 0) {
-            printf("用法: %s [选项]\n", argv[0]);
-            printf("选项:\n");
-            printf("  -w <宽度>   图像宽度 (默认: 512)\n");
-            printf("  -h <高度>   图像高度 (默认: 512)\n");
-            printf("  -s <采样>   每像素采样数 (默认: 16)\n");
-            printf("  -o <文件>   输出 PPM 文件名 (默认: output.ppm)\n");
+            printf("Usage: %s [options]\n", argv[0]);
+            printf("Options:\n");
+            printf("  -w <width>   Image width (default: 512)\n");
+            printf("  -h <height>  Image height (default: 512)\n");
+            printf("  -s <samples> Samples per pixel (default: 16)\n");
+            printf("  -o <file>    Output PPM filename (default: output.ppm)\n");
             return 0;
         }
     }
 
-    printf("=== VLR Wavefront 简单渲染测试 ===\n");
-    printf("分辨率: %u x %u, 采样: %u, 输出: %s\n", width, height, numSamples, outputFile);
+    printf("=== VLR Wavefront Simple Render Test ===\n");
+    printf("Resolution: %u x %u, Samples: %u, Output: %s\n", width, height, numSamples, outputFile);
+    fflush(stdout);
 
     // 创建 Context 和 Scene
+    printf("[Step 1] Creating VLR Context...\n");
+    fflush(stdout);
+    
     VLRContext context = nullptr;
     VLRScene scene = nullptr;
     VLRResult res;
 
     res = vlrCreateContext(nullptr, 0, &context);
+    
+    printf("[Step 1] vlrCreateContext returned: %d\n", res);
+    fflush(stdout);
     if (res != VLRResult_Success || !context) {
-        fprintf(stderr, "[错误] 创建 Context 失败: %d\n", res);
+        fprintf(stderr, "[Error] Failed to create Context: %d\n", res);
         return 1;
     }
 
     res = vlrCreateScene(context, &scene);
     if (res != VLRResult_Success || !scene) {
-        fprintf(stderr, "[错误] 创建 Scene 失败: %d\n", res);
+        fprintf(stderr, "[Error] Failed to create Scene: %d\n", res);
         vlrDestroyContext(context);
         return 1;
     }
@@ -147,7 +158,7 @@ int main(int argc, char** argv) {
     float wallColor[] = { 0.73f, 0.73f, 0.73f };
     res = vlrCreateMaterial(scene, 0 /* Matte */, wallColor, nullptr /* 不发光 */, &matWalls);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 创建墙面材质失败\n");
+        fprintf(stderr, "[Error] Failed to create wall material\n");
         goto cleanup;
     }
 
@@ -155,7 +166,7 @@ int main(int argc, char** argv) {
     float lightEmission[] = { 15.0f, 15.0f, 15.0f };  // 强白光
     res = vlrCreateMaterial(scene, 0 /* Matte */, wallColor, lightEmission, &matLight);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 创建发光材质失败\n");
+        fprintf(stderr, "[Error] Failed to create emissive material\n");
         goto cleanup;
     }
 
@@ -167,7 +178,7 @@ int main(int argc, char** argv) {
         matWalls,
         &meshWalls);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 创建墙面网格失败\n");
+        fprintf(stderr, "[Error] Failed to create wall mesh\n");
         goto cleanup;
     }
 
@@ -179,7 +190,7 @@ int main(int argc, char** argv) {
         matLight,
         &meshLight);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 创建区域光网格失败\n");
+        fprintf(stderr, "[Error] Failed to create area light mesh\n");
         vlrDestroyTriangleMesh(meshWalls);
         goto cleanup;
     }
@@ -192,7 +203,7 @@ int main(int argc, char** argv) {
     VLRInstance instWalls = nullptr;
     res = vlrCreateInstance(scene, meshWalls, origin, scale, axis, 0.0f, &instWalls);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 创建墙面实例失败\n");
+        fprintf(stderr, "[Error] Failed to create wall instance\n");
         vlrDestroyTriangleMesh(meshLight);
         vlrDestroyTriangleMesh(meshWalls);
         goto cleanup;
@@ -201,7 +212,7 @@ int main(int argc, char** argv) {
     VLRInstance instLight = nullptr;
     res = vlrCreateInstance(scene, meshLight, origin, scale, axis, 0.0f, &instLight);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 创建区域光实例失败\n");
+        fprintf(stderr, "[Error] Failed to create area light instance\n");
         vlrDestroyInstance(instWalls);
         vlrDestroyTriangleMesh(meshLight);
         vlrDestroyTriangleMesh(meshWalls);
@@ -211,7 +222,7 @@ int main(int argc, char** argv) {
     // 添加区域光
     res = vlrAddAreaLight(scene, instLight);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[警告] 添加区域光失败: %d，继续渲染\n", res);
+        fprintf(stderr, "[Warning] Failed to add area light: %d, continuing render\n", res);
     }
 
     // 设置透视相机（位于盒前，望向盒子内部）
@@ -234,23 +245,27 @@ int main(int argc, char** argv) {
 
     res = vlrSetCamera(scene, &cam);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 设置相机失败\n");
+        fprintf(stderr, "[Error] Failed to set camera\n");
         goto cleanup_inst;
     }
 
     // 执行渲染（使用 Wavefront 渲染器）
-    printf("[渲染] 开始渲染...\n");
+    printf("[Render] Starting render...\n");
+    fflush(stdout);
     res = vlrRender(context, scene, width, height, numSamples, VLRRenderer_WavefrontPathTracing);
+    fflush(stdout);
     if (res != VLRResult_Success) {
-        fprintf(stderr, "[错误] 渲染失败: %d\n", res);
+        fprintf(stderr, "[Error] Render failed: %d\n", res);
+        fflush(stderr);
         goto cleanup_inst;
     }
-    printf("[渲染] 完成\n");
+    printf("[Render] Done\n");
+    fflush(stdout);
 
     // 获取输出缓冲区并保存为 PPM
     void* devBuffer = vlrGetOutputBuffer(context);
     if (!devBuffer) {
-        fprintf(stderr, "[错误] 无法获取输出缓冲区\n");
+        fprintf(stderr, "[Error] Cannot get output buffer\n");
         goto cleanup_inst;
     }
 
@@ -258,13 +273,13 @@ int main(int argc, char** argv) {
     size_t bufferSize = pixelCount * sizeof(float) * 3;  // DiscretizedSpectrum: r,g,b
     float* hostRGB = (float*)malloc(bufferSize);
     if (!hostRGB) {
-        fprintf(stderr, "[错误] 内存不足\n");
+        fprintf(stderr, "[Error] Out of memory\n");
         goto cleanup_inst;
     }
 
     cudaError_t err = cudaMemcpy(hostRGB, devBuffer, bufferSize, cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
-        fprintf(stderr, "[错误] cudaMemcpy 失败: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "[Error] cudaMemcpy failed: %s\n", cudaGetErrorString(err));
         free(hostRGB);
         goto cleanup_inst;
     }
@@ -289,6 +304,6 @@ cleanup:
     vlrDestroyScene(scene);
     vlrDestroyContext(context);
 
-    printf("=== 测试完成 ===\n");
+    printf("=== Test complete ===\n");
     return 0;
 }

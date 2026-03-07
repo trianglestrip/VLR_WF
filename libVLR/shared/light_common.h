@@ -5,7 +5,7 @@
 // 支持区域光、点光源和环境光的统一接口。
 //
 // 依赖：需在使用前定义 wlp (WavefrontLaunchParameters) 常量
-// 用法：在 wavefront_sample_lights.cu 中包含此头文件
+// 用法：在 sample_lights.cu 中包含此头文件
 //
 // 作者：VLR 开发团队
 // 创建日期：2026-03-07
@@ -15,7 +15,7 @@
 #pragma once
 
 #include "light_types.h"
-#include "wavefront_types.h"
+#include "path_types.h"
 #include "kernel_common.h"
 #include <limits>
 

@@ -115,7 +115,7 @@
     <CudaCompile>
       <Include>F:\project\VLR_WF\libVLR;F:\project\VLR_WF\libVLR\include;F:\project\VLR_WF\libVLR\shared;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
       <Defines>%(Defines);_WINDOWS;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="Debug";VLR_EXPORTS</Defines>
-      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob0"</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob0 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
       <CudaRuntime>Static</CudaRuntime>
@@ -136,20 +136,6 @@
       <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
-    <PostBuildEvent>
-      <Message>复制 PTX 到库输出目录</Message>
-      <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory F:/project/VLR_WF/bin/GPU_kernels
-if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different F:/project/VLR_WF/bin/GPU_kernels/wavefront_trace_rays.ptx F:/project/VLR_WF/bin/GPU_kernels/
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-    </PostBuildEvent>
     <Link>
       <AdditionalDependencies>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cudart.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cuda.lib;cudadevrt.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64;C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64/$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -198,7 +184,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <CudaCompile>
       <Include>F:\project\VLR_WF\libVLR;F:\project\VLR_WF\libVLR\include;F:\project\VLR_WF\libVLR\shared;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
       <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="Release";VLR_EXPORTS</Defines>
-      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Ob2"</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Ob2 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
       <CudaRuntime>Static</CudaRuntime>
@@ -218,20 +204,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
-    <PostBuildEvent>
-      <Message>复制 PTX 到库输出目录</Message>
-      <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory F:/project/VLR_WF/bin/GPU_kernels
-if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different F:/project/VLR_WF/bin/GPU_kernels/wavefront_trace_rays.ptx F:/project/VLR_WF/bin/GPU_kernels/
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-    </PostBuildEvent>
     <Link>
       <AdditionalDependencies>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cudart.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cuda.lib;cudadevrt.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64;C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64/$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -280,7 +252,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <CudaCompile>
       <Include>F:\project\VLR_WF\libVLR;F:\project\VLR_WF\libVLR\include;F:\project\VLR_WF\libVLR\shared;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
       <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="MinSizeRel";VLR_EXPORTS</Defines>
-      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Ob1"</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Ob1 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
       <CudaRuntime>Static</CudaRuntime>
@@ -300,20 +272,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
-    <PostBuildEvent>
-      <Message>复制 PTX 到库输出目录</Message>
-      <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory F:/project/VLR_WF/bin/GPU_kernels
-if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different F:/project/VLR_WF/bin/GPU_kernels/wavefront_trace_rays.ptx F:/project/VLR_WF/bin/GPU_kernels/
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-    </PostBuildEvent>
     <Link>
       <AdditionalDependencies>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cudart.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cuda.lib;cudadevrt.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64;C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64/$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -361,7 +319,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <CudaCompile>
       <Include>F:\project\VLR_WF\libVLR;F:\project\VLR_WF\libVLR\include;F:\project\VLR_WF\libVLR\shared;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
       <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="RelWithDebInfo";VLR_EXPORTS</Defines>
-      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob1"</AdditionalOptions>
+      <AdditionalOptions>%(AdditionalOptions) -std=c++17 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob1 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
       <CudaRuntime>Static</CudaRuntime>
@@ -381,20 +339,6 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
-    <PostBuildEvent>
-      <Message>复制 PTX 到库输出目录</Message>
-      <Command>setlocal
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E make_directory F:/project/VLR_WF/bin/GPU_kernels
-if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E copy_if_different F:/project/VLR_WF/bin/GPU_kernels/wavefront_trace_rays.ptx F:/project/VLR_WF/bin/GPU_kernels/
-if %errorlevel% neq 0 goto :cmEnd
-:cmEnd
-endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
-:cmErrorLevel
-exit /b %1
-:cmDone
-if %errorlevel% neq 0 goto :VCEnd</Command>
-    </PostBuildEvent>
     <Link>
       <AdditionalDependencies>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cudart.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\lib\x64\cuda.lib;cudadevrt.lib;cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64;C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64/$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -474,13 +418,13 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <ClCompile Include="F:\project\VLR_WF\libVLR\vlr.cpp" />
     <ClCompile Include="F:\project\VLR_WF\libVLR\context.cpp" />
     <ClCompile Include="F:\project\VLR_WF\libVLR\scene.cpp" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_generate_rays.cu" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_process_hits.cu" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_sample_lights.cu" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_sample_bsdf.cu" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_compact.cu" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_accumulate.cu" />
-    <CudaCompile Include="..\..\libVLR\GPU_kernels\wavefront_launch.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\generate_rays.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\process_hits.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_lights.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_bsdf.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\compact.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\accumulate.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\kernel_launch.cu" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
@@ -490,9 +434,9 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </ProjectReference>
-    <ProjectReference Include="F:\project\VLR_WF\build\libVLR\wavefront_trace_rays_ptx.vcxproj">
-      <Project>{A6A17D17-836F-3209-86C5-F5B044487996}</Project>
-      <Name>wavefront_trace_rays_ptx</Name>
+    <ProjectReference Include="F:\project\VLR_WF\build\libVLR\trace_rays_ptx.vcxproj">
+      <Project>{6F5C7D06-6FDE-333A-800D-7387949D4F41}</Project>
+      <Name>trace_rays_ptx</Name>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </ProjectReference>

@@ -2,7 +2,7 @@
 // VLR Wavefront - Kernel 启动辅助函数声明
 //
 // 本文件声明 CUDA/OptiX 内核的启动辅助函数，供 Context 调用。
-// 实际实现位于 wavefront_launch.cu 中（需 nvcc 编译以使用 <<<>>> 语法）。
+// 实际实现位于 kernel_launch.cu 中（需 nvcc 编译以使用 <<<>>> 语法）。
 //
 // 作者：VLR 开发团队
 // 创建日期：2026-03-07
@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "shared/wavefront_types.h"
+#include "shared/path_types.h"
 #include <cuda_runtime.h>
 #include <optix.h>
 

@@ -636,14 +636,14 @@ struct BSDFQuery {
     WavelengthSamples wls;
     DirectionType dirTypeFilter;
     TransportMode transportMode;
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    BSDFQuery(const Vector3D& dirIn_, const Vector3D& dirOut_, 
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    BSDFQuery(const Vector3D& dirIn_, const Vector3D& dirOut_,
               const WavelengthSamples& wls_, DirectionType filter, TransportMode mode)
         : dirIn(dirIn_), dirOut(dirOut_), wls(wls_), dirTypeFilter(filter), transportMode(mode) {}
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    BSDFQuery(const Vector3D& dirIn_, const WavelengthSamples& wls_, 
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    BSDFQuery(const Vector3D& dirIn_, const WavelengthSamples& wls_,
               DirectionType filter, TransportMode mode)
         : dirIn(dirIn_), dirOut(0, 0, 0), wls(wls_), dirTypeFilter(filter), transportMode(mode) {}
 };
@@ -654,26 +654,26 @@ struct BSDFSample {
     DirectionType dirType;
 };
 
-/// BSDF 结构体（非模板，以兼容 NVCC PTX 设备编译）
+/// BSDF struct (non-template for NVCC PTX compatibility)
 struct BSDF {
     const SurfaceMaterialDescriptor* matDesc;
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     bool matches(DirectionType type) const {
         return true;
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     SampledSpectrum evaluate(const BSDFQuery& query) const {
         return SampledSpectrum::Zero();
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     float evaluatePDF(const BSDFQuery& query) const {
         return 0.0f;
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     SampledSpectrum sample(const BSDFQuery& query, float u0, float u1, BSDFSample* sample) const {
         return SampledSpectrum::Zero();
     }
@@ -681,27 +681,27 @@ struct BSDF {
 
 struct EDF {
     const SurfaceMaterialDescriptor* matDesc;
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    EDF(const SurfaceMaterialDescriptor& desc, const SurfacePoint& sp, const WavelengthSamples& wls) 
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    EDF(const SurfaceMaterialDescriptor& desc, const SurfacePoint& sp, const WavelengthSamples& wls)
         : matDesc(&desc) {}
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
-    SampledSpectrum evaluateEmittance() const {
-        return SampledSpectrum::Zero();  // 占位符
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    SampledSpectrum evaluateEmittance() {
+        return SampledSpectrum::Zero();
     }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     SampledSpectrum evaluate(const struct EDFQuery& query, const Vector3D& dir) const {
-        return SampledSpectrum::Zero();  // 占位符
+        return SampledSpectrum::Zero();
     }
 };
 
 struct EDFQuery {
     DirectionType dirTypeFilter;
     WavelengthSamples wls;
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     EDFQuery(DirectionType filter, const WavelengthSamples& wls_)
         : dirTypeFilter(filter), wls(wls_) {}
 };
@@ -831,11 +831,15 @@ T calcNode(int32_t nodeIndex, const T& defaultValue, const SurfacePoint& surfPt,
 #else
     #define vlrprintf printf
     inline void atomicAdd(float* addr, float val) { *addr += val; }
-    inline void atomicAdd(uint32_t* addr, uint32_t val) { *addr += val; }
-    inline uint32_t atomicSub(uint32_t* addr, uint32_t val) { 
-        uint32_t old = *addr; 
-        *addr -= val; 
-        return old; 
+    inline uint32_t atomicAdd(uint32_t* addr, uint32_t val) {
+        uint32_t old = *addr;
+        *addr += val;
+        return old;
+    }
+    inline uint32_t atomicSub(uint32_t* addr, uint32_t val) {
+        uint32_t old = *addr;
+        *addr -= val;
+        return old;
     }
 #endif
 

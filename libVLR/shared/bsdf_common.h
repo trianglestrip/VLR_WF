@@ -21,11 +21,7 @@
 namespace vlr {
 namespace shared {
 
-// 使用基础类型的数学常量
-using ::vlr::VLR_M_PI;
-using ::vlr::VLR_M_INV_PI;
-using ::vlr::VLR_M_2PI;
-using ::vlr::VLR_M_INV_2PI;
+// 数学常量来自 basic_types.h 宏定义，直接使用 VLR_M_PI 等
 
 // ============================================================================
 // 1. 工具函数
