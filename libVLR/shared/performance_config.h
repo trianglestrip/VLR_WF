@@ -87,6 +87,32 @@ struct PerformanceConfig {
     
     /// 是否启用预取优化
     static constexpr bool UsePrefetching = false;  // 暂时禁用，需要更多测试
+    
+    // ========================================================================
+    // 早期终止优化
+    // ========================================================================
+    
+    /// 早期终止阈值（0.0-1.0）
+    /// 当活跃路径数低于此比例时，提前终止渲染
+    /// 推荐值：0.01-0.05（1-5%）
+    static constexpr float EarlyTerminationThreshold = 0.01f;
+    
+    /// 早期终止最小深度
+    /// 只在深度大于此值时才考虑早期终止
+    /// 推荐值：10-15
+    static constexpr uint32_t EarlyTerminationMinDepth = 10;
+    
+    // ========================================================================
+    // 动态优化
+    // ========================================================================
+    
+    /// 是否启用动态路径长度调整
+    /// 根据场景复杂度自动调整最大路径长度
+    static constexpr bool UseDynamicMaxDepth = false;  // 暂时禁用
+    
+    /// 是否启用自适应采样
+    /// 根据像素方差调整采样数
+    static constexpr bool UseAdaptiveSampling = false;  // 未来功能
 };
 
 }  // namespace shared

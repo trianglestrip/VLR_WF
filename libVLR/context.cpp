@@ -1225,15 +1225,23 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         for (uint32_t depth = 0; depth < wf.maxPathLength; ++depth) {
         wf.launchParams.currentDepth = depth;
         
-        // 只在同步间隔时检查活跃路径数
+        // 优化：在同步间隔时检查活跃路径数，并支持早期终止
         if (depth % SYNC_INTERVAL == 0 && depth > 0) {
             if (wf.queueCounters) {
                 wf.queueCounters->copyToHost(&numActivePaths, 1, m_stream);
                 CUDA_CHECK(cudaStreamSynchronize(m_stream));
             }
             
+            // 早期终止：当路径数很少时，提前退出
+            constexpr float EARLY_TERMINATION_THRESHOLD = shared::PerformanceConfig::EarlyTerminationThreshold;
+            constexpr uint32_t MIN_DEPTH = shared::PerformanceConfig::EarlyTerminationMinDepth;
+            uint32_t minPaths = static_cast<uint32_t>(numPixels * EARLY_TERMINATION_THRESHOLD);
+            
             if (numActivePaths == 0) {
                 break;  // 所有路径已终止
+            } else if (numActivePaths < minPaths && depth > MIN_DEPTH) {
+                // 路径数很少且已经足够深，提前终止
+                break;
             }
         }
         

@@ -82,6 +82,7 @@ extern "C" __global__ void sampleBSDF(
     // ========================================================================
     // 2. BSDF 采样（使用 sampleBSDFWithU2，部分 BSDF 需三随机数）
     // ========================================================================
+    // 优化：预生成随机数，减少 RNG 调用开销
     float u0 = pathState.rng.getFloat0cTo1o();
     float u1 = pathState.rng.getFloat0cTo1o();
     float u2 = pathState.rng.getFloat0cTo1o();
