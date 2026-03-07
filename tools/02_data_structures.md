@@ -459,8 +459,8 @@ struct WavefrontWorkQueue {
 ```mermaid
 graph TB
     subgraph "深度N: 处理阶段"
-        ActiveN[ActiveQueue<br/>pathIndices[0..199999]<br/>counter=200000]
-        NextN[NextQueue<br/>pathIndices[空]<br/>counter=0]
+        ActiveN["ActiveQueue<br/>pathIndices (200000)<br/>counter=200000"]
+        NextN["NextQueue<br/>pathIndices (空)<br/>counter=0"]
         
         ActiveN -->|读取路径索引| Kernel[SampleBSDF Kernel]
         Kernel -->|写入新路径索引| NextN
@@ -471,8 +471,8 @@ graph TB
     end
     
     subgraph "深度N+1: 处理阶段"
-        ActiveN1[ActiveQueue<br/>pathIndices[0..179999]<br/>counter=180000]
-        NextN1[NextQueue<br/>pathIndices[空]<br/>counter=0]
+        ActiveN1["ActiveQueue<br/>pathIndices (180000)<br/>counter=180000"]
+        NextN1["NextQueue<br/>pathIndices (空)<br/>counter=0"]
         
         ActiveN1 -->|读取路径索引| Kernel2[SampleBSDF Kernel]
         Kernel2 -->|写入新路径索引| NextN1
