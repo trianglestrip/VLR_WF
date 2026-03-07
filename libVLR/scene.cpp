@@ -194,6 +194,32 @@ uint32_t Scene::createMaterial(
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
+uint32_t Scene::createMaterialEx(
+    uint32_t bsdfType,
+    float albedoR, float albedoG, float albedoB,
+    float roughness,
+    float metallic,
+    float ior,
+    float emissionR, float emissionG, float emissionB)
+{
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    mat.bsdfProcedureSetIndex = bsdfType;
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
+    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&albedoR);
+    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&albedoG);
+    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&albedoB);
+    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
+    mat.data[MaterialDataLayout::Metallic] = *reinterpret_cast<uint32_t*>(&metallic);
+    mat.data[MaterialDataLayout::IOR] = *reinterpret_cast<uint32_t*>(&ior);
+    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&emissionR);
+    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&emissionG);
+    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&emissionB);
+    m_materials.push_back(mat);
+    return static_cast<uint32_t>(m_materials.size() - 1);
+}
+
 void Scene::setMaterial(uint32_t materialId,
     float albedoR, float albedoG, float albedoB,
     float roughness,

@@ -235,6 +235,43 @@ void vlrDestroyMaterial(VLRMaterial material) {
     delete TO_MAT(material);
 }
 
+VLRResult vlrCreateMaterialEx(
+    VLRScene scene,
+    uint32_t materialType,
+    const float baseColor[3],
+    float roughness,
+    float metallic,
+    float ior,
+    const float* emissionColor,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !baseColor || !outMaterial) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        
+        float r = baseColor[0];
+        float g = baseColor[1];
+        float b = baseColor[2];
+        float er = emissionColor ? emissionColor[0] : 0.0f;
+        float eg = emissionColor ? emissionColor[1] : 0.0f;
+        float eb = emissionColor ? emissionColor[2] : 0.0f;
+        
+        // 调用 Scene::createMaterialEx，传递完整参数（包括 IOR 和 metallic）
+        uint32_t materialIndex = sceneImpl->scene->createMaterialEx(
+            materialType, r, g, b, roughness, metallic, ior, er, eg, eb);
+        
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrCreateInstance(
     VLRScene scene,
     VLRTriangleMesh mesh,

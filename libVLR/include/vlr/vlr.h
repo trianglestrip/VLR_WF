@@ -157,6 +157,26 @@ VLR_API VLRResult vlrCreateMaterial(
 /// @param material 材质句柄（可为 NULL，无操作）
 VLR_API void vlrDestroyMaterial(VLRMaterial material);
 
+/// 创建扩展材质（支持粗糙度、金属度、折射率等参数）
+/// @param scene 所属场景
+/// @param materialType 材质类型（0=Matte, 3=Specular, 4=SpecularTransmission）
+/// @param baseColor 基础颜色 RGB [0..1]（3 个 float）
+/// @param roughness 粗糙度 [0..1]（0=完美镜面，1=完全粗糙）
+/// @param metallic 金属度 [0..1]（0=电介质，1=金属）
+/// @param ior 折射率（透射材质，如玻璃 1.5）
+/// @param emissionColor 发光颜色 RGB [0..∞]（3 个 float，可为 NULL）
+/// @param outMaterial 输出材质句柄
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrCreateMaterialEx(
+    VLRScene scene,
+    uint32_t materialType,
+    const float baseColor[3],
+    float roughness,
+    float metallic,
+    float ior,
+    const float* emissionColor,
+    VLRMaterial* outMaterial);
+
 /// 创建实例（将网格放入场景）
 /// @param scene 所属场景
 /// @param mesh 网格句柄

@@ -113,5 +113,10 @@ add_executable(multi_material_test test/multi_material_test.cpp)
 target_include_directories(multi_material_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
 target_link_libraries(multi_material_test PRIVATE VLR CUDA::cudart)
 
+# Cornell Box Improved 测试场景（完整材质）
+add_executable(cornell_box_improved_test test/cornell_box_improved_test.cpp)
+target_include_directories(cornell_box_improved_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
+target_link_libraries(cornell_box_improved_test PRIVATE VLR CUDA::cudart)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

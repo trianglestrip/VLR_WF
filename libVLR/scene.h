@@ -159,6 +159,15 @@ public:
         float roughness = 0.5f,
         float emissionR = 0.0f, float emissionG = 0.0f, float emissionB = 0.0f);
 
+    /// 创建扩展材质（支持 IOR 和 metallic）
+    uint32_t createMaterialEx(
+        uint32_t bsdfType,
+        float albedoR, float albedoG, float albedoB,
+        float roughness,
+        float metallic,
+        float ior,
+        float emissionR = 0.0f, float emissionG = 0.0f, float emissionB = 0.0f);
+
     /// 设置材质参数
     void setMaterial(uint32_t materialId,
         float albedoR, float albedoG, float albedoB,
