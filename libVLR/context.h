@@ -301,8 +301,7 @@ private:
     void checkCudaError(cudaError_t error, const char* call, const char* file, int line);
 };
 
-// 辅助宏
-#define OPTIX_CHECK(call) checkOptixError(call, #call, __FILE__, __LINE__)
-#define CUDA_CHECK(call) checkCudaError(call, #call, __FILE__, __LINE__)
+// 注意：OPTIX_CHECK 和 CUDA_CHECK 宏在 utils/optix_util.h 和 utils/cuda_util.h 中定义
+// 这里不再重复定义以避免警告
 
 } // namespace vlr

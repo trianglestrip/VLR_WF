@@ -91,5 +91,12 @@ add_executable(simple_render_test test/simple_render_test.cpp)
 target_include_directories(simple_render_test PRIVATE ${CMAKE_SOURCE_DIR}/libVLR/include)
 target_link_libraries(simple_render_test PRIVATE VLR CUDA::cudart)
 
+# OptiX 最小测试
+add_executable(optix_minimal_test test/optix_minimal_test.cpp)
+target_include_directories(optix_minimal_test PRIVATE 
+    ${OPTIX_PATH}/include
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+target_link_libraries(optix_minimal_test PRIVATE CUDA::cudart CUDA::cuda_driver)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

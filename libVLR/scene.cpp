@@ -316,30 +316,37 @@ void Scene::buildGeometryAccelerationStructures() {
     m_gasOutputBuffers.clear();
     m_gasHandles.clear();
     m_gasHandles.reserve(m_meshes.size());
+    
     OptixAccelBuildOptions accelOptions = {};
     accelOptions.buildFlags = OPTIX_BUILD_FLAG_NONE;
     accelOptions.operation = OPTIX_BUILD_OPERATION_BUILD;
+    
     for (size_t meshIdx = 0; meshIdx < m_meshes.size(); ++meshIdx) {
         const TriangleMeshData& mesh = m_meshes[meshIdx];
         if (mesh.positions.empty() || mesh.triangles.empty()) continue;
+        
         std::vector<float> vertices(mesh.positions.size() * 3);
         for (size_t i = 0; i < mesh.positions.size(); ++i) {
             vertices[i * 3 + 0] = mesh.positions[i].x;
             vertices[i * 3 + 1] = mesh.positions[i].y;
             vertices[i * 3 + 2] = mesh.positions[i].z;
         }
+        
         CUdeviceptr d_vertices = 0;
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_vertices), vertices.size() * sizeof(float)));
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_vertices), vertices.data(), vertices.size() * sizeof(float), cudaMemcpyHostToDevice));
+        
         std::vector<uint32_t> ind(mesh.triangles.size() * 3);
         for (size_t i = 0; i < mesh.triangles.size(); ++i) {
             ind[i * 3 + 0] = mesh.triangles[i].indices[0];
             ind[i * 3 + 1] = mesh.triangles[i].indices[1];
             ind[i * 3 + 2] = mesh.triangles[i].indices[2];
         }
+        
         CUdeviceptr d_indices = 0;
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_indices), ind.size() * sizeof(uint32_t)));
         CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_indices), ind.data(), ind.size() * sizeof(uint32_t), cudaMemcpyHostToDevice));
+        
         OptixBuildInput triangleInput = {};
         triangleInput.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
         triangleInput.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
@@ -350,10 +357,16 @@ void Scene::buildGeometryAccelerationStructures() {
         triangleInput.triangleArray.indexStrideInBytes = sizeof(uint32_t) * 3;
         triangleInput.triangleArray.numIndexTriplets = static_cast<uint32_t>(mesh.triangles.size());
         triangleInput.triangleArray.indexBuffer = d_indices;
-        triangleInput.triangleArray.flags = nullptr;
+        
+        // 关键修复：flags 不能为 nullptr，需要指向有效的 flags 数组
+        static const uint32_t triangleInputFlags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+        triangleInput.triangleArray.flags = triangleInputFlags;
         triangleInput.triangleArray.numSbtRecords = 1;
+        
         OptixAccelBufferSizes gasBufferSizes;
+        
         OPTIX_CHECK(optixAccelComputeMemoryUsage(m_optixContext, &accelOptions, &triangleInput, 1, &gasBufferSizes));
+        
         void* d_temp = nullptr;
         void* d_output = nullptr;
         CUDA_CHECK(cudaMalloc(&d_temp, gasBufferSizes.tempSizeInBytes));

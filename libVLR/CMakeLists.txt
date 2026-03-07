@@ -114,8 +114,19 @@ target_include_directories(VLR PUBLIC
 )
 
 target_compile_options(VLR PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+    $<$<COMPILE_LANGUAGE:CXX>:/utf-8 /MD>
     $<$<COMPILE_LANGUAGE:CUDA>:-DVLR_Device --expt-relaxed-constexpr -Xcompiler=/utf-8>
+)
+
+# 解决 LIBCMT 冲突：强制使用动态运行时库
+set_target_properties(VLR PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+
+# 显式忽略 LIBCMT
+target_link_options(VLR PRIVATE
+    $<$<CONFIG:Release>:/NODEFAULTLIB:LIBCMT>
+    $<$<CONFIG:Debug>:/NODEFAULTLIB:LIBCMTD>
 )
 
 # CUDA 架构

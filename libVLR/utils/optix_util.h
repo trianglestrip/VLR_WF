@@ -275,31 +275,63 @@ private:
 
 template <typename T>
 inline void* createSBTRecord(OptixProgramGroup programGroup, const T& data) {
-    void* record;
     size_t recordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(T);
-    CUDA_CHECK(cudaMalloc(&record, recordSize));
     
-    // 打包头信息
-    OPTIX_CHECK(optixSbtRecordPackHeader(programGroup, record));
-    
-    // 复制数据
-    if (sizeof(T) > 0) {
-        CUDA_CHECK(cudaMemcpy(
-            static_cast<char*>(record) + OPTIX_SBT_RECORD_HEADER_SIZE,
-            &data,
-            sizeof(T),
-            cudaMemcpyHostToDevice
-        ));
+    // 关键修复：optixSbtRecordPackHeader 需要主机内存！
+    void* hostRecord = malloc(recordSize);
+    if (!hostRecord) {
+        throw std::runtime_error("Failed to allocate host memory for SBT record");
     }
     
-    return record;
+    // 在主机内存上打包头信息
+    OPTIX_CHECK(optixSbtRecordPackHeader(programGroup, hostRecord));
+    
+    // 复制附加数据到主机记录
+    if (sizeof(T) > 0) {
+        memcpy(static_cast<char*>(hostRecord) + OPTIX_SBT_RECORD_HEADER_SIZE, &data, sizeof(T));
+    }
+    
+    // 分配设备内存并复制
+    void* deviceRecord;
+    CUDA_CHECK(cudaMalloc(&deviceRecord, recordSize));
+    CUDA_CHECK(cudaMemcpy(deviceRecord, hostRecord, recordSize, cudaMemcpyHostToDevice));
+    
+    free(hostRecord);
+    return deviceRecord;
 }
 
 inline void* createSBTRecord(OptixProgramGroup programGroup) {
-    void* record;
-    CUDA_CHECK(cudaMalloc(&record, OPTIX_SBT_RECORD_HEADER_SIZE));
-    OPTIX_CHECK(optixSbtRecordPackHeader(programGroup, record));
-    return record;
+    // 关键修复：optixSbtRecordPackHeader 需要主机内存！
+    void* hostRecord = malloc(OPTIX_SBT_RECORD_HEADER_SIZE);
+    if (!hostRecord) {
+        throw std::runtime_error("Failed to allocate host memory for SBT record");
+    }
+    
+    // 在主机内存上打包头信息
+    OptixResult optixErr = optixSbtRecordPackHeader(programGroup, hostRecord);
+    if (optixErr != OPTIX_SUCCESS) {
+        free(hostRecord);
+        throw std::runtime_error(std::string("optixSbtRecordPackHeader failed: ") + 
+                               optixGetErrorName(optixErr));
+    }
+    
+    // 分配设备内存并复制
+    void* deviceRecord;
+    cudaError_t cudaErr = cudaMalloc(&deviceRecord, OPTIX_SBT_RECORD_HEADER_SIZE);
+    if (cudaErr != cudaSuccess) {
+        free(hostRecord);
+        throw std::runtime_error(std::string("cudaMalloc failed: ") + cudaGetErrorString(cudaErr));
+    }
+    
+    cudaErr = cudaMemcpy(deviceRecord, hostRecord, OPTIX_SBT_RECORD_HEADER_SIZE, cudaMemcpyHostToDevice);
+    if (cudaErr != cudaSuccess) {
+        free(hostRecord);
+        cudaFree(deviceRecord);
+        throw std::runtime_error(std::string("cudaMemcpy failed: ") + cudaGetErrorString(cudaErr));
+    }
+    
+    free(hostRecord);
+    return deviceRecord;
 }
 
 

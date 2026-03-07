@@ -36,9 +36,6 @@ namespace {
 /// 从 libVLR/GPU_kernels/ 或 build/Release 目录加载 PTX 文件内容
 /// 尝试多个路径以支持不同构建/运行目录布局（含 build/Release 运行时）
 std::vector<char> loadPTXFile(const char* filename) {
-    fprintf(stderr, "DEBUG: loadPTXFile START for: %s\n", filename);
-    fflush(stderr);
-    
     // 候选路径：项目根、libVLR、build/Release、build/Debug 等
     const char* searchPaths[] = {
         "GPU_kernels/",                    // build/Release 或 build/Debug 运行时
@@ -55,29 +52,18 @@ std::vector<char> loadPTXFile(const char* filename) {
 
     for (const char* basePath : searchPaths) {
         std::string path = std::string(basePath) + filename;
-        fprintf(stderr, "DEBUG: Trying path: %s\n", path.c_str());
-        fflush(stderr);
-        
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (file.is_open()) {
-            fprintf(stderr, "DEBUG: File opened: %s\n", path.c_str());
-            fflush(stderr);
-            
             std::streamsize size = file.tellg();
             file.seekg(0, std::ios::beg);
             std::vector<char> buffer(static_cast<size_t>(size) + 1);
             if (file.read(buffer.data(), size)) {
                 buffer[static_cast<size_t>(size)] = '\0';
-                fprintf(stderr, "DEBUG: PTX loaded, size: %lld\n", (long long)size);
-                fflush(stderr);
                 return buffer;
             }
             file.close();
         }
     }
-    
-    fprintf(stderr, "DEBUG: PTX file not found in any search path\n");
-    fflush(stderr);
     
     throw std::runtime_error(
         std::string("Failed to load PTX file: ") + filename +
@@ -100,69 +86,43 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
     , m_cudaContext(nullptr)
     , m_sceneSource(nullptr)
 {
-    // 第一行输出 - 如果这个都不输出，说明崩溃在初始化列表或更早
-    fprintf(stderr, "DEBUG: Context constructor body entered\n");
-    fflush(stderr);
-    
     // 初始化 CUDA 上下文
-    fprintf(stderr, "DEBUG: About to create cudau::Context\n");
-    fflush(stderr);
     m_cudaContext = new cudau::Context();
-    fprintf(stderr, "DEBUG: cudau::Context created\n");
-    fflush(stderr);
     
     // 初始化 OptiX 上下文
-    fprintf(stderr, "DEBUG: Setting OptiX members\n");
-    fflush(stderr);
     m_optix.stream = cudaStream;
     m_optix.enableLogging = enableLogging;
     m_optix.context = nullptr;
     
     // 直接初始化 OptiX，不使用局部 optixu::Context 对象
-    fprintf(stderr, "DEBUG: Calling optixInit\n");
-    fflush(stderr);
     OptixResult optixRes = optixInit();
     if (optixRes != OPTIX_SUCCESS) {
         fprintf(stderr, "ERROR: optixInit failed: %d\n", optixRes);
         fflush(stderr);
         throw std::runtime_error("Failed to initialize OptiX");
     }
-    fprintf(stderr, "DEBUG: optixInit success\n");
-    fflush(stderr);
     
     CUcontext cuContext = nullptr;
-    fprintf(stderr, "DEBUG: Getting CUDA context\n");
-    fflush(stderr);
     CUresult cuRes = cuCtxGetCurrent(&cuContext);
     if (cuRes != CUDA_SUCCESS || !cuContext) {
         fprintf(stderr, "ERROR: cuCtxGetCurrent failed: %d\n", cuRes);
         fflush(stderr);
         throw std::runtime_error("Failed to get CUDA context");
     }
-    fprintf(stderr, "DEBUG: CUDA context obtained\n");
-    fflush(stderr);
     
     OptixDeviceContextOptions options = {};
     options.logCallbackFunction = enableLogging ? &optixLogCallback : nullptr;
     options.logCallbackLevel = 4;
     
-    fprintf(stderr, "DEBUG: Creating OptiX device context\n");
-    fflush(stderr);
     optixRes = optixDeviceContextCreate(cuContext, &options, &m_optix.context);
     if (optixRes != OPTIX_SUCCESS) {
         fprintf(stderr, "ERROR: optixDeviceContextCreate failed: %d\n", optixRes);
         fflush(stderr);
         throw std::runtime_error("Failed to create OptiX device context");
     }
-    fprintf(stderr, "DEBUG: OptiX device context created\n");
-    fflush(stderr);
     
     // 初始化 Wavefront 管线
-    fprintf(stderr, "DEBUG: About to initialize pipeline\n");
-    fflush(stderr);
     initializeWavefrontPipeline();
-    fprintf(stderr, "DEBUG: Pipeline initialized\n");
-    fflush(stderr);
 }
 
 Context::~Context() {
@@ -188,22 +148,11 @@ Context::~Context() {
 // ============================================================================
 
 void Context::initializeWavefrontPipeline() {
-    fprintf(stderr, "DEBUG: initWavefrontPipeline START\n");
-    fflush(stderr);
-    
     auto& wf = m_optix.wavefrontPathTracing;
     
-    fprintf(stderr, "DEBUG: Got wf reference\n");
-    fflush(stderr);
-    
     if (wf.isInitialized) {
-        fprintf(stderr, "DEBUG: Already initialized\n");
-        fflush(stderr);
         return;
     }
-    
-    fprintf(stderr, "DEBUG: About to load PTX\n");
-    fflush(stderr);
     
     // ------------------------------------------------------------------------
     // 1. 加载 PTX 文件
@@ -211,9 +160,9 @@ void Context::initializeWavefrontPipeline() {
     std::vector<char> ptxCode;
     try {
         ptxCode = loadPTXFile("trace_rays.ptx");
-        printf("[VLR] PTX loaded successfully, size: %zu bytes\n", ptxCode.size() - 1);
     } catch (const std::exception& e) {
         fprintf(stderr, "[VLR] Error: PTX load failed - %s\n", e.what());
+        fflush(stderr);
         throw;
     }
     
@@ -239,6 +188,7 @@ void Context::initializeWavefrontPipeline() {
     // ------------------------------------------------------------------------
     char moduleLog[2048];
     size_t moduleLogSize = sizeof(moduleLog);
+    
     OptixResult moduleRes = optixModuleCreate(
         m_optix.context,
         &moduleCompileOptions,
@@ -249,6 +199,7 @@ void Context::initializeWavefrontPipeline() {
         &moduleLogSize,
         &wf.module
     );
+    
     if (moduleRes != OPTIX_SUCCESS) {
         fprintf(stderr, "[VLR] Error: optixModuleCreate failed - %s (%d)\n", optixGetErrorName(moduleRes), moduleRes);
         if (moduleLogSize > 1) {
@@ -373,6 +324,7 @@ void Context::createWavefrontPrograms() {
     auto createProgramGroup = [&](const OptixProgramGroupDesc& desc) -> OptixProgramGroup {
         OptixProgramGroupOptions options = {};
         OptixProgramGroup pg = nullptr;
+        
         OptixResult res = optixProgramGroupCreate(
             m_optix.context,
             &desc,
@@ -382,6 +334,7 @@ void Context::createWavefrontPrograms() {
             &logSize,
             &pg
         );
+        
         if (res != OPTIX_SUCCESS) {
             throw std::runtime_error(
                 std::string("Program group creation failed: ") + optixGetErrorName(res) +
@@ -509,11 +462,21 @@ void Context::createWavefrontSBT() {
         void* missBuffer = nullptr;
         CUDA_CHECK(cudaMalloc(&missBuffer, totalMissSize));
         
-        // 打包两条记录的 header
-        OPTIX_CHECK(optixSbtRecordPackHeader(wf.missProgram, missBuffer));
+        // 使用主机内存打包header，然后复制到设备
+        void* hostMissBuffer = malloc(totalMissSize);
+        if (!hostMissBuffer) {
+            cudaFree(missBuffer);
+            throw std::runtime_error("Failed to allocate host memory for Miss SBT");
+        }
+        
+        OPTIX_CHECK(optixSbtRecordPackHeader(wf.missProgram, hostMissBuffer));
         OPTIX_CHECK(optixSbtRecordPackHeader(
             wf.shadowMissProgram,
-            static_cast<char*>(missBuffer) + missRecordSize));
+            static_cast<char*>(hostMissBuffer) + missRecordSize));
+        
+        // 复制到设备
+        CUDA_CHECK(cudaMemcpy(missBuffer, hostMissBuffer, totalMissSize, cudaMemcpyHostToDevice));
+        free(hostMissBuffer);
         
         // 释放单独分配的，使用连续缓冲区
         cudaFree(wf.missRecord);
@@ -535,10 +498,21 @@ void Context::createWavefrontSBT() {
         void* hitgroupBuffer = nullptr;
         CUDA_CHECK(cudaMalloc(&hitgroupBuffer, totalHitgroupSize));
         
-        OPTIX_CHECK(optixSbtRecordPackHeader(wf.hitGroupProgram, hitgroupBuffer));
+        // 使用主机内存打包header
+        void* hostHitgroupBuffer = malloc(totalHitgroupSize);
+        if (!hostHitgroupBuffer) {
+            cudaFree(hitgroupBuffer);
+            throw std::runtime_error("Failed to allocate host memory for HitGroup SBT");
+        }
+        
+        OPTIX_CHECK(optixSbtRecordPackHeader(wf.hitGroupProgram, hostHitgroupBuffer));
         OPTIX_CHECK(optixSbtRecordPackHeader(
             wf.shadowHitGroupProgram,
-            static_cast<char*>(hitgroupBuffer) + hitgroupRecordSize));
+            static_cast<char*>(hostHitgroupBuffer) + hitgroupRecordSize));
+        
+        // 复制到设备
+        CUDA_CHECK(cudaMemcpy(hitgroupBuffer, hostHitgroupBuffer, totalHitgroupSize, cudaMemcpyHostToDevice));
+        free(hostHitgroupBuffer);
         
         cudaFree(wf.hitgroupRecord);
         cudaFree(wf.shadowHitgroupRecord);

@@ -100,7 +100,7 @@
       <MinimalRebuild></MinimalRebuild>
       <Optimization>Disabled</Optimization>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <SupportJustMyCode></SupportJustMyCode>
       <UseFullPaths>false</UseFullPaths>
@@ -141,7 +141,7 @@
       <AdditionalLibraryDirectories>C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64;C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64/$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries>LIBCMTD;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImportLibrary>F:/project/VLR_WF/bin/VLR.lib</ImportLibrary>
       <ProgramDataBaseFile>F:/project/VLR_WF/bin/VLR.pdb</ProgramDataBaseFile>
       <SubSystem>Console</SubSystem>
@@ -150,7 +150,7 @@
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>
     <CudaLink>
-      <AdditionalOptions>-forward-unknown-to-host-compiler -Wno-deprecated-gpu-targets -D_WINDOWS -Xcompiler=" /GR /EHsc" -Xcompiler=" -Zi -Ob0 -Od /RTC1" "--generate-code=arch=compute_75,code=[compute_75,sm_75]" -Xcompiler=-MDd</AdditionalOptions>
+      <AdditionalOptions>-forward-unknown-to-host-compiler -Wno-deprecated-gpu-targets -Xcompiler=/NODEFAULTLIB:LIBCMTD -Xcompiler=/NODEFAULTLIB:LIBCMTD -D_WINDOWS -Xcompiler=" /GR /EHsc" -Xcompiler=" -Zi -Ob0 -Od /RTC1" "--generate-code=arch=compute_75,code=[compute_75,sm_75]" -Xcompiler=-MDd</AdditionalOptions>
       <PerformDeviceLink>true</PerformDeviceLink>
     </CudaLink>
   </ItemDefinitionGroup>
@@ -209,7 +209,7 @@
       <AdditionalLibraryDirectories>C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64;C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/lib/x64/$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries>LIBCMT;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImportLibrary>F:/project/VLR_WF/bin/VLR.lib</ImportLibrary>
       <ProgramDataBaseFile>F:/project/VLR_WF/bin/VLR.pdb</ProgramDataBaseFile>
       <SubSystem>Console</SubSystem>
@@ -218,7 +218,7 @@
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>
     <CudaLink>
-      <AdditionalOptions>-forward-unknown-to-host-compiler -Wno-deprecated-gpu-targets -D_WINDOWS -Xcompiler=" /GR /EHsc" -Xcompiler="-O2 -Ob2" -DNDEBUG "--generate-code=arch=compute_75,code=[compute_75,sm_75]" -Xcompiler=-MD</AdditionalOptions>
+      <AdditionalOptions>-forward-unknown-to-host-compiler -Wno-deprecated-gpu-targets -Xcompiler=/NODEFAULTLIB:LIBCMT -Xcompiler=/NODEFAULTLIB:LIBCMT -D_WINDOWS -Xcompiler=" /GR /EHsc" -Xcompiler="-O2 -Ob2" -DNDEBUG "--generate-code=arch=compute_75,code=[compute_75,sm_75]" -Xcompiler=-MD</AdditionalOptions>
       <PerformDeviceLink>true</PerformDeviceLink>
     </CudaLink>
   </ItemDefinitionGroup>

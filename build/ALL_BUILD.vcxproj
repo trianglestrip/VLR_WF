@@ -179,6 +179,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{605F9820-D9FF-383D-A867-7E9B383F9303}</Project>
       <Name>VLR</Name>
     </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\optix_minimal_test.vcxproj">
+      <Project>{6333B3C5-8B68-373A-8519-0513964273B6}</Project>
+      <Name>optix_minimal_test</Name>
+    </ProjectReference>
     <ProjectReference Include="F:\project\VLR_WF\build\simple_render_test.vcxproj">
       <Project>{60F84C37-2E0B-3DEA-B1AC-0D04F903C8F7}</Project>
       <Name>simple_render_test</Name>
