@@ -156,7 +156,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     SampledSpectrum Le = edfResult.Le;
     float MISWeight = computeImplicitLightMISWeight(pathState, hypAreaPDF, dirOutLocal.z);
 
-    pathState.contribution += pathState.throughput * Le * MISWeight;
+    SampledSpectrum emissiveContrib = pathState.throughput * Le * MISWeight;
+    pathState.contribution += emissiveContrib;
     pathState.setHitEmissive();
 }
 
@@ -225,6 +226,15 @@ extern "C" __global__ void processHits(
             vertexData);
 
         computeSurfacePointBasic(input, ctx, &surfPt, &hypAreaPDF);
+
+        // Faceforward：确保法线朝向入射光线，使 NEE/BSDF 在正确半球内
+        {
+            Vector3D rayDir = pathState.direction;
+            if (dot(surfPt.geometricNormal, rayDir) > 0.0f) {
+                surfPt.geometricNormal = -surfPt.geometricNormal;
+                surfPt.shadingFrame = ReferenceFrame(surfPt.shadingFrame.x, surfPt.geometricNormal);
+            }
+        }
 
         // 应用法线贴图（若有纹理和材质绑定）
         if (wlp.textureDescriptorBuffer != nullptr && wlp.materialNormalMapIndices != nullptr) {
@@ -326,14 +336,20 @@ extern "C" __global__ void processHits(
     uint32_t pixelIdx = pathState.pixelY * stride + pathState.pixelX;
 
     if (wlp.accumAlbedoBuffer != nullptr) {
-        // 反照率：从材质 AlbedoR/G/B 直接获取（用于 Denoiser）
-        const float* d = getMaterialDataAsFloats(matDesc);
-        float r = d[MaterialDataLayout::AlbedoR];
-        float g = d[MaterialDataLayout::AlbedoG];
-        float b = d[MaterialDataLayout::AlbedoB];
-        wlp.accumAlbedoBuffer[pixelIdx].r = r;
-        wlp.accumAlbedoBuffer[pixelIdx].g = g;
-        wlp.accumAlbedoBuffer[pixelIdx].b = b;
+        // 反照率：从材质获取（用于 Denoiser），棋盘格材质需按 UV 采样
+        BSDFType type = getBSDFType(matDesc);
+        if (type == BSDFType_LambertCheckerboard) {
+            SampledSpectrum albedo;
+            getLambertAlbedoCheckerboard(matDesc, &surfPt, &albedo);
+            wlp.accumAlbedoBuffer[pixelIdx].r = albedo.values[0];
+            wlp.accumAlbedoBuffer[pixelIdx].g = albedo.values[1];
+            wlp.accumAlbedoBuffer[pixelIdx].b = albedo.values[2];
+        } else {
+            const float* d = getMaterialDataAsFloats(matDesc);
+            wlp.accumAlbedoBuffer[pixelIdx].r = d[MaterialDataLayout::AlbedoR];
+            wlp.accumAlbedoBuffer[pixelIdx].g = d[MaterialDataLayout::AlbedoG];
+            wlp.accumAlbedoBuffer[pixelIdx].b = d[MaterialDataLayout::AlbedoB];
+        }
     }
 
     if (wlp.accumNormalBuffer != nullptr) {

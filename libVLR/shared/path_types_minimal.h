@@ -204,5 +204,12 @@ struct WavefrontLaunchParameters {
     uint32_t debugMode;
 };
 
+// ============================================================================
+// SBT 记录数据：存储 launch parameters 指针
+// ============================================================================
+struct WavefrontSBTData {
+    const WavefrontLaunchParameters* params;
+};
+
 }  // namespace shared
 }  // namespace vlr

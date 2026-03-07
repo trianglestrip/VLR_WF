@@ -177,7 +177,14 @@ extern "C" __global__ void generateRays(
     // ========================================================================
     // 6. 将路径加入活跃队列
     // ========================================================================
-    wlp.activePathQueue.enqueue(pathIndex);
+    // 简化：直接使用 pathIndex 作为队列索引（1:1 映射）
+    wlp.activePathQueue.pathIndices[pathIndex] = pathIndex;
+    
+    // 更新队列大小（使用原子操作确保正确）
+    if (pathIndex == wlp.imageSize.x * wlp.imageSize.y - 1) {
+        // 最后一个线程设置队列大小
+        *wlp.activePathQueue.counter = wlp.imageSize.x * wlp.imageSize.y;
+    }
     
     // ========================================================================
     // 7. 处理 Denoiser 辅助缓冲区

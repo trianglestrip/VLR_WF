@@ -17,7 +17,7 @@
 #include "light_types.h"
 #include "path_types.h"
 #include "kernel_common.h"
-#include <limits>
+#include "bsdf_common.h"
 
 namespace vlr {
 namespace shared {
@@ -57,11 +57,35 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool selectLight(
     
     if (!result) return false;
     
+    // 检查光源数量
+    if (wlp.lightInstDist.numValues == 0)
+        return false;
+    
     // 从光源实例分布中采样
     float instProb;
-    uint32_t instIndex = wlp.lightInstDist.sample(uLight, &instProb);
+    uint32_t lightIndex = wlp.lightInstDist.sample(uLight, &instProb);
     
     // 边界检查
+    if (lightIndex >= wlp.lightInstDist.numValues)
+        lightIndex = wlp.lightInstDist.numValues - 1;
+    
+    // 获取实际的实例索引
+    // 注意：lightIndex 是光源数组中的索引，需要通过 instIndices 映射到实际的实例索引
+    // 在简化实现中，我们假设光源实例索引存储在 instIndices 数组的开头
+    uint32_t instIndex;
+    if (wlp.instIndices && lightIndex < wlp.lightInstDist.numValues) {
+        // 从 instIndices 数组获取光源的实例索引
+        // 注意：这里假设 instIndices 的前 numLights 个元素是光源实例索引
+        instIndex = wlp.instIndices[lightIndex];
+    } else {
+        // 回退：假设光源索引就是实例索引
+        instIndex = lightIndex;
+    }
+    
+    // 边界检查：确保 instBuffer 存在
+    if (!wlp.instBuffer)
+        return false;
+    
     const Instance& inst = wlp.instBuffer[instIndex];
     
     // 环境光：使用 envLightInstIndex 对应的实例
@@ -263,19 +287,24 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool evaluateLightEmission(
     const GeometryInstance& geomInst = wlp.geomInstBuffer[descriptor.geomInstIndex];
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
     
-    EDF edf(matDesc, lightSurfPt, wls);
-    SampledSpectrum spEmittance = edf.evaluateEmittance();
+    // 使用材质系统的 evaluateEmittance 获取发光辐射度（Lambertian EDF 各向同性）
+    SampledSpectrum spEmittance = evaluateEmittance(matDesc);
     
     if (!spEmittance.hasNonZero()) {
         result->isValid = false;
         return false;
     }
     
-    // 光源向外发射的方向（与 dirToShading 相反）
-    Vector3D dirOutLocal = lightSurfPt.shadingFrame.toLocal(-dirToShading);
-    EDFQuery feQuery(DirectionType::All(), wls);
-    result->Le = spEmittance * edf.evaluate(feQuery, dirOutLocal);
-    result->isValid = result->Le.hasNonZero();
+    // Lambertian 发光：辐射度与方向无关，仅当着色点在发光半球内有效
+    // dirToShading = 从光源指向着色点；发光方向即 dirToShading，需 dot(dirToShading, normal) > 0
+    float cosLight = dot(dirToShading, lightSurfPt.geometricNormal);
+    if (cosLight <= 0.0f) {
+        result->isValid = false;
+        return false;
+    }
+    
+    result->Le = spEmittance;
+    result->isValid = true;
     
     return result->isValid;
 }
@@ -313,7 +342,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeLightPDF(
     switch (descriptor.type) {
     case LightType_Point:
         // 点光源：立体角上为 delta，PDF 无穷大（MIS 时通常取 1 或特殊处理）
-        return std::numeric_limits<float>::infinity();
+#ifdef __CUDACC__
+        return __int_as_float(0x7F800000);  // +inf
+#else
+        return 1e30f;  // 近似无穷大
+#endif
     
     case LightType_Environment: {
         // 环境光：从立体角转回 (theta, phi) 评估 PDF

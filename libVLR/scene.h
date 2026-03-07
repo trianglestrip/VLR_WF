@@ -168,6 +168,15 @@ public:
         float ior,
         float emissionR = 0.0f, float emissionG = 0.0f, float emissionB = 0.0f);
 
+    /// 创建棋盘格材质（Lambert + 8x8 黑白棋盘格）
+    /// @param color0 第一种颜色 RGB（如黑色）
+    /// @param color1 第二种颜色 RGB（如白色）
+    /// @param gridSize 棋盘格密度（默认 8 表示 8x8）
+    uint32_t createMaterialCheckerboard(
+        float color0R, float color0G, float color0B,
+        float color1R, float color1G, float color1B,
+        uint32_t gridSize = 8);
+
     /// 设置材质参数
     void setMaterial(uint32_t materialId,
         float albedoR, float albedoG, float albedoB,

@@ -245,17 +245,20 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateGGXBSDF(
     float G = G1_l * G1_v;
 
     float VdotH = dot(dirOutLocal, halfVec);
-    float F = SchlickFresnel(VdotH, 0.04f);
-
+    
     float denom = 4.0f * NdotL * NdotV;
     if (denom < 1e-7f)
         return SampledSpectrum::Zero();
 
-    float spec = D * G * F / denom;
+    float spec = D * G / denom;
 
+    // Use reflectance as F0 for metallic materials (Schlick Fresnel with colored F0)
     SampledSpectrum result;
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        result.values[i] = reflectance.values[i] * spec;
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        float F0 = reflectance.values[i];
+        float F = F0 + (1.0f - F0) * powf(1.0f - VdotH, 5.0f);
+        result.values[i] = F * spec;
+    }
 
     return result;
 }
@@ -329,19 +332,22 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleGGXBSDF(
 
     float G1_l = GGX_G1(NdotL, alpha2);
     float G = G1_l * G1_v;
-    float F = SchlickFresnel(VdotH, 0.04f);
 
     float denom = 4.0f * std::abs(NdotL) * NdotV;
-    float spec = (denom > 1e-7f) ? (D * G * F / denom) : 0.0f;
+    float spec = (denom > 1e-7f) ? (D * G / denom) : 0.0f;
 
     result->dirLocal = dirOutLocal;
     result->pdf = pdf;
     result->isDelta = false;
     result->sampledBSDFType = BSDFType_GGX;
 
+    // Use reflectance as F0 for metallic materials (Schlick Fresnel with colored F0)
     result->f = SampledSpectrum::Zero();
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        result->f.values[i] = reflectance.values[i] * spec;
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        float F0 = reflectance.values[i];
+        float F = F0 + (1.0f - F0) * powf(1.0f - VdotH, 5.0f);
+        result->f.values[i] = F * spec;
+    }
 }
 
 /// GGX BSDF 的 PDF
@@ -474,12 +480,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSD
 }
 
 /// 采样完美镜面透射（支持波长相关折射率）
+/// 玻璃材质：根据 Fresnel 方程随机选择反射或透射
 /// wls: 波长采样，当 singleWlSelected 时用 selectedLambda 对应波长计算 IOR
 CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
     float etaI, float etaT, float dispersionStrength,
     const WavelengthSamples* wls, bool singleWlSelected,
     const Vector3D& dirInLocal, const Normal3D& geomNormalLocal,
-    float /*u0*/, float /*u1*/,
+    float u0, float /*u1*/,
     BSDFSampleResult* result) {
 
     // 单波长选择：使用选定波长的 IOR
@@ -490,28 +497,64 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
         etaT_eff = iorAtWavelength(lambda, etaT, dispersionStrength);
     }
 
+    float cosThetaI = dot(dirInLocal, geomNormalLocal);
+    // 进入/离开：cosThetaI<0 表示从外进入，cosThetaI>0 表示从内离开
+    float etaRatio;
+    Normal3D nEff;
+    float etaIncident, etaTransmitted;
+    if (cosThetaI < 0.0f) {
+        nEff = Vector3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
+        etaRatio = etaI / etaT_eff;  // 1/1.5 进入玻璃
+        etaIncident = etaI;
+        etaTransmitted = etaT_eff;
+    } else {
+        nEff = geomNormalLocal;
+        etaRatio = etaT_eff / etaI;  // 1.5/1 离开玻璃
+        etaIncident = etaT_eff;
+        etaTransmitted = etaI;
+    }
+    float F = FresnelDielectric(std::abs(cosThetaI), etaIncident, etaTransmitted);
+
     Vector3D wt;
-    if (!refract(dirInLocal, geomNormalLocal, etaI / etaT_eff, &wt)) {
-        // 全内反射：采样反射方向
+    bool canRefract = refract(dirInLocal, nEff, etaRatio, &wt);
+
+    // 全内反射：必须反射
+    if (!canRefract) {
         float NdotL = dot(dirInLocal, geomNormalLocal);
         result->dirLocal = 2.0f * NdotL * geomNormalLocal - dirInLocal;
-        result->f = SampledSpectrum::One();  // 全反射
+        result->f = SampledSpectrum::One();  // 全反射 F=1
         result->pdf = 1.0f;
-        result->sampledBSDFType = BSDFType_Specular;  // 反射分量
+        result->sampledBSDFType = BSDFType_Specular;
         result->isDelta = true;
         return;
     }
 
-    float F = FresnelDielectric(dot(dirInLocal, geomNormalLocal), etaI, etaT_eff);
-    SampledSpectrum transmittance;
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        transmittance.values[i] = (1.0f - F) / (etaT_eff * etaT_eff);  // 透射权重校正
-
-    result->dirLocal = wt;
-    result->f = transmittance;
-    result->pdf = 1.0f;
-    result->sampledBSDFType = BSDFType_SpecularTransmission;
-    result->isDelta = true;
+    // 根据 Fresnel 概率选择反射或透射（离散采样）
+    // throughput *= f * cosAbs / pdf：反射时 *= F，透射时 *= (1-F)*(etaI/etaT)^2
+    if (u0 < F) {
+        // 反射
+        float NdotL = dot(dirInLocal, geomNormalLocal);
+        result->dirLocal = 2.0f * NdotL * geomNormalLocal - dirInLocal;
+        float cosAbs = std::abs(NdotL);
+        float fVal = (cosAbs > 1e-6f) ? (F * F / cosAbs) : 0.0f;
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            result->f.values[i] = fVal;
+        result->pdf = F;
+        result->sampledBSDFType = BSDFType_Specular;
+        result->isDelta = true;
+    } else {
+        // 透射
+        float cosThetaT = std::abs(dot(wt, geomNormalLocal));
+        float etaRatio2 = (etaIncident * etaIncident) / (etaTransmitted * etaTransmitted);
+        float cosSafe = cosThetaT > 1e-6f ? cosThetaT : 1e-6f;
+        float fVal = (1.0f - F) * (1.0f - F) * etaRatio2 / cosSafe;
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            result->f.values[i] = fVal;
+        result->dirLocal = wt;
+        result->pdf = 1.0f - F;
+        result->sampledBSDFType = BSDFType_SpecularTransmission;
+        result->isDelta = true;
+    }
 }
 
 /// SpecularTransmission PDF（Delta）
@@ -793,6 +836,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
         getLambertAlbedo(matDesc, &albedo);
         return evaluateLambertBSDF(albedo, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
+    case BSDFType_LambertCheckerboard: {
+        SampledSpectrum albedo;
+        getLambertAlbedoCheckerboard(matDesc, ctx.surfPt, &albedo);
+        return evaluateLambertBSDF(albedo, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+    }
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
         float roughness;
@@ -872,6 +920,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         SampledSpectrum albedo;
         getLambertAlbedo(matDesc, &albedo);
         sampleLambertBSDF(albedo, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
+        break;
+    }
+    case BSDFType_LambertCheckerboard: {
+        SampledSpectrum albedo;
+        getLambertAlbedoCheckerboard(matDesc, ctx.surfPt, &albedo);
+        sampleLambertBSDF(albedo, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
+        result->sampledBSDFType = BSDFType_LambertCheckerboard;
         break;
     }
     case BSDFType_GGX: {

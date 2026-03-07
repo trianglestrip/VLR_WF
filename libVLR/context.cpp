@@ -39,10 +39,13 @@ namespace {
 std::vector<char> loadPTXFile(const char* filename) {
     // 候选路径：项目根、libVLR、build/Release、build/Debug 等
     const char* searchPaths[] = {
+        "bin/GPU_kernels/",                // 统一输出目录
         "GPU_kernels/",                    // build/Release 或 build/Debug 运行时
         "libVLR/GPU_kernels/",
         "../GPU_kernels/",
         "../../GPU_kernels/",
+        "../bin/GPU_kernels/",
+        "../../bin/GPU_kernels/",
         "Release/GPU_kernels/",
         "Debug/GPU_kernels/",
         "../libVLR/GPU_kernels/",
@@ -150,11 +153,11 @@ Context::~Context() {
 
 void Context::initializeWavefrontPipeline() {
     auto& wf = m_optix.wavefrontPathTracing;
-    
+
     if (wf.isInitialized) {
         return;
     }
-    
+
     // ------------------------------------------------------------------------
     // 1. 加载 PTX 文件
     // ------------------------------------------------------------------------
@@ -163,7 +166,6 @@ void Context::initializeWavefrontPipeline() {
         ptxCode = loadPTXFile("trace_rays.ptx");
     } catch (const std::exception& e) {
         fprintf(stderr, "[VLR] Error: PTX load failed - %s\n", e.what());
-        fflush(stderr);
         throw;
     }
     
@@ -425,19 +427,24 @@ void Context::createWavefrontSBT() {
     // ========================================================================
     // 使用 optixu::createSBTRecord 创建 SBT 记录
     // SBT 布局：RayGen(1) | Miss(2: Closest + Shadow) | HitGroup(2: Closest + Shadow)
+    // 每个记录包含 WavefrontSBTData（launch parameters 指针）
     // ========================================================================
     
-    // 1. RayGen 记录（无附加数据）
-    wf.raygenRecord = optixu::createSBTRecord(wf.raygenProgram);
+    // SBT 数据：包含 launch parameters 指针（初始为 nullptr，稍后更新）
+    shared::WavefrontSBTData sbtData;
+    sbtData.params = nullptr;  // 稍后在 setupWavefrontLaunchParams 中更新
+    
+    // 1. RayGen 记录（附加 WavefrontSBTData）
+    wf.raygenRecord = optixu::createSBTRecord(wf.raygenProgram, sbtData);
     
     // 2. Miss 记录 - 需要 2 条（RayType 0: miss, RayType 1: shadowMiss）
-    wf.missRecord = optixu::createSBTRecord(wf.missProgram);
-    wf.shadowMissRecord = optixu::createSBTRecord(wf.shadowMissProgram);
+    wf.missRecord = optixu::createSBTRecord(wf.missProgram, sbtData);
+    wf.shadowMissRecord = optixu::createSBTRecord(wf.shadowMissProgram, sbtData);
     
     // 3. HitGroup 记录 - 需要 2 条（RayType 0: closest hit, RayType 1: shadow any hit）
     // 同一几何体的不同光线类型使用相邻的 SBT 记录，stride = 2
-    wf.hitgroupRecord = optixu::createSBTRecord(wf.hitGroupProgram);
-    wf.shadowHitgroupRecord = optixu::createSBTRecord(wf.shadowHitGroupProgram);
+    wf.hitgroupRecord = optixu::createSBTRecord(wf.hitGroupProgram, sbtData);
+    wf.shadowHitgroupRecord = optixu::createSBTRecord(wf.shadowHitGroupProgram, sbtData);
     
     // ========================================================================
     // 填充 OptixShaderBindingTable 结构
@@ -447,9 +454,11 @@ void Context::createWavefrontSBT() {
     // RayGen 区
     wf.sbt.raygenRecord = reinterpret_cast<CUdeviceptr>(wf.raygenRecord);
     
-    // Miss 区：2 条记录，stride = OPTIX_SBT_RECORD_HEADER_SIZE（无附加数据时）
+    // Miss 区：2 条记录，stride = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(WavefrontSBTData)
     // 将两条 miss 记录紧密排列
-    size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE;
+    // 注意：SBT 记录 stride 必须是 16 字节对齐
+    size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
+    missRecordSize = (missRecordSize + 15) & ~15;  // 向上对齐到 16 字节
     wf.sbt.missRecordBase = reinterpret_cast<CUdeviceptr>(wf.missRecord);
     wf.sbt.missRecordStrideInBytes = static_cast<uint32_t>(missRecordSize);
     wf.sbt.missRecordCount = 2;  // Closest + Shadow
@@ -463,7 +472,7 @@ void Context::createWavefrontSBT() {
         void* missBuffer = nullptr;
         CUDA_CHECK(cudaMalloc(&missBuffer, totalMissSize));
         
-        // 使用主机内存打包header，然后复制到设备
+        // 使用主机内存打包header + data，然后复制到设备
         void* hostMissBuffer = malloc(totalMissSize);
         if (!hostMissBuffer) {
             cudaFree(missBuffer);
@@ -471,9 +480,13 @@ void Context::createWavefrontSBT() {
         }
         
         OPTIX_CHECK(optixSbtRecordPackHeader(wf.missProgram, hostMissBuffer));
+        memcpy(static_cast<char*>(hostMissBuffer) + OPTIX_SBT_RECORD_HEADER_SIZE, &sbtData, sizeof(sbtData));
+        
         OPTIX_CHECK(optixSbtRecordPackHeader(
             wf.shadowMissProgram,
             static_cast<char*>(hostMissBuffer) + missRecordSize));
+        memcpy(static_cast<char*>(hostMissBuffer) + missRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+               &sbtData, sizeof(sbtData));
         
         // 复制到设备
         CUDA_CHECK(cudaMemcpy(missBuffer, hostMissBuffer, totalMissSize, cudaMemcpyHostToDevice));
@@ -490,16 +503,23 @@ void Context::createWavefrontSBT() {
         wf.sbt.missRecordCount = 2;
     }
     
-    // HitGroup 区：2 条记录（stride = 2 用于多光线类型）
-    // 同一几何体：Record 0 = Closest Hit, Record 1 = Shadow Any Hit
-    size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE;
+    // HitGroup 区：每个 GAS 需要 RAY_TYPE_COUNT 条记录
+    // 布局：[GAS0_Closest, GAS0_Shadow, GAS1_Closest, GAS1_Shadow, ...]
+    // stride = RAY_TYPE_COUNT（用于多光线类型）
+    // 注意：SBT 记录 stride 必须是 16 字节对齐
+    const uint32_t RAY_TYPE_COUNT = 2;  // Closest Hit + Shadow
+    size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
+    hitgroupRecordSize = (hitgroupRecordSize + 15) & ~15;  // 向上对齐到 16 字节
+    
+    // 临时：在 SBT 创建时，我们还不知道有多少个 GAS
+    // 所以先创建一个默认的 HitGroup 记录，稍后在 setupWavefrontLaunchParams 中重新创建
     {
-        // 分配连续的 2 条 HitGroup 记录
-        size_t totalHitgroupSize = 2 * hitgroupRecordSize;
+        // 分配连续的 RAY_TYPE_COUNT 条 HitGroup 记录（默认为 1 个 GAS）
+        size_t totalHitgroupSize = RAY_TYPE_COUNT * hitgroupRecordSize;
         void* hitgroupBuffer = nullptr;
         CUDA_CHECK(cudaMalloc(&hitgroupBuffer, totalHitgroupSize));
         
-        // 使用主机内存打包header
+        // 使用主机内存打包header + data
         void* hostHitgroupBuffer = malloc(totalHitgroupSize);
         if (!hostHitgroupBuffer) {
             cudaFree(hitgroupBuffer);
@@ -507,9 +527,13 @@ void Context::createWavefrontSBT() {
         }
         
         OPTIX_CHECK(optixSbtRecordPackHeader(wf.hitGroupProgram, hostHitgroupBuffer));
+        memcpy(static_cast<char*>(hostHitgroupBuffer) + OPTIX_SBT_RECORD_HEADER_SIZE, &sbtData, sizeof(sbtData));
+        
         OPTIX_CHECK(optixSbtRecordPackHeader(
             wf.shadowHitGroupProgram,
             static_cast<char*>(hostHitgroupBuffer) + hitgroupRecordSize));
+        memcpy(static_cast<char*>(hostHitgroupBuffer) + hitgroupRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+               &sbtData, sizeof(sbtData));
         
         // 复制到设备
         CUDA_CHECK(cudaMemcpy(hitgroupBuffer, hostHitgroupBuffer, totalHitgroupSize, cudaMemcpyHostToDevice));
@@ -522,7 +546,7 @@ void Context::createWavefrontSBT() {
         
         wf.sbt.hitgroupRecordBase = reinterpret_cast<CUdeviceptr>(wf.hitgroupRecord);
         wf.sbt.hitgroupRecordStrideInBytes = static_cast<uint32_t>(hitgroupRecordSize);
-        wf.sbt.hitgroupRecordCount = 2;
+        wf.sbt.hitgroupRecordCount = RAY_TYPE_COUNT;  // 默认 1 个 GAS × 2 个 Ray Types
     }
     
     printf("[VLR] SBT created (RayGen, Miss x2, HitGroup x2)\n");
@@ -688,14 +712,22 @@ void Context::resizeWavefrontBuffers(uint32_t width, uint32_t height) {
 
 void Context::resetWavefrontQueues() {
     auto& wf = m_optix.wavefrontPathTracing;
-    
+
+    // 使用同步的 cudaMemset 确保立即清除
     if (wf.queueCounters) {
-        wf.queueCounters->clear(m_stream);
+        CUDA_CHECK(cudaMemset(wf.queueCounters->getDevicePointer(), 0, 2 * sizeof(uint32_t)));
     }
-    
+
     if (wf.useMaterialQueues && wf.materialQueueCounters) {
         wf.materialQueueCounters->clear(m_stream);
     }
+    
+    // 清除路径状态缓冲区（重要：避免旧的终止状态影响新的渲染）
+    if (wf.pathStateBuffer) {
+        wf.pathStateBuffer->clear(m_stream);
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+    }
+    
 }
 
 
@@ -759,6 +791,9 @@ void Context::setupWavefrontLaunchParams() {
         lp.progSampleLensPosition = -1;
         lp.progTestLensIntersection = -1;
         lp.progEvaluateIDF = -1;
+        // 设置光源实例索引数组（用于光源采样）
+        lp.instIndices = m_sceneSource->getLightInstIndices();
+
         // SceneBounds 需设备指针，上传到小缓冲区
         if (!wf.sceneBoundsBuffer) {
             wf.sceneBoundsBuffer = new cudau::Buffer<shared::SceneBounds>();
@@ -800,6 +835,17 @@ void Context::setupWavefrontLaunchParams() {
     lp.numShadowRays = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(1) : nullptr;
     lp.numTerminatedPaths = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(2) : nullptr;
     
+    // 设置光源分布
+    if (m_sceneSource) {
+        lp.lightInstDist.weights = nullptr;  // 简化实现：均匀分布
+        lp.lightInstDist.numValues = m_sceneSource->getNumLightInsts();
+        lp.envLightInstIndex = m_sceneSource->getEnvLightInstIndex();
+    } else {
+        lp.lightInstDist.weights = nullptr;
+        lp.lightInstDist.numValues = 0;
+        lp.envLightInstIndex = 0xFFFFFFFF;
+    }
+
     // 设置调试参数
     lp.probePixX = -1;
     lp.probePixY = -1;
@@ -817,6 +863,53 @@ void Context::setupWavefrontLaunchParams() {
         sizeof(shared::WavefrontLaunchParameters),
         cudaMemcpyHostToDevice,
         m_stream
+    ));
+    
+    // 同步以确保参数上传完成
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+    
+    // ========================================================================
+    // 更新 SBT 记录中的 launch parameters 指针
+    // ========================================================================
+    shared::WavefrontSBTData sbtData;
+    sbtData.params = static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+    
+    // 更新 RayGen 记录
+    CUDA_CHECK(cudaMemcpy(
+        static_cast<char*>(wf.raygenRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+        &sbtData,
+        sizeof(sbtData),
+        cudaMemcpyHostToDevice
+    ));
+    
+    // 更新 Miss 记录（2 条）
+    size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
+    CUDA_CHECK(cudaMemcpy(
+        static_cast<char*>(wf.missRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+        &sbtData,
+        sizeof(sbtData),
+        cudaMemcpyHostToDevice
+    ));
+    CUDA_CHECK(cudaMemcpy(
+        static_cast<char*>(wf.missRecord) + missRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+        &sbtData,
+        sizeof(sbtData),
+        cudaMemcpyHostToDevice
+    ));
+    
+    // 更新 HitGroup 记录（2 条）
+    size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
+    CUDA_CHECK(cudaMemcpy(
+        static_cast<char*>(wf.hitgroupRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+        &sbtData,
+        sizeof(sbtData),
+        cudaMemcpyHostToDevice
+    ));
+    CUDA_CHECK(cudaMemcpy(
+        static_cast<char*>(wf.hitgroupRecord) + hitgroupRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+        &sbtData,
+        sizeof(sbtData),
+        cudaMemcpyHostToDevice
     ));
 }
 
@@ -1043,6 +1136,20 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
     // 重置队列
     resetWavefrontQueues();
     
+    // 更新启动参数到设备（确保 counter 指针指向已清除的计数器）
+    setupWavefrontLaunchParams();
+    
+    // 再次显式重置计数器（确保 GPU 能看到）
+    if (wf.queueCounters) {
+        uint32_t zero[2] = {0, 0};
+        CUDA_CHECK(cudaMemcpy(
+            wf.queueCounters->getDevicePointer(),
+            zero,
+            2 * sizeof(uint32_t),
+            cudaMemcpyHostToDevice
+        ));
+    }
+    
     // 阶段 1: 生成初始光线
     launchGenerateRays(numPixels);
     
@@ -1119,8 +1226,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             if (requiredTempBytes > wf.cubTempStorageBytes) {
                 fprintf(stderr, "[VLR] Warning: CUB temp storage insufficient (%zu > %zu), using simple swap\n",
                         requiredTempBytes, wf.cubTempStorageBytes);
-                fflush(stderr);
-                
+
                 // 回退到简单交换
                 std::swap(wf.activePathIndices, wf.nextActivePathIndices);
                 CUDA_CHECK(cudaMemcpyAsync(
@@ -1193,7 +1299,6 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
     
     // 阶段 6: 累加结果
     launchAccumulate(numPixels);
-    
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
 }
 
@@ -1230,16 +1335,21 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
     // 将当前深度等参数更新到设备
     setupWavefrontLaunchParams();
 
-    vlr::optixu::launch(
-        wf.pipeline,
-        m_stream,
-        wf.launchParamsBuffer,
-        sizeof(shared::WavefrontLaunchParameters),
-        &wf.sbt,
-        numActivePaths,  // 每个线程处理一条活跃路径
-        1,
-        1
-    );
+    try {
+        // 注意：我们通过 SBT 数据传递 launch parameters，所以 launchParams 参数设为 0
+        OPTIX_CHECK(optixLaunch(
+            wf.pipeline,
+            m_stream,
+            0,  // 不使用 launchParams（通过 SBT 传递）
+            0,
+            &wf.sbt,
+            numActivePaths,  // 每个线程处理一条活跃路径
+            1,
+            1
+        ));
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("launchTraceRays: optixLaunch failed - ") + e.what());
+    }
 }
 
 void Context::launchProcessHits(uint32_t numActivePaths) {

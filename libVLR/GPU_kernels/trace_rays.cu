@@ -28,12 +28,9 @@ namespace vlr {
 namespace shared {
 
 // ============================================================================
-// 启动参数：OptiX 设备端通过 __constant__ 访问
+// 启动参数：OptiX 设备端通过 SBT 数据访问
 // ============================================================================
-
-#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-extern "C" __constant__ WavefrontLaunchParameters wlp;
-#endif
+// OptiX 7+ 推荐通过 SBT 数据传递 launch parameters 指针，而不是 __constant__ 变量
 
 // ============================================================================
 // Payload 辅助：WFTracePayload 打包/解包为 7 个 dword（28 字节）
@@ -97,6 +94,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setShadowPayloadOccluded() {
 extern "C" __global__ void RT_RG_NAME(traceRays)() {
     using namespace vlr::shared;
 
+    // 从 SBT 数据获取 launch parameters 指针
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
+
     // 工作索引：每个线程处理活跃队列中的一个路径
     uint32_t workIndex = optixGetLaunchIndex().x;
     uint32_t numActive = *wlp.activePathQueue.counter;
@@ -132,8 +135,8 @@ extern "C" __global__ void RT_RG_NAME(traceRays)() {
         0xFF,    // visibilityMask
         OPTIX_RAY_FLAG_NONE,
         0,       // SBT offset（默认 hit group）
-        0,       // SBT stride
-        0,       // miss SBT index
+        2,       // SBT stride（Ray Types 数量：Closest Hit + Shadow）
+        0,       // miss SBT index（Ray Type 0：Closest Hit）
         pd[0], pd[1], pd[2], pd[3], pd[4], pd[5], pd[6]
     );
 }
@@ -146,6 +149,12 @@ extern "C" __global__ void RT_RG_NAME(traceRays)() {
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
 extern "C" __global__ void RT_CH_NAME(closestHit)() {
     using namespace vlr::shared;
+
+    // 从 SBT 数据获取 launch parameters 指针
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
 
     unsigned int pd[7];
     pd[0] = optixGetPayload_0();
@@ -193,6 +202,12 @@ extern "C" __global__ void RT_CH_NAME(closestHit)() {
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
 extern "C" __global__ void RT_MS_NAME(miss)() {
     using namespace vlr::shared;
+
+    // 从 SBT 数据获取 launch parameters 指针
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
 
     unsigned int pd[7];
     pd[0] = optixGetPayload_0();
@@ -259,6 +274,7 @@ extern "C" __global__ void RT_AH_NAME(shadowAnyHit)() {
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
 extern "C" __global__ void RT_AH_NAME(shadowAnyHitWithAlpha)() {
     using namespace vlr::shared;
+    
     const float alphaThreshold = 0.5f;
     (void)alphaThreshold;
     // TODO: 从材质获取 alpha，< threshold 则 optixIgnoreIntersection() 否则 optixTerminateRay()

@@ -324,7 +324,45 @@ void applyBumpMappingDefault(const Normal3D& localNormal, SurfacePoint* surfPt) 
 
 
 // ============================================================================
-// 9. 从材质/纹理缓冲区获取法线贴图采样器
+// 9. 棋盘格程序化纹理采样
+// ============================================================================
+
+/// 棋盘格纹理采样
+/// 基于 UV 坐标 (u, v) 计算：cell = (floor(u*gridSize) + floor(v*gridSize)) % 2
+/// cell == 0 返回 color0，cell == 1 返回 color1
+/// @param u, v 纹理坐标 [0,1) 或任意（会 wrap）
+/// @param gridSize 棋盘格密度（如 8 表示 8x8）
+/// @param color0R,G,B 第一种颜色 RGB
+/// @param color1R,G,B 第二种颜色 RGB
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+TextureSampleRGBA sampleCheckerboard(
+    float u, float v,
+    uint32_t gridSize,
+    float color0R, float color0G, float color0B,
+    float color1R, float color1G, float color1B) {
+
+    if (gridSize < 1) gridSize = 1;
+
+#ifdef __CUDACC__
+    int iu = (int)floorf(u * (float)gridSize);
+    int iv = (int)floorf(v * (float)gridSize);
+#else
+    int iu = (int)std::floor(u * (float)gridSize);
+    int iv = (int)std::floor(v * (float)gridSize);
+#endif
+
+    int cell = (iu + iv) % 2;
+    if (cell < 0) cell += 2;
+
+    if (cell == 0) {
+        return TextureSampleRGBA(color0R, color0G, color0B, 1.0f);
+    }
+    return TextureSampleRGBA(color1R, color1G, color1B, 1.0f);
+}
+
+
+// ============================================================================
+// 10. 从材质/纹理缓冲区获取法线贴图采样器
 // ============================================================================
 
 /// 从纹理缓冲区获取法线贴图采样器

@@ -54,51 +54,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float testVisibility(
     float distance,
     uint64_t topGroup) {
 
-#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
-    if (topGroup == 0)
-        return 1.0f;  // 无可遍历场景时视为可见
-
-    // 沿法线偏移光线起点，避免自相交
-    Normal3D offsetNormal = shadingSurfPt.geometricNormal;
-    float cosToLight = dot(dirToLight, offsetNormal);
-    if (cosToLight < 0.0f)
-        offsetNormal = -offsetNormal;
-
-    Point3D rayOrigin = offsetRayOrigin(shadingSurfPt.position, offsetNormal);
-
-    // 阴影光线：tmin 避免自相交，tmax 为到光源距离减去小偏移
-    float tmin = 1e-5f;
-    float tmax = distance - 1e-4f;
-    if (tmax <= tmin)
-        return 1.0f;  // 光源太近，视为可见
-
-    // OptiX  trace：阴影光线使用 terminate-on-first-hit 语义
-    // 若命中任何几何则被遮挡；若 miss 则可见
-    // 注意：SBT 布局需与 Pipeline 一致，此处使用占位参数
-    // 完整集成时需从 WavefrontLaunchParameters 传入 shadowRaySbtOffset 等
-    constexpr unsigned int RAY_FLAG_TERMINATE_ON_FIRST_HIT = 1u;
-
-    // OptiX 8 optixTrace: (handle, float3 origin, float3 direction, tmin, tmax, rayTime, mask, flags, sbtOffset, sbtStride, missSbtIndex, payload&...)
-    // 阴影 payload：初值 0，Miss 设为 1(可见)，AnyHit 设为 0(遮挡)，payload 通过引用修改
-    float3 ro = make_float3(rayOrigin.x, rayOrigin.y, rayOrigin.z);
-    float3 rd = make_float3(dirToLight.x, dirToLight.y, dirToLight.z);
-    unsigned int shadowPayload = 0u;
-    optixTrace(topGroup, ro, rd, tmin, tmax, 0.0f,
-               0xFF, RAY_FLAG_TERMINATE_ON_FIRST_HIT,
-               0, 1, 1,  // sbtOffset, sbtStride, missSbtIndex（阴影 SBT）
-               shadowPayload);
-
-    return (shadowPayload != 0) ? 1.0f : 0.0f;  // 非零=Miss 设置的可见
-
-#else
-    // 无 OptiX 时：占位实现，假定可见（用于编译/测试）
+    // 注意：optixTrace 只能在 OptiX RayGen/Hit/Miss 中调用，不能从普通 CUDA kernel 调用。
+    // SampleLights 是 CUDA kernel，故暂不发射阴影光线，假定光源可见。
+    // 后续可通过将阴影测试移至单独的 OptiX 内核实现完整的可见性测试
     (void)shadingSurfPt;
     (void)lightSurfPt;
     (void)dirToLight;
     (void)distance;
     (void)topGroup;
     return 1.0f;
-#endif
 }
 
 }  // anonymous namespace
@@ -116,6 +80,7 @@ extern "C" __global__ void sampleLights(
 
 #ifdef __CUDACC__
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    
     if (workIndex >= wlp.activePathQueue.size())
         return;
 
@@ -249,7 +214,7 @@ extern "C" __global__ void sampleLights(
         float v = contrib.values[i];
         isFinite = isFinite && (v == v) && (v > -1e30f) && (v < 1e30f);
     }
-    if (contrib.hasNonZero() && isFinite) {
+    if (isFinite && contrib.hasNonZero()) {
         pathState.contribution += contrib;
     }
 

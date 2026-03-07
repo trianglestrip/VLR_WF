@@ -15,6 +15,7 @@
 #include "kernel_common.h"
 #include "geometry_common.h"
 #include "light_common.h"
+#include "texture_common.h"
 #include "../include/vlr/basic_types.h"
 
 namespace vlr {
@@ -218,7 +219,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void computeSurfacePoint(
     
     // Apply normal mapping
     Normal3D localNormal = calcNode(geomInst.nodeNormal, Normal3D(0.0f, 0.0f, 1.0f), *surfPt, wls);
-    applyBumpMapping(localNormal, surfPt);
+    applyBumpMapping(localNormal, surfPt, nullptr);
     
     // Apply tangent modification
     Vector3D newTangent = calcNode(geomInst.nodeTangent, surfPt->shadingFrame.x, *surfPt, wls);

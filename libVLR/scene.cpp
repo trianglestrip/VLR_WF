@@ -220,6 +220,34 @@ uint32_t Scene::createMaterialEx(
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
+uint32_t Scene::createMaterialCheckerboard(
+    float color0R, float color0G, float color0B,
+    float color1R, float color1G, float color1B,
+    uint32_t gridSize)
+{
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    mat.bsdfProcedureSetIndex = static_cast<uint32_t>(BSDFType_LambertCheckerboard);
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = static_cast<uint32_t>(BSDFType_LambertCheckerboard);
+    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&color0R);
+    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&color0G);
+    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&color0B);
+    mat.data[MaterialDataLayout::CheckerboardColor1R] = *reinterpret_cast<uint32_t*>(&color1R);
+    mat.data[MaterialDataLayout::CheckerboardColor1G] = *reinterpret_cast<uint32_t*>(&color1G);
+    mat.data[MaterialDataLayout::CheckerboardColor1B] = *reinterpret_cast<uint32_t*>(&color1B);
+    float gridSizeF = static_cast<float>(gridSize > 0 ? gridSize : 8);
+    mat.data[MaterialDataLayout::CheckerboardGridSize] = *reinterpret_cast<uint32_t*>(&gridSizeF);
+    float roughness = 0.5f;
+    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
+    float zero = 0.0f;
+    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
+    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
+    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
+    m_materials.push_back(mat);
+    return static_cast<uint32_t>(m_materials.size() - 1);
+}
+
 void Scene::setMaterial(uint32_t materialId,
     float albedoR, float albedoG, float albedoB,
     float roughness,
@@ -350,13 +378,14 @@ void Scene::buildGeometryAccelerationStructures() {
     for (size_t meshIdx = 0; meshIdx < m_meshes.size(); ++meshIdx) {
         const TriangleMeshData& mesh = m_meshes[meshIdx];
         if (mesh.positions.empty() || mesh.triangles.empty()) continue;
-        
+
         std::vector<float> vertices(mesh.positions.size() * 3);
         for (size_t i = 0; i < mesh.positions.size(); ++i) {
             vertices[i * 3 + 0] = mesh.positions[i].x;
             vertices[i * 3 + 1] = mesh.positions[i].y;
             vertices[i * 3 + 2] = mesh.positions[i].z;
         }
+
         
         CUdeviceptr d_vertices = 0;
         CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_vertices), vertices.size() * sizeof(float)));
@@ -415,6 +444,7 @@ void Scene::buildInstanceAccelerationStructure() {
         m_topGroup = 0;
         return;
     }
+
     std::vector<OptixInstance> optixInstances;
     optixInstances.reserve(m_instances.size());
     for (size_t i = 0; i < m_instances.size(); ++i) {
@@ -428,9 +458,15 @@ void Scene::buildInstanceAccelerationStructure() {
         oi.traversableHandle = m_gasHandles[gasIdx];
         const ReferenceFrame& rf = m_instances[i].transform;
         const InstanceTransform& it = rec.transform;
-        oi.transform[0] = rf.x.x; oi.transform[1] = rf.x.y; oi.transform[2] = rf.x.z; oi.transform[3] = it.position.x;
-        oi.transform[4] = rf.y.x; oi.transform[5] = rf.y.y; oi.transform[6] = rf.y.z; oi.transform[7] = it.position.y;
-        oi.transform[8] = rf.z.x; oi.transform[9] = rf.z.y; oi.transform[10] = rf.z.z; oi.transform[11] = it.position.z;
+        // OptiX transform 是行优先（row-major）3x4 矩阵：
+        // Row 0: [m00, m01, m02, tx]
+        // Row 1: [m10, m11, m12, ty]
+        // Row 2: [m20, m21, m22, tz]
+        // ReferenceFrame 有 x, y, z 三个向量（列向量），需要转置为行向量
+        oi.transform[0] = rf.x.x; oi.transform[1] = rf.y.x; oi.transform[2] = rf.z.x; oi.transform[3] = it.position.x;
+        oi.transform[4] = rf.x.y; oi.transform[5] = rf.y.y; oi.transform[6] = rf.z.y; oi.transform[7] = it.position.y;
+        oi.transform[8] = rf.x.z; oi.transform[9] = rf.y.z; oi.transform[10] = rf.z.z; oi.transform[11] = it.position.z;
+
         optixInstances.push_back(oi);
     }
     CUdeviceptr d_instances = 0;

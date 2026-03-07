@@ -272,6 +272,32 @@ VLRResult vlrCreateMaterialEx(
     }
 }
 
+VLRResult vlrCreateMaterialCheckerboard(
+    VLRScene scene,
+    const float color0[3],
+    const float color1[3],
+    uint32_t gridSize,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !outMaterial || !color0 || !color1) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialCheckerboard(
+            color0[0], color0[1], color0[2],
+            color1[0], color1[1], color1[2],
+            gridSize > 0 ? gridSize : 8);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrCreateInstance(
     VLRScene scene,
     VLRTriangleMesh mesh,

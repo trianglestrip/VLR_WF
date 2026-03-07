@@ -40,6 +40,7 @@ enum MaterialCategory : uint32_t {
 /// BSDF 类型：标识材质使用的反射/透射模型
 enum BSDFType : uint32_t {
     BSDFType_Lambert = 0,              ///< Lambert 漫反射
+    BSDFType_LambertCheckerboard,      ///< Lambert 漫反射 + 棋盘格纹理
     BSDFType_GGX,                      ///< GGX 微表面镜面反射
     BSDFType_Specular,                 ///< 完美镜面反射
     BSDFType_SpecularTransmission,      ///< 完美镜面透射（支持色散）
@@ -76,6 +77,11 @@ namespace MaterialDataLayout {
     constexpr int KappaR = 13;              ///< data[13]: 导体消光系数 k R
     constexpr int KappaG = 14;              ///< data[14]: 导体消光系数 k G
     constexpr int KappaB = 15;              ///< data[15]: 导体消光系数 k B
+    // 棋盘格纹理（LambertCheckerboard）
+    constexpr int CheckerboardColor1R = 10; ///< data[10]: 棋盘格第二种颜色 R（复用 EtaR 槽位）
+    constexpr int CheckerboardColor1G = 11; ///< data[11]: 棋盘格第二种颜色 G
+    constexpr int CheckerboardColor1B = 12; ///< data[12]: 棋盘格第二种颜色 B
+    constexpr int CheckerboardGridSize = 13;///< data[13]: 棋盘格密度 (如 8 表示 8x8)
     // FresnelBlend: Roughness=镜面粗糙度, Albedo=漫反射
     // GGXTransmission: IOR + Roughness
     // MixedBSDF: Metallic=混合权重
@@ -104,6 +110,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFType getBSDFType(
 }
 
 /// 从材质描述符获取 Lambert 反照率（RGB 转 SampledSpectrum）
+/// 使用 values[0..2]=RGB 保留颜色，values[3]=亮度用于重要性采样
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedo(
     const SurfaceMaterialDescriptor& matDesc,
     SampledSpectrum* albedo) {
@@ -111,9 +118,69 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedo(
     float r = d[MaterialDataLayout::AlbedoR];
     float g = d[MaterialDataLayout::AlbedoG];
     float b = d[MaterialDataLayout::AlbedoB];
-    // 简化为均匀光谱（可扩展为波长相关）
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        albedo->values[i] = (r + g + b) / 3.0f * VLR_M_INV_PI;
+    albedo->values[0] = r;
+    albedo->values[1] = g;
+    albedo->values[2] = b;
+    albedo->values[3] = (r + g + b) / 3.0f;  // 亮度用于重要性采样
+}
+
+/// 从材质描述符获取 Lambert 棋盘格反照率（按 UV 在两种颜色间切换）
+/// 对于水平表面（法线接近 ±Y）使用 position.x/z 作为 UV；否则使用 texCoord
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedoCheckerboard(
+    const SurfaceMaterialDescriptor& matDesc,
+    const SurfacePoint* surfPt,
+    SampledSpectrum* albedo) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float r0 = d[MaterialDataLayout::AlbedoR];
+    float g0 = d[MaterialDataLayout::AlbedoG];
+    float b0 = d[MaterialDataLayout::AlbedoB];
+    float r1 = d[MaterialDataLayout::CheckerboardColor1R];
+    float g1 = d[MaterialDataLayout::CheckerboardColor1G];
+    float b1 = d[MaterialDataLayout::CheckerboardColor1B];
+    float gridSize = d[MaterialDataLayout::CheckerboardGridSize];
+    if (gridSize < 1.0f) gridSize = 8.0f;
+
+    float u, v;
+    if (surfPt == nullptr) {
+        u = v = 0.0f;
+    } else {
+        float ny = (surfPt->geometricNormal.y >= 0) ? surfPt->geometricNormal.y : -surfPt->geometricNormal.y;
+        if (ny > 0.9f) {
+            u = surfPt->position.x;
+            v = surfPt->position.z;
+        } else {
+            u = surfPt->texCoord.x;
+            v = surfPt->texCoord.y;
+        }
+#ifdef __CUDACC__
+        u = u - floorf(u);
+        v = v - floorf(v);
+#else
+        u = u - std::floor(u);
+        v = v - std::floor(v);
+#endif
+        if (u < 0.0f) u += 1.0f;
+        if (v < 0.0f) v += 1.0f;
+    }
+
+#ifdef __CUDACC__
+    int iu = (int)floorf(u * gridSize);
+    int iv = (int)floorf(v * gridSize);
+#else
+    int iu = (int)std::floor(u * gridSize);
+    int iv = (int)std::floor(v * gridSize);
+#endif
+    bool useColor0 = ((iu + iv) % 2 == 0);
+    if (useColor0) {
+        albedo->values[0] = r0;
+        albedo->values[1] = g0;
+        albedo->values[2] = b0;
+    } else {
+        albedo->values[0] = r1;
+        albedo->values[1] = g1;
+        albedo->values[2] = b1;
+    }
+    albedo->values[3] = (albedo->values[0] + albedo->values[1] + albedo->values[2]) / 3.0f;
 }
 
 /// 从材质描述符获取 GGX 参数
@@ -121,12 +188,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getGGXParams(
     const SurfaceMaterialDescriptor& matDesc,
     SampledSpectrum* reflectance,
     float* roughness) {
-    float r = matDesc.data[MaterialDataLayout::AlbedoR];
-    float g = matDesc.data[MaterialDataLayout::AlbedoG];
-    float b = matDesc.data[MaterialDataLayout::AlbedoB];
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        reflectance->values[i] = (r + g + b) / 3.0f;
-    *roughness = matDesc.data[MaterialDataLayout::Roughness];
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float r = d[MaterialDataLayout::AlbedoR];
+    float g = d[MaterialDataLayout::AlbedoG];
+    float b = d[MaterialDataLayout::AlbedoB];
+    reflectance->values[0] = r;
+    reflectance->values[1] = g;
+    reflectance->values[2] = b;
+    reflectance->values[3] = (r + g + b) / 3.0f;
+    *roughness = d[MaterialDataLayout::Roughness];
     *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;  // 避免除零
 }
 
@@ -138,8 +208,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getSpecularReflectance(
     float r = d[MaterialDataLayout::AlbedoR];
     float g = d[MaterialDataLayout::AlbedoG];
     float b = d[MaterialDataLayout::AlbedoB];
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        reflectance->values[i] = (r + g + b) / 3.0f;
+    reflectance->values[0] = r;
+    reflectance->values[1] = g;
+    reflectance->values[2] = b;
+    reflectance->values[3] = (r + g + b) / 3.0f;
 }
 
 /// 从材质描述符获取透射材质参数（IOR + 色散）
@@ -184,8 +256,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getFresnelBlendParams(
     float r = d[MaterialDataLayout::AlbedoR];
     float g = d[MaterialDataLayout::AlbedoG];
     float b = d[MaterialDataLayout::AlbedoB];
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        diffuseReflectance->values[i] = (r + g + b) / 3.0f;
+    diffuseReflectance->values[0] = r;
+    diffuseReflectance->values[1] = g;
+    diffuseReflectance->values[2] = b;
+    diffuseReflectance->values[3] = (r + g + b) / 3.0f;
     *specularReflectance = *diffuseReflectance;  // 可扩展为独立参数
     *roughness = ::vlr::vlr_max(d[MaterialDataLayout::Roughness], 0.001f);
 }
@@ -200,8 +274,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getUE4Params(
     float r = d[MaterialDataLayout::AlbedoR];
     float g = d[MaterialDataLayout::AlbedoG];
     float b = d[MaterialDataLayout::AlbedoB];
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        baseColor->values[i] = (r + g + b) / 3.0f;
+    baseColor->values[0] = r;
+    baseColor->values[1] = g;
+    baseColor->values[2] = b;
+    baseColor->values[3] = (r + g + b) / 3.0f;
     *metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Metallic]));
     *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
 }
@@ -217,10 +293,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getMixedParams(
     float r = d[MaterialDataLayout::AlbedoR];
     float g = d[MaterialDataLayout::AlbedoG];
     float b = d[MaterialDataLayout::AlbedoB];
-    for (int i = 0; i < NumSpectralSamples; ++i) {
-        albedo0->values[i] = (r + g + b) / 3.0f;
-        albedo1->values[i] = albedo0->values[i];  // 可扩展
-    }
+    albedo0->values[0] = albedo1->values[0] = r;
+    albedo0->values[1] = albedo1->values[1] = g;
+    albedo0->values[2] = albedo1->values[2] = b;
+    albedo0->values[3] = albedo1->values[3] = (r + g + b) / 3.0f;
     *blendWeight = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Metallic]));
     *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
 }
@@ -233,8 +309,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getEmissiveRadiance(
     float r = d[MaterialDataLayout::EmissionR];
     float g = d[MaterialDataLayout::EmissionG];
     float b = d[MaterialDataLayout::EmissionB];
-    for (int i = 0; i < NumSpectralSamples; ++i)
-        radiance->values[i] = (r + g + b) / 3.0f;
+    radiance->values[0] = r;
+    radiance->values[1] = g;
+    radiance->values[2] = b;
+    radiance->values[3] = (r + g + b) / 3.0f;
 }
 
 
@@ -325,6 +403,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     BSDFType type) {
     switch (type) {
     case BSDFType_Lambert:
+    case BSDFType_LambertCheckerboard:
     case BSDFType_FresnelBlend:
         return MaterialCategory_Diffuse;
     case BSDFType_GGX:
@@ -347,7 +426,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
 CUDA_DEVICE_FUNCTION CUDA_INLINE bool materialHasNonDelta(
     const SurfaceMaterialDescriptor& matDesc) {
     BSDFType type = getBSDFType(matDesc);
-    return type == BSDFType_Lambert || type == BSDFType_GGX
+    return type == BSDFType_Lambert || type == BSDFType_LambertCheckerboard || type == BSDFType_GGX
         || type == BSDFType_FresnelBlend || type == BSDFType_UE4BRDF
         || type == BSDFType_FrostbiteBRDF || type == BSDFType_GGXTransmission
         || type == BSDFType_MixedBSDF;
@@ -364,6 +443,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool materialIsDelta(
 CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType type) {
     switch (type) {
     case BSDFType_Lambert:
+    case BSDFType_LambertCheckerboard:
     case BSDFType_FresnelBlend:
         return DirectionType::Reflection();
     case BSDFType_GGX:

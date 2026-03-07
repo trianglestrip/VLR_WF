@@ -397,8 +397,9 @@ static_assert(sizeof(WavelengthSamples) == 24, "WavelengthSamples must be 24 byt
 // toDiscretizedSpectrum 实现在此（需要 WavelengthSamples 完整定义）
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 DiscretizedSpectrum SampledSpectrum::toDiscretizedSpectrum(const WavelengthSamples& wls) const {
-    float luminance = values[wls.selectedLambdaIndex() % NumSpectralSamples];
-    return DiscretizedSpectrum(luminance, luminance, luminance);
+    // 对于 RGB 渲染：values[0..2] 存储 R/G/B，直接输出以保留颜色
+    (void)wls;
+    return DiscretizedSpectrum(values[0], values[1], values[2]);
 }
 
 

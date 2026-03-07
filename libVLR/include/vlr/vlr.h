@@ -177,6 +177,19 @@ VLR_API VLRResult vlrCreateMaterialEx(
     const float* emissionColor,
     VLRMaterial* outMaterial);
 
+/// 创建棋盘格材质（用于地板等）
+/// @param scene 所属场景
+/// @param color0 第一种颜色 RGB [0..1]（如黑色）
+/// @param color1 第二种颜色 RGB [0..1]（如白色）
+/// @param gridSize 棋盘格密度（默认 8 表示 8x8）
+/// @param outMaterial 输出材质句柄
+VLR_API VLRResult vlrCreateMaterialCheckerboard(
+    VLRScene scene,
+    const float color0[3],
+    const float color1[3],
+    uint32_t gridSize,
+    VLRMaterial* outMaterial);
+
 /// 创建实例（将网格放入场景）
 /// @param scene 所属场景
 /// @param mesh 网格句柄
