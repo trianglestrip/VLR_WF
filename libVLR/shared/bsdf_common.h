@@ -409,8 +409,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getGGXBSDFPDF(
 // ============================================================================
 
 /// 评估导体微表面反射 BSDF（GGX + FresnelConductor）
-/// 与原始 VLR MicrofacetBRDF 一致：f = F * D * G / (4 * NdotL * NdotV)
+/// 与原始 VLR MicrofacetBRDF 一致：f = coeffR * F * D * G / (4 * NdotL * NdotV)
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSDF(
+    const SampledSpectrum& coeffR,
     const SampledSpectrum& eta,
     const SampledSpectrum& kappa,
     float roughness,
@@ -420,6 +421,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
 
     float NdotL = dot(dirInLocal, geomNormalLocal);
     float NdotV = dot(dirOutLocal, geomNormalLocal);
+
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_BSDF_VERBOSE)
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        printf("[GPU evaluateMicrofacetReflectionBSDF]\n");
+        printf("  eta=(%.3f,%.3f,%.3f), kappa=(%.3f,%.3f,%.3f), roughness=%.3f\n",
+            eta.values[0], eta.values[1], eta.values[2],
+            kappa.values[0], kappa.values[1], kappa.values[2], roughness);
+        printf("  NdotL=%.3f, NdotV=%.3f\n", NdotL, NdotV);
+    }
+#endif
 
     if (NdotL <= 0.0f || NdotV <= 0.0f)
         return SampledSpectrum::Zero();
@@ -450,19 +461,37 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
     SampledSpectrum F;
     float cosTheta = std::abs(VdotH);
     for (int i = 0; i < NumSpectralSamples; ++i) {
-        F.values[i] = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+        float fresnelValue = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+        F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);  // Clamp 到 [0,1] 确保能量守恒
     }
+
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_BSDF_VERBOSE)
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        printf("  cosTheta=%.3f, D=%.6f, G=%.6f, denom=%.6f\n", cosTheta, D, G, denom);
+        printf("  Fresnel F=(%.6f,%.6f,%.6f,%.6f)\n", 
+            F.values[0], F.values[1], F.values[2], F.values[3]);
+    }
+#endif
 
     SampledSpectrum result;
     float spec = D * G / denom;
     for (int i = 0; i < NumSpectralSamples; ++i) {
-        result.values[i] = F.values[i] * spec;
+        result.values[i] = coeffR.values[i] * F.values[i] * spec;
     }
+    
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_BSDF_VERBOSE)
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        printf("  Final BSDF=(%.6f,%.6f,%.6f,%.6f)\n",
+            result.values[0], result.values[1], result.values[2], result.values[3]);
+    }
+#endif
+    
     return result;
 }
 
 /// 采样导体微表面反射 BSDF（GGX VNDF + FresnelConductor）
 CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
+    const SampledSpectrum& coeffR,
     const SampledSpectrum& eta,
     const SampledSpectrum& kappa,
     float roughness,
@@ -515,14 +544,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     SampledSpectrum F;
     float cosTheta = std::abs(VdotH);
     for (int i = 0; i < NumSpectralSamples; ++i) {
-        F.values[i] = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+        float fresnelValue = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+        F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);  // Clamp 到 [0,1] 确保能量守恒
     }
 
     float denom = 4.0f * NdotL * NdotV;
     if (denom > 1e-7f) {
         float spec = D * G / denom;
         for (int i = 0; i < NumSpectralSamples; ++i) {
-            result->f.values[i] = F.values[i] * spec;
+            result->f.values[i] = coeffR.values[i] * F.values[i] * spec;
         }
     } else {
         result->f = SampledSpectrum::Zero();
@@ -868,11 +898,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularBSDF(
     if (diff < 1e-5f) {
         float cosTheta = std::abs(dot(dirInLocal, geomNormalLocal));
         float F = (eta.values[0] * eta.values[0] + kappa.values[0] * kappa.values[0] < 1e-10f)
-            ? 1.0f : FresnelConductor(cosTheta, eta.values[0], kappa.values[0]);
+            ? 1.0f : ::vlr::vlr_min(1.0f, FresnelConductor(cosTheta, eta.values[0], kappa.values[0]));
         SampledSpectrum ret;
         for (int i = 0; i < NumSpectralSamples; ++i) {
             float Fi = (eta.values[i] * eta.values[i] + kappa.values[i] * kappa.values[i] < 1e-10f)
-                ? 1.0f : FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+                ? 1.0f : ::vlr::vlr_min(1.0f, FresnelConductor(cosTheta, eta.values[i], kappa.values[i]));
             ret.values[i] = coeffR.values[i] * Fi;
         }
         return ret;
@@ -1399,10 +1429,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
         return evaluateGGXBSDF(reflectance, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_MicrofacetReflection: {
-        SampledSpectrum eta, kappa;
+        SampledSpectrum coeffR, eta, kappa;
+        getLambertAlbedo(matDesc, &coeffR);
         float roughness;
         getMicrofacetReflectionParams(matDesc, &eta, &kappa, &roughness);
-        return evaluateMicrofacetReflectionBSDF(eta, kappa, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+        return evaluateMicrofacetReflectionBSDF(coeffR, eta, kappa, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_MicrofacetScattering: {
         float ior, roughness;
@@ -1477,6 +1508,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
     const WavelengthSamples* wls = ctx.wls;
     bool singleWl = ctx.singleWlSelected;
 
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        printf("[GPU sampleBSDFWithU2] BSDFType=%u\n", (uint32_t)type);
+    }
+#endif
+
     switch (type) {
     case BSDFType_Lambert: {
         SampledSpectrum albedo;
@@ -1499,10 +1536,24 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         break;
     }
     case BSDFType_MicrofacetReflection: {
-        SampledSpectrum eta, kappa;
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
+        if (threadIdx.x == 0 && blockIdx.x == 0) {
+            printf("[GPU sampleBSDFWithU2] Entering MicrofacetReflection branch\n");
+        }
+#endif
+        SampledSpectrum coeffR, eta, kappa;
+        getLambertAlbedo(matDesc, &coeffR);
         float roughness;
         getMicrofacetReflectionParams(matDesc, &eta, &kappa, &roughness);
-        sampleMicrofacetReflectionBSDF(eta, kappa, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
+        if (threadIdx.x == 0 && blockIdx.x == 0) {
+            printf("  coeffR=(%.3f,%.3f,%.3f), eta=(%.3f,%.3f,%.3f), kappa=(%.3f,%.3f,%.3f), roughness=%.3f\n",
+                coeffR.values[0], coeffR.values[1], coeffR.values[2],
+                eta.values[0], eta.values[1], eta.values[2],
+                kappa.values[0], kappa.values[1], kappa.values[2], roughness);
+        }
+#endif
+        sampleMicrofacetReflectionBSDF(coeffR, eta, kappa, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
         break;
     }
     case BSDFType_MicrofacetScattering: {
@@ -1518,10 +1569,20 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         break;
     }
     case BSDFType_SpecularTransmission: {
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
+        if (threadIdx.x == 0 && blockIdx.x == 0) {
+            printf("[GPU sampleBSDFWithU2] Entering SpecularTransmission branch\n");
+        }
+#endif
         float ior, disp;
         getTransmissionParams(matDesc, &ior, &disp);
+#if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
+        if (threadIdx.x == 0 && blockIdx.x == 0) {
+            printf("  ior=%.3f, dispersion=%.3f\n", ior, disp);
+        }
+#endif
         SampledSpectrum transmittance;
-        getLambertAlbedo(matDesc, &transmittance);  // 透射系数，透明玻璃为 (1,1,1)
+        getLambertAlbedo(matDesc, &transmittance);
         sampleSpecularTransmissionBSDF(1.0f, ior, disp, transmittance, wls, singleWl,
             dirInLocal, ctx.geomNormalLocal, u0, u1, result);
         break;

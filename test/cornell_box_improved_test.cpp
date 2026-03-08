@@ -131,15 +131,16 @@ static void createSphere(std::vector<float>& vertices, std::vector<uint32_t>& in
             uint32_t first = lat * (segments + 1) + lon;
             uint32_t second = first + segments + 1;
 
+            // 反转卷绕顺序，使法线指向外部（对玻璃球至关重要）
             if (lat != 0) {
                 indices.push_back(first);
+                indices.push_back(first + 1);     // 反转
                 indices.push_back(second);
-                indices.push_back(first + 1);
             }
             if (lat != rings - 1) {
                 indices.push_back(first + 1);
+                indices.push_back(second + 1);    // 反转
                 indices.push_back(second);
-                indices.push_back(second + 1);
             }
         }
     }
@@ -229,6 +230,12 @@ static const float kRightWallVertices[] = {
 };
 static const uint32_t kRightWallIndices[] = { 0, 1, 2,  0, 2, 3 };
 
+// Front wall (z=F=1.5): normal -Z (facing camera)
+static const float kFrontWallVertices[] = {
+    1.5f, 0.0f, 1.5f,  -1.5f, 0.0f, 1.5f,  -1.5f, 3.0f, 1.5f,  1.5f, 3.0f, 1.5f
+};
+static const uint32_t kFrontWallIndices[] = { 0, 1, 2,  0, 2, 3 };
+
 // Area light: y=2.9, size 1.0×1.0 (from -0.5 to 0.5 in x and z)
 static const float kLightVertices[] = {
     -0.5f, 2.9f, -0.5f,  0.5f, 2.9f, -0.5f,  0.5f, 2.9f, 0.5f,  -0.5f, 2.9f, 0.5f
@@ -255,6 +262,12 @@ int main(int argc, char** argv) {
     float camPosX = 0.0f, camPosY = 1.5f, camPosZ = 6.0f;
     float camTargetX = 0.0f, camTargetY = 1.5f, camTargetZ = 0.0f;
     float camFOV = 40.0f, lensRadius = 0.0f, focusDistance = 1.0f;
+    
+    // 降噪器配置（默认禁用）
+    bool denoiserEnabled = false;
+    bool denoiserUseAlbedo = true;
+    bool denoiserUseNormal = true;
+    float denoiserHDRIntensity = 1.0f;
 
     bool useIniScene = false;
     const char* perfConfigFile = nullptr;
@@ -280,6 +293,12 @@ int main(int argc, char** argv) {
             camFOV = parser.getFloat("Camera", "FOV", 40.0f);
             lensRadius = parser.getFloat("Camera", "LensRadius", 0.0f);
             focusDistance = parser.getFloat("Camera", "FocusDistance", 1.0f);
+            
+            // 读取降噪器配置
+            denoiserEnabled = parser.getInt("Denoiser", "Enabled", 0) != 0;
+            denoiserUseAlbedo = parser.getInt("Denoiser", "UseAlbedo", 1) != 0;
+            denoiserUseNormal = parser.getInt("Denoiser", "UseNormal", 1) != 0;
+            denoiserHDRIntensity = parser.getFloat("Denoiser", "HDRIntensity", 1.0f);
         } else {
             fprintf(stderr, "[Warning] Failed to load scene config: %s, using defaults\n", argv[1]);
         }
@@ -311,6 +330,14 @@ int main(int argc, char** argv) {
 
     printf("Resolution: %u x %u, Samples: %u, MaxDepth: %u, Exposure: %.2f\n", width, height, numSamples, maxDepth, exposure);
     printf("Output: %s (%s)\n", outputFile.c_str(), outputFormat.c_str());
+    if (denoiserEnabled) {
+        printf("Denoiser: Enabled (Albedo: %s, Normal: %s, HDR: %.2f)\n", 
+               denoiserUseAlbedo ? "ON" : "OFF",
+               denoiserUseNormal ? "ON" : "OFF",
+               denoiserHDRIntensity);
+    } else {
+        printf("Denoiser: Disabled\n");
+    }
     if (useIniScene) printf("Scene config: %s\n", argv[1]);
     if (perfConfigFile) printf("Performance config: %s (delegated to libVLR)\n", perfConfigFile);
     fflush(stdout);
@@ -321,11 +348,67 @@ int main(int argc, char** argv) {
     VLRCameraParams camera = {};
     std::vector<float> sphereVerts, boxVerts;
     std::vector<uint32_t> sphereInds, boxInds;
+    
+    // Materials
+    float whiteColor[] = { 0.522f, 0.522f, 0.522f };
+    float redColor[] = { 0.522f, 0.0508f, 0.0508f };
+    float blueColor[] = { 0.0508f, 0.0508f, 0.522f };
+    float blackColor[] = { 0.0508f, 0.0508f, 0.0508f };
+    VLRMaterial matWhite = nullptr;
+    VLRMaterial matRed = nullptr;
+    VLRMaterial matBlue = nullptr;
+    VLRMaterial matFloor = nullptr;
+    VLRMaterial matLight = nullptr;
+    float lightEmission[] = { 30.0f, 30.0f, 30.0f };
+    VLRMaterial matGlass = nullptr;
+    float glassColor[] = { 0.999f, 0.999f, 0.999f };
+    VLRMaterial matGold = nullptr;
+    float etaGold[] = { 0.143f, 0.374f, 1.442f };
+    float kappaGold[] = { 3.984f, 2.386f, 1.603f };
+    
+    // Geometry
+    VLRTriangleMesh meshFloor = nullptr;
+    VLRTriangleMesh meshCeiling = nullptr;
+    VLRTriangleMesh meshBackWall = nullptr;
+    VLRTriangleMesh meshLeftWall = nullptr;
+    VLRTriangleMesh meshRightWall = nullptr;
+    VLRTriangleMesh meshFrontWall = nullptr;
+    VLRTriangleMesh meshLight = nullptr;
+    VLRTriangleMesh meshSphere = nullptr;
+    VLRTriangleMesh meshBox = nullptr;
+    
+    // Instances
+    float origin[] = { 0, 0, 0 };
+    float scale[] = { 1, 1, 1 };
+    float axis[] = { 0, 1, 0 };
+    VLRInstance instFloor = nullptr;
+    VLRInstance instCeiling = nullptr;
+    VLRInstance instBackWall = nullptr;
+    VLRInstance instLeftWall = nullptr;
+    VLRInstance instRightWall = nullptr;
+    VLRInstance instLight = nullptr;
+    VLRInstance instSphere = nullptr;
+    VLRInstance instBox = nullptr;
+    
+    // Camera
+    float dx, dy, dz, len;
+    
+    // Render
+    size_t bufferSize = 0;
+    float* outputBuffer = nullptr;
+    void* deviceBuffer = nullptr;
+    cudaError_t cudaErr = cudaSuccess;
 
     res = vlrCreateContext(nullptr, 0, &context);
     if (res != VLRResult_Success || !context) {
         fprintf(stderr, "[Error] Failed to create Context: %d\n", res);
         return 1;
+    }
+
+    // 设置降噪器配置
+    res = vlrSetDenoiserConfig(context, denoiserEnabled, denoiserUseAlbedo, denoiserUseNormal, denoiserHDRIntensity);
+    if (res != VLRResult_Success) {
+        fprintf(stderr, "[Warning] Failed to set denoiser config\n");
     }
 
     // Load performance config (delegated to libVLR)
@@ -351,42 +434,26 @@ int main(int argc, char** argv) {
     // blue:  sRGB blue -> linear (0.0508, 0.0508, 0.522)
     // black: sRGB 0.25 -> linear ~0.0508
 
-    float whiteColor[] = { 0.522f, 0.522f, 0.522f };
-    float redColor[] = { 0.522f, 0.0508f, 0.0508f };
-    float blueColor[] = { 0.0508f, 0.0508f, 0.522f };
-    float blackColor[] = { 0.0508f, 0.0508f, 0.0508f };
-
-    VLRMaterial matWhite = nullptr;
     res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, nullptr, &matWhite);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] White material\n"); goto cleanup; }
 
-    VLRMaterial matRed = nullptr;
     res = vlrCreateMaterial(scene, 0 /* Matte */, redColor, nullptr, &matRed);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Red material\n"); goto cleanup; }
 
-    VLRMaterial matBlue = nullptr;
     res = vlrCreateMaterial(scene, 0 /* Matte */, blueColor, nullptr, &matBlue);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Blue material\n"); goto cleanup; }
 
-    VLRMaterial matFloor = nullptr;
     res = vlrCreateMaterialCheckerboard(scene, blackColor, whiteColor, 20, 1.5f, &matFloor);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor material\n"); goto cleanup; }
 
-    VLRMaterial matLight = nullptr;
-    float lightEmission[] = { 30.0f, 30.0f, 30.0f };  // 完全对标 VLR
     res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, lightEmission, &matLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light material\n"); goto cleanup; }
 
     // Glass sphere: SpecularTransmission, IOR 1.5 (standard glass)
-    VLRMaterial matGlass = nullptr;
-    float glassColor[] = { 0.999f, 0.999f, 0.999f };  // Minimal absorption
-    res = vlrCreateMaterialEx(scene, 4 /* SpecularTransmission */, glassColor, 0.0f, 0.0f, 1.5f, nullptr, &matGlass);
+    res = vlrCreateMaterialEx(scene, 6 /* SpecularTransmission */, glassColor, 0.0f, 0.0f, 1.5f, nullptr, &matGlass);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Glass material\n"); goto cleanup; }
 
     // Gold metal box: MicrofacetReflection, roughness 0.15
-    VLRMaterial matGold = nullptr;
-    float etaGold[] = { 0.143f, 0.374f, 1.442f };
-    float kappaGold[] = { 3.984f, 2.386f, 1.603f };
     res = vlrCreateMaterialConductor(scene, etaGold, kappaGold, 0.15f, &matGold);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Gold material\n"); goto cleanup; }
 
@@ -394,39 +461,34 @@ int main(int argc, char** argv) {
     // Geometry
     // ========================================================================
 
-    VLRTriangleMesh meshFloor = nullptr;
     res = vlrCreateTriangleMesh(scene, kFloorVertices, 4, kFloorIndices, 2, matFloor, &meshFloor);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor mesh\n"); goto cleanup; }
 
-    VLRTriangleMesh meshCeiling = nullptr;
     res = vlrCreateTriangleMesh(scene, kCeilingVertices, 4, kCeilingIndices, 2, matWhite, &meshCeiling);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Ceiling mesh\n"); goto cleanup; }
 
-    VLRTriangleMesh meshBackWall = nullptr;
     res = vlrCreateTriangleMesh(scene, kBackWallVertices, 4, kBackWallIndices, 2, matWhite, &meshBackWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Back wall mesh\n"); goto cleanup; }
 
-    VLRTriangleMesh meshLeftWall = nullptr;
     res = vlrCreateTriangleMesh(scene, kLeftWallVertices, 4, kLeftWallIndices, 2, matBlue, &meshLeftWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Left wall mesh\n"); goto cleanup; }
 
-    VLRTriangleMesh meshRightWall = nullptr;
     res = vlrCreateTriangleMesh(scene, kRightWallVertices, 4, kRightWallIndices, 2, matRed, &meshRightWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Right wall mesh\n"); goto cleanup; }
 
-    VLRTriangleMesh meshLight = nullptr;
+    res = vlrCreateTriangleMesh(scene, kFrontWallVertices, 4, kFrontWallIndices, 2, matWhite, &meshFrontWall);
+    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Front wall mesh\n"); goto cleanup; }
+
     res = vlrCreateTriangleMesh(scene, kLightVertices, 4, kLightIndices, 2, matLight, &meshLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light mesh\n"); goto cleanup; }
 
     createSphere(sphereVerts, sphereInds, -0.6f, 0.5f, 0.0f, 0.5f, 64, 48);  // glass sphere on left
     createRotatedBox(boxVerts, boxInds, 0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);  // metal box on right
 
-    VLRTriangleMesh meshSphere = nullptr;
     res = vlrCreateTriangleMesh(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
                                sphereInds.data(), (uint32_t)(sphereInds.size() / 3), matGlass, &meshSphere);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Sphere mesh\n"); goto cleanup; }
 
-    VLRTriangleMesh meshBox = nullptr;
     res = vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),
                                boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box mesh\n"); goto cleanup; }
@@ -435,39 +497,27 @@ int main(int argc, char** argv) {
     // Instances
     // ========================================================================
 
-    float origin[] = { 0, 0, 0 };
-    float scale[] = { 1, 1, 1 };
-    float axis[] = { 0, 1, 0 };
-
-    VLRInstance instFloor = nullptr;
     res = vlrCreateInstance(scene, meshFloor, origin, scale, axis, 0.0f, &instFloor);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor instance\n"); goto cleanup; }
 
-    VLRInstance instCeiling = nullptr;
     res = vlrCreateInstance(scene, meshCeiling, origin, scale, axis, 0.0f, &instCeiling);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Ceiling instance\n"); goto cleanup; }
 
-    VLRInstance instBackWall = nullptr;
     res = vlrCreateInstance(scene, meshBackWall, origin, scale, axis, 0.0f, &instBackWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Back wall instance\n"); goto cleanup; }
 
-    VLRInstance instLeftWall = nullptr;
     res = vlrCreateInstance(scene, meshLeftWall, origin, scale, axis, 0.0f, &instLeftWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Left wall instance\n"); goto cleanup; }
 
-    VLRInstance instRightWall = nullptr;
     res = vlrCreateInstance(scene, meshRightWall, origin, scale, axis, 0.0f, &instRightWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Right wall instance\n"); goto cleanup; }
 
-    VLRInstance instLight = nullptr;
     res = vlrCreateInstance(scene, meshLight, origin, scale, axis, 0.0f, &instLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light instance\n"); goto cleanup; }
 
-    VLRInstance instSphere = nullptr;
     res = vlrCreateInstance(scene, meshSphere, origin, scale, axis, 0.0f, &instSphere);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Sphere instance\n"); goto cleanup; }
 
-    VLRInstance instBox = nullptr;
     res = vlrCreateInstance(scene, meshBox, origin, scale, axis, 0.0f, &instBox);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box instance\n"); goto cleanup; }
 
@@ -486,10 +536,10 @@ int main(int argc, char** argv) {
     // ========================================================================
     // Camera: from config or defaults
     // ========================================================================
-    float dx = camTargetX - camPosX;
-    float dy = camTargetY - camPosY;
-    float dz = camTargetZ - camPosZ;
-    float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    dx = camTargetX - camPosX;
+    dy = camTargetY - camPosY;
+    dz = camTargetZ - camPosZ;
+    len = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (len < 1e-6f) len = 1.0f;
     camera.position[0] = camPosX;
     camera.position[1] = camPosY;
@@ -527,8 +577,8 @@ int main(int argc, char** argv) {
     // Render
     // ========================================================================
 
-    size_t bufferSize = width * height * sizeof(float) * 3;
-    float* outputBuffer = (float*)malloc(bufferSize);
+    bufferSize = width * height * sizeof(float) * 3;
+    outputBuffer = (float*)malloc(bufferSize);
     if (!outputBuffer) {
         fprintf(stderr, "[Error] Allocate output buffer\n");
         goto cleanup;
@@ -541,14 +591,14 @@ int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    void* deviceBuffer = vlrGetOutputBuffer(context);
+    deviceBuffer = vlrGetOutputBuffer(context);
     if (!deviceBuffer) {
         fprintf(stderr, "[Error] Get output buffer\n");
         free(outputBuffer);
         goto cleanup;
     }
 
-    cudaError_t cudaErr = cudaMemcpy(outputBuffer, deviceBuffer, bufferSize, cudaMemcpyDeviceToHost);
+    cudaErr = cudaMemcpy(outputBuffer, deviceBuffer, bufferSize, cudaMemcpyDeviceToHost);
     if (cudaErr != cudaSuccess) {
         fprintf(stderr, "[Error] cudaMemcpy: %s\n", cudaGetErrorString(cudaErr));
         free(outputBuffer);

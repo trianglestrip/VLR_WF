@@ -29,8 +29,9 @@ enum MaterialCategory : uint32_t {
     MaterialCategory_Transmissive,      ///< 透射材质（玻璃等）
     MaterialCategory_Emissive,           ///< 发光材质
     MaterialCategory_Mixed,              ///< 混合材质
-    NumMaterialCategories
+    MaterialCategory_Count
 };
+static_assert(static_cast<uint32_t>(MaterialCategory_Count) == NumMaterialCategories, "MaterialCategory count mismatch");
 
 
 // ============================================================================

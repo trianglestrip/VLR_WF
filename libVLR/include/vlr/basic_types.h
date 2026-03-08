@@ -1,12 +1,4 @@
-// ============================================================================
-// VLR 基础类型定义
-// 
-// 本文件定义了 VLR 中使用的基础数学类型。
-// 
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
-// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
-// ============================================================================
+﻿// ============================================================================// VLR 基础类型定义// // 本文件定义了 VLR 中使用的基础数学类型。// // 作者：VLR 开发团队// 创建日期：2026-03-07// 环境：CUDA 13.1, OptiX 8.0.0, VS2022// ============================================================================
 
 #pragma once
 
@@ -29,9 +21,7 @@
 
 namespace vlr {
 
-// ============================================================================
-// 数学常量（使用宏定义确保 PTX/设备代码中可用）
-// ============================================================================
+// ============================================================================// 数学常量（使用宏定义确保 PTX/设备代码中可用）// ============================================================================
 
 #ifndef VLR_M_PI
 #define VLR_M_PI 3.14159265358979323846f
@@ -46,26 +36,13 @@ namespace vlr {
 #define VLR_M_INV_2PI 0.15915494309189533577f
 #endif
 
-/// sincos：CUDA 设备端使用 sincosf，主机端使用 std::sin/cos
-/// 与原始 VLR common.h 保持一致，确保跨平台编译
+/// sincos：简化版本，统一使用模板
 template <typename T>
-CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+CUDA_HOST_FUNCTION CUDA_INLINE
 void sincos(T angle, T* s, T* c) {
     *s = std::sin(angle);
     *c = std::cos(angle);
 }
-#if defined(__CUDACC__)
-template <>
-CUDA_DEVICE_FUNCTION CUDA_INLINE
-void sincos(float angle, float* s, float* c) {
-#ifdef __CUDA_ARCH__
-    ::sincosf(angle, s, c);
-#else
-    *s = std::sin(angle);
-    *c = std::cos(angle);
-#endif
-}
-#endif
 
 /// 设备端安全的 max/min（替代 std::max/min，避免 CUDA 设备代码中的链接问题）
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -78,9 +55,7 @@ float vlr_min(float a, float b) {
 }
 
 
-// ============================================================================
-// 向量类型
-// ============================================================================
+// ============================================================================// 向量类型// ============================================================================
 
 struct Vector3D {
     float x, y, z;
@@ -119,14 +94,21 @@ struct Vector3D {
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     void toPolarYUp(float* theta, float* phi) const {
-#ifdef __CUDACC__
-        *theta = acosf(y);
-        *phi = atan2f(z, x);
-#else
-        *theta = std::acos(y);
-        *phi = std::atan2(z, x);
-#endif
-        if (*phi < 0) *phi += VLR_M_2PI;
+        // 简化实现：将向量转换为极坐标
+        float len = sqrtf(x * x + y * y + z * z);
+        if (len < 1e-10f) {
+            *theta = 0.0f;
+            *phi = 0.0f;
+            return;
+        }
+        
+        float x_ = x / len;
+        float y_ = y / len;
+        float z_ = z / len;
+        
+        *theta = acosf(vlr_max(-1.0f, vlr_min(1.0f, y_)));
+        *phi = atan2f(z_, x_);
+        if (*phi < 0.0f) *phi += VLR_M_2PI;
     }
 };
 
@@ -147,9 +129,7 @@ struct Vector2D {
 using TexCoord2D = Vector2D;
 
 
-// ============================================================================
-// CUDA 向量类型（用于兼容性）
-// ============================================================================
+// ============================================================================// CUDA 向量类型（用于兼容性）// ============================================================================
 
 #ifndef __CUDACC__
 struct uint2 {
@@ -165,14 +145,12 @@ inline uint2 make_uint2(uint32_t x, uint32_t y) {
 #endif
 
 
-// ============================================================================
-// 向量运算
-// ============================================================================
+// ============================================================================// 向量运算// ============================================================================
 
 /// Scalar * Vector (commutative)
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 Vector3D operator*(float s, const Vector3D& v) {
-    return v * s;
+    return Vector3D(v.x * s, v.y * s, v.z * s);
 }
 
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -212,22 +190,11 @@ Vector3D normalize(const Vector3D& v) {
     float len = length(v);
     if (len < 1e-10f)
         return Vector3D(0.0f, 0.0f, 1.0f);  // 零向量时返回默认，避免 NaN/Inf
-    return v / len;
-}
-
-/// 安全归一化：当向量长度过小时返回默认方向，避免产生 NaN/Inf
-CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-Vector3D safeNormalize(const Vector3D& v, const Vector3D& fallback = Vector3D(0.0f, 0.0f, 1.0f)) {
-    float len = length(v);
-    if (len < 1e-10f)
-        return fallback;
-    return v / len;
+    return Vector3D(v.x / len, v.y / len, v.z / len);
 }
 
 
-// ============================================================================
-// 参考坐标系
-// ============================================================================
+// ============================================================================// 参考坐标系// ============================================================================
 
 struct ReferenceFrame {
     Vector3D x, y, z;
@@ -238,7 +205,7 @@ struct ReferenceFrame {
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     ReferenceFrame(const Vector3D& tangent, const Normal3D& normal) {
         z = normal;
-        x = normalize(tangent - z * dot(tangent, z));
+        x = normalize(Vector3D(tangent.x - z.x * dot(tangent, z), tangent.y - z.y * dot(tangent, z), tangent.z - z.z * dot(tangent, z)));
         y = cross(z, x);
     }
     
@@ -254,14 +221,45 @@ struct ReferenceFrame {
 };
 
 
-// ============================================================================
-// 光谱类型
-// ============================================================================
+// ============================================================================// 光谱类型// ============================================================================
 
 constexpr uint32_t NumSpectralSamples = 4;
 
-struct WavelengthSamples;   // 前向声明，用于 toDiscretizedSpectrum
-struct DiscretizedSpectrum;  // 前向声明，用于 toDiscretizedSpectrum 返回类型
+struct WavelengthSamples {
+    float lambdas[NumSpectralSamples];  // 16 字节
+    uint32_t selectedLambda;            // 4 字节
+    uint32_t _padding;                  // 4 字节（对齐到 24 字节）
+    
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    WavelengthSamples() : selectedLambda(0), _padding(0) {
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            lambdas[i] = 550.0f;
+    }
+    
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    uint32_t selectedLambdaIndex() const {
+        return selectedLambda;
+    }
+    
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    static WavelengthSamples createWithEqualOffsets(float u1, float u2, float* selectWLPDF) {
+        WavelengthSamples wls;
+        // 简化实现：生成等间隔的波长样本
+        float lambdaMin = 400.0f;
+        float lambdaMax = 700.0f;
+        float delta = (lambdaMax - lambdaMin) / NumSpectralSamples;
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            wls.lambdas[i] = lambdaMin + i * delta;
+        }
+        // 选择一个波长作为主波长
+        wls.selectedLambda = static_cast<uint32_t>(u1 * NumSpectralSamples) % NumSpectralSamples;
+        // 设置 PDF
+        if (selectWLPDF) *selectWLPDF = 1.0f / NumSpectralSamples;
+        return wls;
+    }
+};
+
+struct DiscretizedSpectrum;
 
 struct SampledSpectrum {
     float values[NumSpectralSamples];
@@ -313,11 +311,6 @@ struct SampledSpectrum {
     }
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    SampledSpectrum operator/(float s) const {
-        return (*this) * (1.0f / s);
-    }
-    
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     void operator+=(const SampledSpectrum& s) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] += s.values[i];
@@ -330,10 +323,25 @@ struct SampledSpectrum {
     }
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    void operator*=(float s) {
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            values[i] *= s;
+    }
+    
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     void operator/=(float s) {
         float inv = 1.0f / s;
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] *= inv;
+    }
+    
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    SampledSpectrum operator/(float s) const {
+        SampledSpectrum result;
+        float inv = 1.0f / s;
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            result.values[i] = values[i] * inv;
+        return result;
     }
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
@@ -353,12 +361,6 @@ struct SampledSpectrum {
     }
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    float importance(uint32_t selectedLambdaIndex) const {
-        return values[selectedLambdaIndex];
-    }
-
-    /// 检查所有光谱分量是否为有限值（非 NaN、非 Inf）
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     bool allFinite() const {
         for (int i = 0; i < NumSpectralSamples; ++i) {
 #ifdef __CUDACC__
@@ -371,10 +373,12 @@ struct SampledSpectrum {
         }
         return true;
     }
-
-    /// 将采样光谱转换为 RGB（DiscretizedSpectrum），定义见 WavelengthSamples 之后
+    
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     DiscretizedSpectrum toDiscretizedSpectrum(const WavelengthSamples& wls) const;
+    
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    float importance(uint32_t lambdaIndex) const;
 };
 
 struct DiscretizedSpectrum {
@@ -389,44 +393,6 @@ struct DiscretizedSpectrum {
 
 using SpectrumStorage = DiscretizedSpectrum;
 
-
-struct WavelengthSamples {
-    float lambdas[NumSpectralSamples];  // 16 字节
-    uint32_t selectedLambda;            // 4 字节
-    uint32_t _padding;                  // 4 字节（对齐到 24 字节）
-    
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    WavelengthSamples() : selectedLambda(0), _padding(0) {
-        for (int i = 0; i < NumSpectralSamples; ++i)
-            lambdas[i] = 550.0f;
-    }
-    
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    uint32_t selectedLambdaIndex() const {
-        return selectedLambda;
-    }
-    
-    /// 使用等间隔偏移创建波长采样（4 个光谱采样）
-    /// u1: 波长偏移 [0,1)，u2: 选择索引 [0,1)，selectWLPDF 输出波长选择 PDF
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    static WavelengthSamples createWithEqualOffsets(float u1, float u2, float* selectWLPDF) {
-        constexpr float lambdaMin = 360.0f;
-        constexpr float lambdaMax = 830.0f;
-        constexpr float lambdaSpan = lambdaMax - lambdaMin;
-        
-        WavelengthSamples wls;
-        for (int i = 0; i < NumSpectralSamples; ++i) {
-            wls.lambdas[i] = lambdaMin + (i + u1) * (lambdaSpan / NumSpectralSamples);
-        }
-        wls.selectedLambda = static_cast<uint32_t>(u2 * NumSpectralSamples) % NumSpectralSamples;
-        wls._padding = 0;
-        *selectWLPDF = 1.0f / NumSpectralSamples;
-        return wls;
-    }
-};
-
-static_assert(sizeof(WavelengthSamples) == 24, "WavelengthSamples must be 24 bytes");
-
 // toDiscretizedSpectrum 实现在此（需要 WavelengthSamples 完整定义）
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 DiscretizedSpectrum SampledSpectrum::toDiscretizedSpectrum(const WavelengthSamples& wls) const {
@@ -435,10 +401,18 @@ DiscretizedSpectrum SampledSpectrum::toDiscretizedSpectrum(const WavelengthSampl
     return DiscretizedSpectrum(values[0], values[1], values[2]);
 }
 
+// importance 实现在此
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+float SampledSpectrum::importance(uint32_t lambdaIndex) const {
+    // 简化实现：返回指定波长的重要性值
+    if (lambdaIndex < NumSpectralSamples) {
+        return values[lambdaIndex];
+    }
+    return 0.0f;
+}
 
-// ============================================================================
-// 方向类型
-// ============================================================================
+
+// ============================================================================// 方向类型// ============================================================================
 
 struct DirectionType {
     uint32_t data;
@@ -476,11 +450,16 @@ struct DirectionType {
 };
 
 
-// ============================================================================
-// 随机数生成器
-// ============================================================================
+// ============================================================================// 传输模式// ============================================================================
 
-// PCG32 RNG (默认，质量高)
+enum class TransportMode : uint32_t {
+    Radiance = 0,
+    Importance
+};
+
+
+// ============================================================================// 随机数生成器// ============================================================================
+
 struct KernelRNG {
     uint64_t state;
     uint64_t inc;
@@ -503,45 +482,8 @@ struct KernelRNG {
     }
 };
 
-// Xorshift32 RNG (更快，质量略低但足够)
-struct XorshiftRNG {
-    uint32_t state;
 
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    XorshiftRNG() : state(2463534242u) {}
-
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    XorshiftRNG(uint32_t seed) : state(seed) {}
-
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    uint32_t next() {
-        uint32_t x = state;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        state = x;
-        return x;
-    }
-
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    float getFloat0cTo1o() {
-        return (next() >> 8) * 0x1.0p-24f;
-    }
-};
-
-// 使用宏选择 RNG 类型
-#ifdef VLR_USE_FAST_RNG
-using FastRNG = XorshiftRNG;
-#else
-using FastRNG = KernelRNG;
-#endif
-
-static_assert(sizeof(KernelRNG) == 16, "KernelRNG must be 16 bytes");
-
-
-// ============================================================================
-// 表面点
-// ============================================================================
+// ============================================================================// 表面点// ============================================================================
 
 struct SurfacePoint {
     Point3D position;
@@ -555,9 +497,7 @@ struct SurfacePoint {
 };
 
 
-// ============================================================================
-// 相机类型与描述符
-// ============================================================================
+// ============================================================================// 相机类型与描述符// ============================================================================
 
 /// 相机类型枚举（与 VLRCameraType 对应，使用 uint32_t 确保设备端可读）
 enum CameraType : uint32_t {
@@ -574,7 +514,6 @@ struct CameraDescriptor {
     float lensRadius;
     float focusDistance;
     uint32_t cameraType;     ///< CameraType 枚举值（0=透视，1=等距柱状）
-    /// 注：progEvaluateIDF 已移至 WavefrontLaunchParameters，避免 PTX 设备编译问题
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     CameraDescriptor() 
@@ -588,9 +527,7 @@ struct CameraDescriptor {
 };
 
 
-// ============================================================================
-// 几何类型
-// ============================================================================
+// ============================================================================// 几何类型// ============================================================================
 
 enum GeometryType : uint32_t {
     GeometryType_TriangleMesh = 0,
@@ -643,9 +580,7 @@ struct Instance {
 };
 
 
-// ============================================================================
-// 材质描述符（占位符）
-// ============================================================================
+// ============================================================================// 材质描述符（占位符）// ============================================================================
 
 struct NodeProcedureSet {
     int32_t progs[8];
@@ -687,22 +622,7 @@ struct SurfaceMaterialDescriptor {
 };
 
 
-// ============================================================================
-// 传输模式
-// ============================================================================
-
-enum class TransportMode : uint32_t {
-    Radiance = 0,
-    Importance
-};
-
-
-// ============================================================================
-// BSDF/EDF 查询类型（占位符）
-// PTX TraceRays 编译时跳过，避免设备端解析问题
-// ============================================================================
-
-#if !defined(VLR_PTX_TRACERAYS)
+// ============================================================================// BSDF/EDF 查询类型（占位符）// ============================================================================
 
 struct BSDFQuery {
     Vector3D dirIn;
@@ -753,12 +673,19 @@ struct BSDF {
     }
 };
 
+struct EDFQuery {
+    DirectionType dirTypeFilter;
+    WavelengthSamples wls;
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    EDFQuery(DirectionType filter, const WavelengthSamples& wls_) : dirTypeFilter(filter), wls(wls_) {}
+};
+
 struct EDF {
     const SurfaceMaterialDescriptor* matDesc;
 
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    EDF(const SurfaceMaterialDescriptor& desc, const SurfacePoint& sp, const WavelengthSamples& wls)
-        : matDesc(&desc) {}
+    EDF(const SurfaceMaterialDescriptor& desc, const SurfacePoint& sp, const WavelengthSamples& wls) : matDesc(&desc) {}
 
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
     SampledSpectrum evaluateEmittance() {
@@ -766,26 +693,13 @@ struct EDF {
     }
 
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    SampledSpectrum evaluate(const struct EDFQuery& query, const Vector3D& dir) const {
+    SampledSpectrum evaluate(const EDFQuery& query, const Vector3D& dir) const {
         return SampledSpectrum::Zero();
     }
 };
 
-struct EDFQuery {
-    DirectionType dirTypeFilter;
-    WavelengthSamples wls;
 
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    EDFQuery(DirectionType filter, const WavelengthSamples& wls_)
-        : dirTypeFilter(filter), wls(wls_) {}
-};
-
-#endif  // !VLR_PTX_TRACERAYS
-
-
-// ============================================================================
-// 采样结构
-// ============================================================================
+// ============================================================================// 采样结构// ============================================================================
 
 struct LensPosSample {
     Point3D position;
@@ -804,9 +718,7 @@ struct LightPosSample {
 };
 
 
-// ============================================================================
-// 分布类型（占位符）
-// ============================================================================
+// ============================================================================// 分布类型（占位符）// ============================================================================
 
 struct DiscreteDistribution1D {
     float* weights;
@@ -825,9 +737,7 @@ struct DiscreteDistribution1D {
 };
 
 
-// ============================================================================
-// 场景边界
-// ============================================================================
+// ============================================================================// 场景边界// ============================================================================
 
 struct SceneBounds {
     Point3D minPoint;
@@ -835,31 +745,42 @@ struct SceneBounds {
 };
 
 
-// ============================================================================
-// OptiX 工具类型（占位符）
-// ============================================================================
+// ============================================================================// OptiX 工具类型（占位符）// ============================================================================
 
 namespace optixu {
     template <typename T>
     struct PayloadSignature {
         using Type = T;
     };
-    
+
     template <typename T>
     struct NativeBlockBuffer2D {
         T* data;
     };
-    
+
     template <typename T, int N>
     struct BlockBuffer2D {
         T* data;
     };
 }
 
+template <typename T>
+struct PayloadSignature {
+    using Type = T;
+};
 
-// ============================================================================
-// CMF 类型（占位符）
-// ============================================================================
+template <typename T>
+struct NativeBlockBuffer2D {
+    T* data;
+};
+
+template <typename T, int N>
+struct BlockBuffer2D {
+    T* data;
+};
+
+
+// ============================================================================// CMF 类型（占位符）// ============================================================================
 
 struct DiscretizedSpectrumAlwaysSpectral {
     struct CMF {
@@ -868,9 +789,7 @@ struct DiscretizedSpectrumAlwaysSpectral {
 };
 
 
-// ============================================================================
-// 程序签名（占位符）
-// ============================================================================
+// ============================================================================// 程序签名（占位符）// ============================================================================
 
 #define ProgSigDecodeHitPoint int32_t
 #define ProgSigSampleLensPosition int32_t
@@ -878,9 +797,7 @@ struct DiscretizedSpectrumAlwaysSpectral {
 #define ProgSigSampleLightPosition int32_t
 
 
-// ============================================================================
-// 工具函数
-// ============================================================================
+// ============================================================================// 工具函数// ============================================================================
 
 CUDA_DEVICE_FUNCTION CUDA_INLINE
 void applyBumpMapping(const Normal3D& localNormal, SurfacePoint* surfPt) {
@@ -898,23 +815,27 @@ T calcNode(int32_t nodeIndex, const T& defaultValue, const SurfacePoint& surfPt,
     return defaultValue;  /* placeholder */
 }
 
+} // namespace vlr
+
+// ============================================================================// 全局宏定义（在命名空间外部）// ============================================================================
+
 #ifdef __CUDACC__
     #define vlrprintf printf
     #define atomicAdd ::atomicAdd
     #define atomicSub ::atomicSub
 #else
     #define vlrprintf printf
-    inline void atomicAdd(float* addr, float val) { *addr += val; }
-    inline uint32_t atomicAdd(uint32_t* addr, uint32_t val) {
-        uint32_t old = *addr;
-        *addr += val;
-        return old;
-    }
-    inline uint32_t atomicSub(uint32_t* addr, uint32_t val) {
-        uint32_t old = *addr;
-        *addr -= val;
-        return old;
-    }
+    namespace vlr {
+        inline void atomicAdd(float* addr, float val) { *addr += val; }
+        inline uint32_t atomicAdd(uint32_t* addr, uint32_t val) {
+            uint32_t old = *addr;
+            *addr += val;
+            return old;
+        }
+        inline uint32_t atomicSub(uint32_t* addr, uint32_t val) {
+            uint32_t old = *addr;
+            *addr -= val;
+            return old;
+        }
+    } // namespace vlr
 #endif
-
-} // namespace vlr

@@ -16,6 +16,9 @@
     <ClCompile Include="F:\project\VLR_WF\libVLR\tinyexr_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="F:\project\VLR_WF\libVLR\denoiser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\generate_rays.cu">

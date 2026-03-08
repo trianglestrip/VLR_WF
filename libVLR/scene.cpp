@@ -38,21 +38,11 @@ Scene::Scene(OptixDeviceContext optixContext, cudaStream_t stream, cudau::Contex
     : m_optixContext(optixContext)
     , m_stream(stream)
     , m_cudaContext(cudaContext)
-    , m_envLightInstIndex(0xFFFFFFFF)
     , m_topGroup(0)
     , m_accelOutputBuffer(nullptr)
     , m_accelTempBuffer(nullptr)
     , m_accelOutputSize(0)
     , m_accelTempSize(0)
-    , m_geomInstBuffer(nullptr)
-    , m_instBuffer(nullptr)
-    , m_instGeomIndicesBuffer(nullptr)
-    , m_materialBuffer(nullptr)
-    , m_vertexPositionBuffer(nullptr)
-    , m_vertexNormalBuffer(nullptr)
-    , m_vertexTexCoordBuffer(nullptr)
-    , m_triangleBuffer(nullptr)
-    , m_lightInstIndicesBuffer(nullptr)
 {
     m_sceneBounds.minPoint = Point3D(1e10f, 1e10f, 1e10f);
     m_sceneBounds.maxPoint = Point3D(-1e10f, -1e10f, -1e10f);
@@ -70,24 +60,6 @@ Scene::~Scene() {
         cudaFree(m_accelTempBuffer);
         m_accelTempBuffer = nullptr;
     }
-    delete m_geomInstBuffer;
-    delete m_instBuffer;
-    delete m_instGeomIndicesBuffer;
-    delete m_materialBuffer;
-    delete m_vertexPositionBuffer;
-    delete m_vertexNormalBuffer;
-    delete m_vertexTexCoordBuffer;
-    delete m_triangleBuffer;
-    delete m_lightInstIndicesBuffer;
-    m_geomInstBuffer = nullptr;
-    m_instBuffer = nullptr;
-    m_instGeomIndicesBuffer = nullptr;
-    m_materialBuffer = nullptr;
-    m_vertexPositionBuffer = nullptr;
-    m_vertexNormalBuffer = nullptr;
-    m_vertexTexCoordBuffer = nullptr;
-    m_triangleBuffer = nullptr;
-    m_lightInstIndicesBuffer = nullptr;
 }
 
 // ============================================================================
@@ -237,8 +209,25 @@ uint32_t Scene::createMaterialEx(
         mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&zero);
         mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&zero);
     }
+    
+    uint32_t matIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
-    return static_cast<uint32_t>(m_materials.size() - 1);
+    
+#ifdef VLR_DEBUG_MATERIAL
+    printf("[Material Debug] createMaterialEx: index=%u, bsdfType=%u\n", matIndex, bsdfType);
+    printf("  Albedo: (%.3f, %.3f, %.3f)\n", albedoR, albedoG, albedoB);
+    printf("  Roughness: %.3f, Metallic: %.3f, IOR: %.3f\n", roughness, metallic, ior);
+    printf("  Emission: (%.3f, %.3f, %.3f)\n", emissionR, emissionG, emissionB);
+    printf("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
+    
+    const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
+    printf("  Verify data[AlbedoR]: %.3f (expected %.3f)\n", 
+        dataAsFloat[MaterialDataLayout::AlbedoR], albedoR);
+    printf("  Verify data[IOR]: %.3f (expected %.3f)\n", 
+        dataAsFloat[MaterialDataLayout::IOR], ior);
+#endif
+    
+    return matIndex;
 }
 
 uint32_t Scene::createMaterialConductor(
@@ -259,12 +248,39 @@ uint32_t Scene::createMaterialConductor(
     mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&kappaR);
     mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&kappaG);
     mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&kappaB);
+    
+    // 设置 Albedo 为 (1,1,1)，让铜的颜色完全由 Fresnel 决定
+    float one = 1.0f;
+    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&one);
+    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&one);
+    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&one);
+    
     float zero = 0.0f;
     mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
     mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
     mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
+    
+    uint32_t matIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
-    return static_cast<uint32_t>(m_materials.size() - 1);
+    
+#ifdef VLR_DEBUG_MATERIAL
+    printf("[Material Debug] createMaterialConductor: index=%u, bsdfType=%u (MicrofacetReflection)\n", 
+        matIndex, bsdfType);
+    printf("  Eta: (%.3f, %.3f, %.3f)\n", etaR, etaG, etaB);
+    printf("  Kappa: (%.3f, %.3f, %.3f)\n", kappaR, kappaG, kappaB);
+    printf("  Roughness: %.3f\n", roughness);
+    printf("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
+    
+    const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
+    printf("  Verify data[EtaR]: %.3f (expected %.3f)\n", 
+        dataAsFloat[MaterialDataLayout::EtaR], etaR);
+    printf("  Verify data[KappaR]: %.3f (expected %.3f)\n", 
+        dataAsFloat[MaterialDataLayout::KappaR], kappaR);
+    printf("  Verify data[Roughness]: %.3f (expected %.3f)\n", 
+        dataAsFloat[MaterialDataLayout::Roughness], roughness);
+#endif
+    
+    return matIndex;
 }
 
 uint32_t Scene::createMaterialMicrofacetScattering(
@@ -515,7 +531,7 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     // - 需要创建 GeometryType_InfiniteSphere 实例供 miss shader 查询
     
     // 清理旧的环境光实例（如果存在）
-    if (m_envLightInstIndex != 0xFFFFFFFF && m_envLightInstIndex < m_instances.size()) {
+    if (m_envLightInstIndex.has_value() && m_envLightInstIndex.value() < m_instances.size()) {
         // 注意：不需要从 m_lightInstIndices 移除，因为环境光本来就不在其中
         // TODO: 清理旧的材质和几何实例（需要更复杂的资源管理）
     }
@@ -626,9 +642,10 @@ void Scene::buildGeometryAccelerationStructures() {
     m_gasHandles.clear();
     m_gasHandles.reserve(m_meshes.size());
     
-    OptixAccelBuildOptions accelOptions = {};
-    accelOptions.buildFlags = OPTIX_BUILD_FLAG_NONE;
-    accelOptions.operation = OPTIX_BUILD_OPERATION_BUILD;
+    OptixAccelBuildOptions accelOptions = {
+        .buildFlags = OPTIX_BUILD_FLAG_NONE,
+        .operation = OPTIX_BUILD_OPERATION_BUILD
+    };
     
     for (size_t meshIdx = 0; meshIdx < m_meshes.size(); ++meshIdx) {
         const TriangleMeshData& mesh = m_meshes[meshIdx];
@@ -731,9 +748,10 @@ void Scene::buildInstanceAccelerationStructure() {
     iasInput.type = OPTIX_BUILD_INPUT_TYPE_INSTANCES;
     iasInput.instanceArray.instances = d_instances;
     iasInput.instanceArray.numInstances = static_cast<uint32_t>(optixInstances.size());
-    OptixAccelBuildOptions iasOptions = {};
-    iasOptions.buildFlags = OPTIX_BUILD_FLAG_NONE;
-    iasOptions.operation = OPTIX_BUILD_OPERATION_BUILD;
+    OptixAccelBuildOptions iasOptions = {
+        .buildFlags = OPTIX_BUILD_FLAG_NONE,
+        .operation = OPTIX_BUILD_OPERATION_BUILD
+    };
     OptixAccelBufferSizes iasBufferSizes;
     OPTIX_CHECK(optixAccelComputeMemoryUsage(m_optixContext, &iasOptions, &iasInput, 1, &iasBufferSizes));
     if (m_accelTempBuffer) cudaFree(m_accelTempBuffer);
@@ -801,20 +819,20 @@ void Scene::updateToGPU() {
         }
         vertexOffset += static_cast<uint32_t>(mesh.positions.size());
     }
-    if (!m_vertexPositionBuffer) m_vertexPositionBuffer = new cudau::Buffer<Point3D>();
+    if (!m_vertexPositionBuffer) m_vertexPositionBuffer = std::make_unique<cudau::Buffer<Point3D>>();
     m_vertexPositionBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allPositions.size());
     m_vertexPositionBuffer->copyToDevice(allPositions.data(), allPositions.size(), m_stream);
     if (!allNormals.empty()) {
-        if (!m_vertexNormalBuffer) m_vertexNormalBuffer = new cudau::Buffer<Normal3D>();
+        if (!m_vertexNormalBuffer) m_vertexNormalBuffer = std::make_unique<cudau::Buffer<Normal3D>>();
         m_vertexNormalBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allNormals.size());
         m_vertexNormalBuffer->copyToDevice(allNormals.data(), allNormals.size(), m_stream);
     }
     if (!allTexCoords.empty()) {
-        if (!m_vertexTexCoordBuffer) m_vertexTexCoordBuffer = new cudau::Buffer<TexCoord2D>();
+        if (!m_vertexTexCoordBuffer) m_vertexTexCoordBuffer = std::make_unique<cudau::Buffer<TexCoord2D>>();
         m_vertexTexCoordBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTexCoords.size());
         m_vertexTexCoordBuffer->copyToDevice(allTexCoords.data(), allTexCoords.size(), m_stream);
     }
-    if (!m_triangleBuffer) m_triangleBuffer = new cudau::Buffer<Triangle>();
+    if (!m_triangleBuffer) m_triangleBuffer = std::make_unique<cudau::Buffer<Triangle>>();
     m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTriangles.size());
     m_triangleBuffer->copyToDevice(allTriangles.data(), allTriangles.size(), m_stream);
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
@@ -828,7 +846,7 @@ void Scene::updateToGPU() {
     }
     size_t totalGeomIndices = 0;
     for (const auto& rec : m_instanceRecords) totalGeomIndices += rec.geomInstIndices.size();
-    if (!m_instGeomIndicesBuffer) m_instGeomIndicesBuffer = new cudau::Buffer<uint32_t>();
+    if (!m_instGeomIndicesBuffer) m_instGeomIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
     m_instGeomIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, totalGeomIndices);
     std::vector<uint32_t> geomIndicesFlat;
     uint32_t offset = 0;
@@ -838,16 +856,41 @@ void Scene::updateToGPU() {
         offset += static_cast<uint32_t>(m_instanceRecords[i].geomInstIndices.size());
     }
     m_instGeomIndicesBuffer->copyToDevice(geomIndicesFlat.data(), geomIndicesFlat.size(), m_stream);
-    if (!m_geomInstBuffer) m_geomInstBuffer = new cudau::Buffer<GeometryInstance>();
+    if (!m_geomInstBuffer) m_geomInstBuffer = std::make_unique<cudau::Buffer<GeometryInstance>>();
     m_geomInstBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_geometryInstances.size());
     m_geomInstBuffer->copyToDevice(m_geometryInstances.data(), m_geometryInstances.size(), m_stream);
-    if (!m_instBuffer) m_instBuffer = new cudau::Buffer<Instance>();
+    if (!m_instBuffer) m_instBuffer = std::make_unique<cudau::Buffer<Instance>>();
     m_instBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_instances.size());
     m_instBuffer->copyToDevice(m_instances.data(), m_instances.size(), m_stream);
-    if (!m_materialBuffer) m_materialBuffer = new cudau::Buffer<SurfaceMaterialDescriptor>();
+    if (!m_materialBuffer) m_materialBuffer = std::make_unique<cudau::Buffer<SurfaceMaterialDescriptor>>();
     m_materialBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materials.size());
+    
+#ifdef VLR_DEBUG_MATERIAL
+    printf("\n[Material Debug] updateToGPU: Uploading %zu materials to GPU\n", m_materials.size());
+    for (size_t i = 0; i < m_materials.size(); ++i) {
+        const SurfaceMaterialDescriptor& mat = m_materials[i];
+        const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
+        printf("  Material[%zu]: bsdfProcedureSetIndex=%u\n", i, mat.bsdfProcedureSetIndex);
+        printf("    Albedo: (%.3f, %.3f, %.3f)\n", 
+            dataAsFloat[MaterialDataLayout::AlbedoR],
+            dataAsFloat[MaterialDataLayout::AlbedoG],
+            dataAsFloat[MaterialDataLayout::AlbedoB]);
+        printf("    Roughness: %.3f, IOR: %.3f\n", 
+            dataAsFloat[MaterialDataLayout::Roughness],
+            dataAsFloat[MaterialDataLayout::IOR]);
+        printf("    Eta: (%.3f, %.3f, %.3f)\n",
+            dataAsFloat[MaterialDataLayout::EtaR],
+            dataAsFloat[MaterialDataLayout::EtaG],
+            dataAsFloat[MaterialDataLayout::EtaB]);
+        printf("    Kappa: (%.3f, %.3f, %.3f)\n",
+            dataAsFloat[MaterialDataLayout::KappaR],
+            dataAsFloat[MaterialDataLayout::KappaG],
+            dataAsFloat[MaterialDataLayout::KappaB]);
+    }
+#endif
+    
     m_materialBuffer->copyToDevice(m_materials.data(), m_materials.size(), m_stream);
-    if (!m_lightInstIndicesBuffer) m_lightInstIndicesBuffer = new cudau::Buffer<uint32_t>();
+    if (!m_lightInstIndicesBuffer) m_lightInstIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
     m_lightInstIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_lightInstIndices.size());
     if (!m_lightInstIndices.empty())
         m_lightInstIndicesBuffer->copyToDevice(m_lightInstIndices.data(), m_lightInstIndices.size(), m_stream);
@@ -890,7 +933,7 @@ uint32_t Scene::getNumGeomInsts() const { return static_cast<uint32_t>(m_geometr
 uint32_t Scene::getNumInstances() const { return static_cast<uint32_t>(m_instances.size()); }
 uint32_t Scene::getNumMaterials() const { return static_cast<uint32_t>(m_materials.size()); }
 uint32_t Scene::getNumLightInsts() const { return static_cast<uint32_t>(m_lightInstIndices.size()); }
-uint32_t Scene::getEnvLightInstIndex() const { return m_envLightInstIndex; }
+uint32_t Scene::getEnvLightInstIndex() const { return m_envLightInstIndex.value_or(0xFFFFFFFF); }
 OptixTraversableHandle Scene::getTopGroup() const { return m_topGroup; }
 const shared::CameraDescriptor& Scene::getCamera() const { return m_camera; }
 const shared::SceneBounds& Scene::getSceneBounds() const { return m_sceneBounds; }

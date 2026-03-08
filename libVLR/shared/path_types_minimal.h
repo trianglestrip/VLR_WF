@@ -1,16 +1,16 @@
-// ============================================================================
-// VLR Wavefront TraceRays - 最小化类型定义
+﻿// ============================================================================
+// VLR Wavefront TraceRays - 鏈€灏忓寲绫诲瀷瀹氫箟
 //
-// 本文件仅包含 TraceRays OptiX 程序所需的最小类型集合。
-// 用于 PTX 编译，避免 material_types、texture_types 等重型依赖。
+// 鏈枃浠朵粎鍖呭惈 TraceRays OptiX 绋嬪簭鎵€闇€鐨勬渶灏忕被鍨嬮泦鍚堛€?
+// 鐢ㄤ簬 PTX 缂栬瘧锛岄伩鍏?material_types銆乼exture_types 绛夐噸鍨嬩緷璧栥€?
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
+// 浣滆€咃細VLR 寮€鍙戝洟闃?
+// 鍒涘缓鏃ユ湡锛?026-03-07
 // ============================================================================
 
 #pragma once
 
-#include "../include/vlr/basic_types.h"
+#include "vlr/basic_types.h"
 #include <cstdint>
 
 namespace vlr {
@@ -42,15 +42,26 @@ using ::vlr::DiscreteDistribution1D;
 using ::vlr::SceneBounds;
 using ::vlr::SpectrumStorage;
 
-// 前向声明，避免包含 texture_types.h
+// OptiX Buffer 绫诲瀷锛堟湰鍦板畾涔夛紝閬垮厤妯℃澘瑙ｆ瀽闂锛?
+template <typename T>
+struct NativeBlockBuffer2D {
+    T* data;
+};
+
+template <typename T, int N>
+struct BlockBuffer2D {
+    T* data;
+};
+
+// 鍓嶅悜澹版槑锛岄伩鍏嶅寘鍚?texture_types.h
 struct Texture2DDescriptor;
 
-// 材质类别数量（与 material_types.h 保持一致，用于 WavefrontMaterialQueues 布局）
+// 鏉愯川绫诲埆鏁伴噺锛堜笌 kernel_common.h 淇濇寔涓€鑷达紝鐢ㄤ簬 WavefrontMaterialQueues 甯冨眬锛?
 constexpr uint32_t NumMaterialCategories = 6;
 
 // ============================================================================
-// 1. WavefrontPathState（TraceRays 仅需 origin、direction、wls、isActive）
-// 布局必须与 path_types.h 完全一致（144 字节），因 pathStateBuffer 共享
+// 1. WavefrontPathState锛圱raceRays 浠呴渶 origin銆乨irection銆亀ls銆乮sActive锛?
+// 甯冨眬蹇呴』涓?path_types.h 瀹屽叏涓€鑷达紙144 瀛楄妭锛夛紝鍥?pathStateBuffer 鍏变韩
 // ============================================================================
 struct alignas(16) WavefrontPathState {
     Point3D origin;
@@ -122,7 +133,7 @@ struct WavefrontWorkQueue {
 };
 
 // ============================================================================
-// 4. WavefrontMaterialQueues（布局匹配，用于 WavefrontLaunchParameters）
+// 4. WavefrontMaterialQueues锛堝竷灞€鍖归厤锛岀敤浜?WavefrontLaunchParameters锛?
 // ============================================================================
 struct WavefrontMaterialQueues {
     WavefrontWorkQueue queues[NumMaterialCategories];
@@ -137,7 +148,7 @@ struct WFTracePayload {
 };
 
 // ============================================================================
-// 6. WavefrontLaunchParameters（TraceRays 用到的字段，布局与 path_types.h 完全一致）
+// 6. WavefrontLaunchParameters锛圱raceRays 鐢ㄥ埌鐨勫瓧娈碉紝甯冨眬涓?path_types.h 瀹屽叏涓€鑷达級
 // ============================================================================
 struct WavefrontLaunchParameters {
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_xbar;
@@ -181,8 +192,8 @@ struct WavefrontLaunchParameters {
     WavefrontWorkQueue nextActivePathQueue;
     WavefrontMaterialQueues materialQueues;
 
-    ::vlr::optixu::NativeBlockBuffer2D<::vlr::KernelRNG> rngBuffer;
-    ::vlr::optixu::BlockBuffer2D<::vlr::SpectrumStorage, 0> accumBuffer;
+    NativeBlockBuffer2D<::vlr::KernelRNG> rngBuffer;
+    BlockBuffer2D<::vlr::SpectrumStorage, 0> accumBuffer;
     ::vlr::DiscretizedSpectrum* accumAlbedoBuffer;
     ::vlr::Normal3D* accumNormalBuffer;
 
@@ -205,7 +216,7 @@ struct WavefrontLaunchParameters {
 };
 
 // ============================================================================
-// SBT 记录数据：存储 launch parameters 指针
+// SBT 璁板綍鏁版嵁锛氬瓨鍌?launch parameters 鎸囬拡
 // ============================================================================
 struct WavefrontSBTData {
     const WavefrontLaunchParameters* params;

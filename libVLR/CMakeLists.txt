@@ -81,6 +81,7 @@ set(LIBVLR_CPP_SOURCES
     scene.cpp
     image_loader.cpp
     tinyexr_impl.cpp
+    denoiser.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -119,7 +120,7 @@ target_include_directories(VLR PUBLIC
 )
 
 target_compile_options(VLR PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:/utf-8 /MD>
+    $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
     $<$<COMPILE_LANGUAGE:CUDA>:-DVLR_Device --expt-relaxed-constexpr -Xcompiler=/utf-8>
 )
 

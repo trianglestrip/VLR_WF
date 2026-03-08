@@ -329,6 +329,19 @@ VLR_API VLRResult vlrContextSetWavefrontStreamCompaction(VLRContext context, int
 /// @note 仅加载性能优化参数，不涉及场景参数（分辨率、采样数等）
 VLR_API VLRResult vlrLoadPerformanceConfig(VLRContext context, const char* perfConfigFile);
 
+/// 设置降噪器配置
+/// @param context 渲染上下文句柄
+/// @param enabled 是否启用降噪
+/// @param useAlbedo 是否使用 Albedo guide layer
+/// @param useNormal 是否使用 Normal guide layer
+/// @param hdrIntensity HDR 强度参数
+VLR_API VLRResult vlrSetDenoiserConfig(
+    VLRContext context, 
+    bool enabled,
+    bool useAlbedo,
+    bool useNormal,
+    float hdrIntensity);
+
 
 // ============================================================================
 // 版本与工具

@@ -44,7 +44,7 @@ extern "C" __global__ void sampleBSDF(
     WavefrontLaunchParameters& wlp = *params;
 
 #ifdef __CUDACC__
-    // 优化：Shared Memory 缓存材质数据
+
 #if PerformanceConfig::UseMaterialCache
     __shared__ MaterialCache<PerformanceConfig::MaterialCacheSize> materialCache;
     if (threadIdx.x == 0) {
@@ -57,7 +57,7 @@ extern "C" __global__ void sampleBSDF(
         materialCache.numMaterials = numMaterials;
     }
     __syncthreads();
-    #endif
+#endif
 
     // 工作索引：每个线程处理一条活跃路径
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -92,12 +92,38 @@ extern "C" __global__ void sampleBSDF(
     // 1. 获取材质和 BSDF 上下文
     // ========================================================================
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
-    
+
 #if PerformanceConfig::UseMaterialCache
     const SurfaceMaterialDescriptor& matDesc = *materialCache.get(
         geomInst.materialIndex, wlp.materialDescriptorBuffer);
 #else
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
+#endif
+
+#ifdef VLR_DEBUG_MATERIAL
+    if (pathIndex < 10) {
+        BSDFType bsdfType = getBSDFType(matDesc);
+        const float* dataAsFloat = getMaterialDataAsFloats(matDesc);
+        printf("[GPU SampleBSDF] pathIndex=%u, geomInstIndex=%u, materialIndex=%u\n",
+            pathIndex, hitInfo.geomInstIndex, geomInst.materialIndex);
+        printf("  bsdfProcedureSetIndex=%u, getBSDFType()=%u\n",
+            matDesc.bsdfProcedureSetIndex, (uint32_t)bsdfType);
+        printf("  Albedo: (%.3f, %.3f, %.3f)\n",
+            dataAsFloat[MaterialDataLayout::AlbedoR],
+            dataAsFloat[MaterialDataLayout::AlbedoG],
+            dataAsFloat[MaterialDataLayout::AlbedoB]);
+        printf("  Roughness: %.3f, IOR: %.3f\n",
+            dataAsFloat[MaterialDataLayout::Roughness],
+            dataAsFloat[MaterialDataLayout::IOR]);
+        printf("  Eta: (%.3f, %.3f, %.3f)\n",
+            dataAsFloat[MaterialDataLayout::EtaR],
+            dataAsFloat[MaterialDataLayout::EtaG],
+            dataAsFloat[MaterialDataLayout::EtaB]);
+        printf("  Kappa: (%.3f, %.3f, %.3f)\n",
+            dataAsFloat[MaterialDataLayout::KappaR],
+            dataAsFloat[MaterialDataLayout::KappaG],
+            dataAsFloat[MaterialDataLayout::KappaB]);
+    }
 #endif
 
     // 构造 BSDF 采样所需参数：入射方向（局部）、几何法线
@@ -119,6 +145,18 @@ extern "C" __global__ void sampleBSDF(
 
     BSDFSampleResult result;
     sampleBSDFWithU2(bsdfCtx, dirInLocal, u0, u1, u2, &result);
+
+#ifdef VLR_DEBUG_MATERIAL
+    if (pathIndex < 10) {
+        printf("[GPU SampleBSDF] pathIndex=%u: BSDF sampling result\n", pathIndex);
+        printf("  sampledBSDFType=%u, isDelta=%d\n", (uint32_t)result.sampledBSDFType, result.isDelta);
+        printf("  pdf=%.6f\n", result.pdf);
+        printf("  f=(%.6f, %.6f, %.6f, %.6f)\n", 
+            result.f.values[0], result.f.values[1], result.f.values[2], result.f.values[3]);
+        printf("  dirLocal=(%.3f, %.3f, %.3f)\n",
+            result.dirLocal.x, result.dirLocal.y, result.dirLocal.z);
+    }
+#endif
 
     // 与原始 VLR path_tracing.cu:243 完全一致：
     // if (fs == SampledSpectrum::Zero() || fsResult.dirPDF == 0.0f) return;

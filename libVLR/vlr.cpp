@@ -611,4 +611,29 @@ VLRResult vlrLoadPerformanceConfig(VLRContext context, const char* perfConfigFil
     }
 }
 
+VLRResult vlrSetDenoiserConfig(
+    VLRContext context, 
+    bool enabled,
+    bool useAlbedo,
+    bool useNormal,
+    float hdrIntensity)
+{
+    if (!context) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        
+        vlr::DenoiserConfig config;
+        config.enabled = enabled;
+        config.useAlbedo = useAlbedo;
+        config.useNormal = useNormal;
+        config.hdrIntensity = hdrIntensity;
+        
+        impl->ctx->setDenoiserConfig(config);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 }  // extern "C"

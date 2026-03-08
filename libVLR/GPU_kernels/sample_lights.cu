@@ -83,7 +83,7 @@ extern "C" __global__ void sampleLights(
     WavefrontLaunchParameters& wlp = *params;
 
 #ifdef __CUDACC__
-    // 优化：Shared Memory 缓存光源数据
+
 #if PerformanceConfig::UseLightCache
     __shared__ LightCache<PerformanceConfig::LightCacheSize> lightCache;
     if (threadIdx.x == 0) {
@@ -189,8 +189,39 @@ extern "C" __global__ void sampleLights(
     Vector3D dirOutLocal = surfPt.shadingFrame.toLocal(dirToLight);
     Normal3D geomNormalLocal = surfPt.shadingFrame.toLocal(surfPt.geometricNormal);
 
+#ifdef VLR_DEBUG_BSDF_VERBOSE
+    if (pathIndex < 5) {
+        printf("[GPU SampleLights] pathIndex=%u: Direction check\n", pathIndex);
+        printf("  pathState.direction (world)=(%.3f,%.3f,%.3f)\n",
+            pathState.direction.x, pathState.direction.y, pathState.direction.z);
+        printf("  dirToLight (world)=(%.3f,%.3f,%.3f)\n",
+            dirToLight.x, dirToLight.y, dirToLight.z);
+        printf("  surfPt.geometricNormal (world)=(%.3f,%.3f,%.3f)\n",
+            surfPt.geometricNormal.x, surfPt.geometricNormal.y, surfPt.geometricNormal.z);
+        printf("  dirInLocal=(%.3f,%.3f,%.3f)\n",
+            dirInLocal.x, dirInLocal.y, dirInLocal.z);
+        printf("  dirOutLocal=(%.3f,%.3f,%.3f)\n",
+            dirOutLocal.x, dirOutLocal.y, dirOutLocal.z);
+        printf("  geomNormalLocal=(%.3f,%.3f,%.3f)\n",
+            geomNormalLocal.x, geomNormalLocal.y, geomNormalLocal.z);
+        float NdotIn = dot(dirInLocal, geomNormalLocal);
+        float NdotOut = dot(dirOutLocal, geomNormalLocal);
+        printf("  NdotIn=%.3f, NdotOut=%.3f\n", NdotIn, NdotOut);
+    }
+#endif
+
     BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls);
     SampledSpectrum fs = evaluateBSDF(bsdfCtx, dirInLocal, dirOutLocal);
+
+#ifdef VLR_DEBUG_MATERIAL
+    if (pathIndex < 5) {
+        BSDFType bsdfType = getBSDFType(matDesc);
+        printf("[GPU SampleLights] pathIndex=%u: evaluateBSDF result\n", pathIndex);
+        printf("  BSDFType=%u\n", (uint32_t)bsdfType);
+        printf("  fs=(%.6f, %.6f, %.6f, %.6f)\n", 
+            fs.values[0], fs.values[1], fs.values[2], fs.values[3]);
+    }
+#endif
 
     if (!fs.hasNonZero())
         return;

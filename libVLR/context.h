@@ -13,6 +13,8 @@
 #include "include/vlr/public_types.h"
 #include "shared/path_types.h"
 #include "config_loader.h"
+#include "denoiser.h"
+#include "utils/cuda_util.h"
 
 // 前向声明 Scene（避免循环依赖）
 namespace vlr { class Scene; }
@@ -22,6 +24,7 @@ namespace vlr { class Scene; }
 #undef min
 #endif
 #include <optix.h>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -73,6 +76,10 @@ public:
         uint32_t height,
         uint32_t numSamples,
         void* outputBuffer);
+    
+    // 降噪器配置
+    void setDenoiserConfig(const DenoiserConfig& config);
+    const DenoiserConfig& getDenoiserConfig() const;
 
     // 缓冲区管理
     void resizeOutputBuffer(uint32_t width, uint32_t height);
@@ -131,33 +138,33 @@ private:
             void* shadowHitgroupRecord;
             
             // 路径状态缓冲区
-            cudau::Buffer<shared::WavefrontPathState>* pathStateBuffer;
-            cudau::Buffer<shared::WavefrontHitInfo>* hitInfoBuffer;
-            cudau::Buffer<shared::SurfacePoint>* surfacePointBuffer;
+            std::unique_ptr<cudau::Buffer<shared::WavefrontPathState>> pathStateBuffer;
+            std::unique_ptr<cudau::Buffer<shared::WavefrontHitInfo>> hitInfoBuffer;
+            std::unique_ptr<cudau::Buffer<shared::SurfacePoint>> surfacePointBuffer;
             
             // 工作队列
-            cudau::Buffer<uint32_t>* activePathIndices;
-            cudau::Buffer<uint32_t>* nextActivePathIndices;
-            cudau::Buffer<uint32_t>* queueCounters;  // [0]: 当前活跃, [1]: 下一轮
+            std::unique_ptr<cudau::Buffer<uint32_t>> activePathIndices;
+            std::unique_ptr<cudau::Buffer<uint32_t>> nextActivePathIndices;
+            std::unique_ptr<cudau::Buffer<uint32_t>> queueCounters;  // [0]: 当前活跃, [1]: 下一轮
             
             // 材质队列（可选）
-            cudau::Buffer<uint32_t>* materialQueueIndices[shared::NumMaterialCategories];
-            cudau::Buffer<uint32_t>* materialQueueCounters;
+            std::array<std::unique_ptr<cudau::Buffer<uint32_t>>, shared::NumMaterialCategories> materialQueueIndices;
+            std::unique_ptr<cudau::Buffer<uint32_t>> materialQueueCounters;
             
             // 输出缓冲区
-            cudau::Buffer<shared::SpectrumStorage>* accumBuffer;
-            cudau::Buffer<shared::DiscretizedSpectrum>* accumAlbedoBuffer;
-            cudau::Buffer<shared::Normal3D>* accumNormalBuffer;
-            cudau::Buffer<shared::KernelRNG>* rngBuffer;
+            std::unique_ptr<cudau::Buffer<shared::SpectrumStorage>> accumBuffer;
+            std::unique_ptr<cudau::Buffer<shared::DiscretizedSpectrum>> accumAlbedoBuffer;
+            std::unique_ptr<cudau::Buffer<shared::Normal3D>> accumNormalBuffer;
+            std::unique_ptr<cudau::Buffer<shared::KernelRNG>> rngBuffer;
             
             // 场景设备缓冲区（从 Scene 上传）
-            cudau::Buffer<shared::GeometryInstance>* sceneGeomInstBuffer;
-            cudau::Buffer<shared::Instance>* sceneInstBuffer;
-            cudau::Buffer<shared::SurfaceMaterialDescriptor>* sceneMaterialBuffer;
-            cudau::Buffer<shared::Triangle>* sceneTriangleBuffer;
-            cudau::Buffer<shared::Point3D>* sceneVertexBuffer;
-            cudau::Buffer<uint32_t>* sceneGeomInstIndicesBuffer;  // 打包的 geom 索引
-            cudau::Buffer<shared::SceneBounds>* sceneBoundsBuffer;
+            std::unique_ptr<cudau::Buffer<shared::GeometryInstance>> sceneGeomInstBuffer;
+            std::unique_ptr<cudau::Buffer<shared::Instance>> sceneInstBuffer;
+            std::unique_ptr<cudau::Buffer<shared::SurfaceMaterialDescriptor>> sceneMaterialBuffer;
+            std::unique_ptr<cudau::Buffer<shared::Triangle>> sceneTriangleBuffer;
+            std::unique_ptr<cudau::Buffer<shared::Point3D>> sceneVertexBuffer;
+            std::unique_ptr<cudau::Buffer<uint32_t>> sceneGeomInstIndicesBuffer;  // 打包的 geom 索引
+            std::unique_ptr<cudau::Buffer<shared::SceneBounds>> sceneBoundsBuffer;
             
             // 启动参数（主机端副本）
             shared::WavefrontLaunchParameters launchParams;
@@ -167,7 +174,7 @@ private:
             
             // 性能统计
             shared::WavefrontPerformanceStats perfStats;
-            cudau::Buffer<uint32_t>* perfStatsBuffer;
+            std::unique_ptr<cudau::Buffer<uint32_t>> perfStatsBuffer;
             
             // CUDA 事件（用于性能测量）
             cudaEvent_t startEvent;
@@ -181,11 +188,11 @@ private:
             bool useGraphExecution;
             
             // CUB 临时存储（用于排序和压缩）
-            cudau::Buffer<uint8_t>* cubTempStorage;
+            std::unique_ptr<cudau::Buffer<uint8_t>> cubTempStorage;
             size_t cubTempStorageBytes;
-            cudau::Buffer<uint32_t>* sortedPathIndices;  // 排序后的路径索引
-            cudau::Buffer<uint32_t>* compactedPathIndices;  // 压缩后的路径索引
-            cudau::Buffer<uint32_t>* numCompactedPaths;  // CUB 输出的压缩后路径数
+            std::unique_ptr<cudau::Buffer<uint32_t>> sortedPathIndices;  // 排序后的路径索引
+            std::unique_ptr<cudau::Buffer<uint32_t>> compactedPathIndices;  // 压缩后的路径索引
+            std::unique_ptr<cudau::Buffer<uint32_t>> numCompactedPaths;  // CUB 输出的压缩后路径数
             
             // 配置
             uint32_t maxPathLength;
@@ -215,20 +222,7 @@ private:
                 , hitgroupRecord(nullptr)
                 , shadowMissRecord(nullptr)
                 , shadowHitgroupRecord(nullptr)
-                , pathStateBuffer(nullptr)
-                , hitInfoBuffer(nullptr)
-                , surfacePointBuffer(nullptr)
-                , activePathIndices(nullptr)
-                , nextActivePathIndices(nullptr)
-                , queueCounters(nullptr)
-                , materialQueueCounters(nullptr)
-                , accumBuffer(nullptr)
-                , accumAlbedoBuffer(nullptr)
-                , accumNormalBuffer(nullptr)
-                , rngBuffer(nullptr)
-                , sceneBoundsBuffer(nullptr)
                 , launchParamsBuffer(nullptr)
-                , perfStatsBuffer(nullptr)
                 , startEvent(nullptr)
                 , endEvent(nullptr)
                 , eventsCreated(false)
@@ -236,11 +230,7 @@ private:
                 , renderGraphExec(nullptr)
                 , graphCaptured(false)
                 , useGraphExecution(true)  // 默认启用 CUDA Graphs
-                , cubTempStorage(nullptr)
                 , cubTempStorageBytes(0)
-                , sortedPathIndices(nullptr)
-                , compactedPathIndices(nullptr)
-                , numCompactedPaths(nullptr)
                 , maxPathLength(shared::WavefrontConfig::DefaultMaxPathLength)
                 , maxNumPaths(0)
                 , usePathSorting(shared::WavefrontConfig::UsePathSorting)
@@ -251,9 +241,6 @@ private:
                 , currentHeight(0)
                 , numAccumFrames(0)
             {
-                for (int i = 0; i < shared::NumMaterialCategories; ++i) {
-                    materialQueueIndices[i] = nullptr;
-                }
                 memset(&sbt, 0, sizeof(sbt));
             }
         };
@@ -315,6 +302,10 @@ private:
     
     /// 运行时性能配置（从 INI 加载，供 vlrLoadPerformanceConfig 使用）
     RuntimePerformanceConfig m_perfConfig;
+    
+    // 降噪器
+    Denoiser m_denoiser;
+    DenoiserConfig m_denoiserConfig;
     
     // ========================================================================
     // 私有方法

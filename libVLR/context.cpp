@@ -26,6 +26,7 @@
 #include <sstream>
 #include <vector>
 #include <chrono>
+#include <memory>
 #include "shared/performance_config.h"
 
 namespace vlr {
@@ -95,6 +96,12 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
     // 初始化 CUDA 上下文
     m_cudaContext = new cudau::Context();
     
+    // 初始化降噪器配置
+    m_denoiserConfig.enabled = false;
+    m_denoiserConfig.useAlbedo = true;
+    m_denoiserConfig.useNormal = true;
+    m_denoiserConfig.hdrIntensity = 1.0f;
+    
     // 初始化 OptiX 上下文
     m_optix.stream = cudaStream;
     m_optix.enableLogging = enableLogging;
@@ -116,9 +123,10 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
         throw std::runtime_error("Failed to get CUDA context");
     }
     
-    OptixDeviceContextOptions options = {};
-    options.logCallbackFunction = enableLogging ? &optixLogCallback : nullptr;
-    options.logCallbackLevel = 4;
+    OptixDeviceContextOptions options = {
+        .logCallbackFunction = enableLogging ? &optixLogCallback : nullptr,
+        .logCallbackLevel = 4
+    };
     
     optixRes = optixDeviceContextCreate(cuContext, &options, &m_optix.context);
     if (optixRes != OPTIX_SUCCESS) {
@@ -174,19 +182,21 @@ void Context::initializeWavefrontPipeline() {
     // ------------------------------------------------------------------------
     // 2. 创建管线编译选项
     // ------------------------------------------------------------------------
-    OptixPipelineCompileOptions pipelineCompileOptions = {};
-    pipelineCompileOptions.usesMotionBlur = false;
-    pipelineCompileOptions.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
-    pipelineCompileOptions.numPayloadValues = 7;  // WFTracePayload: 28 字节 = 7 个双字
-    pipelineCompileOptions.numAttributeValues = 2;  // 标准三角形属性
-    pipelineCompileOptions.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
-    pipelineCompileOptions.pipelineLaunchParamsVariableName = "wlp";
+    OptixPipelineCompileOptions pipelineCompileOptions = {
+        .usesMotionBlur = false,
+        .traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING,
+        .numPayloadValues = 7,  // WFTracePayload: 28 字节 = 7 个双字
+        .numAttributeValues = 2,  // 标准三角形属性
+        .exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE,
+        .pipelineLaunchParamsVariableName = "wlp"
+    };
     
     // 创建模块编译选项
-    OptixModuleCompileOptions moduleCompileOptions = {};
-    moduleCompileOptions.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
-    moduleCompileOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
-    moduleCompileOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
+    OptixModuleCompileOptions moduleCompileOptions = {
+        .maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT,
+        .optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT,
+        .debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL
+    };
     
     // ------------------------------------------------------------------------
     // 3. 创建 OptiX 模块
@@ -577,33 +587,33 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     
     // 分配路径状态缓冲区
     if (!wf.pathStateBuffer) {
-        wf.pathStateBuffer = new cudau::Buffer<shared::WavefrontPathState>();
+        wf.pathStateBuffer = std::make_unique<cudau::Buffer<shared::WavefrontPathState>>();
     }
     wf.pathStateBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     if (!wf.hitInfoBuffer) {
-        wf.hitInfoBuffer = new cudau::Buffer<shared::WavefrontHitInfo>();
+        wf.hitInfoBuffer = std::make_unique<cudau::Buffer<shared::WavefrontHitInfo>>();
     }
     wf.hitInfoBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     if (!wf.surfacePointBuffer) {
-        wf.surfacePointBuffer = new cudau::Buffer<shared::SurfacePoint>();
+        wf.surfacePointBuffer = std::make_unique<cudau::Buffer<shared::SurfacePoint>>();
     }
     wf.surfacePointBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     // 分配工作队列
     if (!wf.activePathIndices) {
-        wf.activePathIndices = new cudau::Buffer<uint32_t>();
+        wf.activePathIndices = std::make_unique<cudau::Buffer<uint32_t>>();
     }
     wf.activePathIndices->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     if (!wf.nextActivePathIndices) {
-        wf.nextActivePathIndices = new cudau::Buffer<uint32_t>();
+        wf.nextActivePathIndices = std::make_unique<cudau::Buffer<uint32_t>>();
     }
     wf.nextActivePathIndices->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     if (!wf.queueCounters) {
-        wf.queueCounters = new cudau::Buffer<uint32_t>();
+        wf.queueCounters = std::make_unique<cudau::Buffer<uint32_t>>();
     }
     wf.queueCounters->initialize(m_cudaContext, cudau::BufferType::Device, 2);
     wf.queueCounters->clear(m_stream);
@@ -612,13 +622,13 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     if (wf.useMaterialQueues) {
         for (int i = 0; i < shared::NumMaterialCategories; ++i) {
             if (!wf.materialQueueIndices[i]) {
-                wf.materialQueueIndices[i] = new cudau::Buffer<uint32_t>();
+                wf.materialQueueIndices[i] = std::make_unique<cudau::Buffer<uint32_t>>();
             }
             wf.materialQueueIndices[i]->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
         }
         
         if (!wf.materialQueueCounters) {
-            wf.materialQueueCounters = new cudau::Buffer<uint32_t>();
+            wf.materialQueueCounters = std::make_unique<cudau::Buffer<uint32_t>>();
         }
         wf.materialQueueCounters->initialize(m_cudaContext, cudau::BufferType::Device, shared::NumMaterialCategories);
         wf.materialQueueCounters->clear(m_stream);
@@ -626,13 +636,13 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     
     // 分配输出缓冲区
     if (!wf.accumBuffer) {
-        wf.accumBuffer = new cudau::Buffer<shared::SpectrumStorage>();
+        wf.accumBuffer = std::make_unique<cudau::Buffer<shared::SpectrumStorage>>();
     }
     wf.accumBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     wf.accumBuffer->clear(m_stream);
     
     if (!wf.rngBuffer) {
-        wf.rngBuffer = new cudau::Buffer<shared::KernelRNG>();
+        wf.rngBuffer = std::make_unique<cudau::Buffer<shared::KernelRNG>>();
     }
     wf.rngBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
@@ -650,18 +660,18 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     
     // 分配降噪缓冲区（可选）
     if (!wf.accumAlbedoBuffer) {
-        wf.accumAlbedoBuffer = new cudau::Buffer<shared::DiscretizedSpectrum>();
+        wf.accumAlbedoBuffer = std::make_unique<cudau::Buffer<shared::DiscretizedSpectrum>>();
     }
     wf.accumAlbedoBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     if (!wf.accumNormalBuffer) {
-        wf.accumNormalBuffer = new cudau::Buffer<shared::Normal3D>();
+        wf.accumNormalBuffer = std::make_unique<cudau::Buffer<shared::Normal3D>>();
     }
     wf.accumNormalBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
     // 分配性能统计缓冲区
     if (!wf.perfStatsBuffer) {
-        wf.perfStatsBuffer = new cudau::Buffer<uint32_t>();
+        wf.perfStatsBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
     }
     wf.perfStatsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 16);
     
@@ -692,23 +702,23 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
         
         if (wf.cubTempStorageBytes > 0) {
             if (!wf.cubTempStorage) {
-                wf.cubTempStorage = new cudau::Buffer<uint8_t>();
+                wf.cubTempStorage = std::make_unique<cudau::Buffer<uint8_t>>();
             }
             wf.cubTempStorage->initialize(m_cudaContext, cudau::BufferType::Device, wf.cubTempStorageBytes);
             
             // 分配排序/压缩辅助缓冲区
             if (!wf.sortedPathIndices) {
-                wf.sortedPathIndices = new cudau::Buffer<uint32_t>();
+                wf.sortedPathIndices = std::make_unique<cudau::Buffer<uint32_t>>();
             }
             wf.sortedPathIndices->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
             
             if (!wf.compactedPathIndices) {
-                wf.compactedPathIndices = new cudau::Buffer<uint32_t>();
+                wf.compactedPathIndices = std::make_unique<cudau::Buffer<uint32_t>>();
             }
             wf.compactedPathIndices->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
             
             if (!wf.numCompactedPaths) {
-                wf.numCompactedPaths = new cudau::Buffer<uint32_t>();
+                wf.numCompactedPaths = std::make_unique<cudau::Buffer<uint32_t>>();
             }
             wf.numCompactedPaths->initialize(m_cudaContext, cudau::BufferType::Device, 1);
             
@@ -834,7 +844,7 @@ void Context::setupWavefrontLaunchParams() {
 
         // SceneBounds 需设备指针，上传到小缓冲区
         if (!wf.sceneBoundsBuffer) {
-            wf.sceneBoundsBuffer = new cudau::Buffer<shared::SceneBounds>();
+            wf.sceneBoundsBuffer = std::make_unique<cudau::Buffer<shared::SceneBounds>>();
         }
         shared::SceneBounds bounds = m_sceneSource->getSceneBounds();
         wf.sceneBoundsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 1);
@@ -1023,20 +1033,19 @@ void Context::cleanupWavefrontResources() {
         wf.shadowHitgroupRecord = nullptr;
     }
     
-    // 释放缓冲区
-    delete wf.pathStateBuffer;
-    delete wf.hitInfoBuffer;
-    delete wf.surfacePointBuffer;
-    delete wf.activePathIndices;
-    delete wf.nextActivePathIndices;
-    delete wf.queueCounters;
-    delete wf.accumBuffer;
-    delete wf.accumAlbedoBuffer;
-    delete wf.accumNormalBuffer;
-    delete wf.rngBuffer;
-    delete wf.perfStatsBuffer;
-    delete wf.sceneBoundsBuffer;
-    wf.sceneBoundsBuffer = nullptr;
+    // 释放缓冲区（智能指针自动析构，显式 reset 以立即释放）
+    wf.pathStateBuffer.reset();
+    wf.hitInfoBuffer.reset();
+    wf.surfacePointBuffer.reset();
+    wf.activePathIndices.reset();
+    wf.nextActivePathIndices.reset();
+    wf.queueCounters.reset();
+    wf.accumBuffer.reset();
+    wf.accumAlbedoBuffer.reset();
+    wf.accumNormalBuffer.reset();
+    wf.rngBuffer.reset();
+    wf.perfStatsBuffer.reset();
+    wf.sceneBoundsBuffer.reset();
     
     // 销毁 CUDA 事件
     if (wf.eventsCreated) {
@@ -1053,20 +1062,15 @@ void Context::cleanupWavefrontResources() {
     }
     
     // 释放 CUB 临时存储
-    delete wf.cubTempStorage;
-    delete wf.sortedPathIndices;
-    delete wf.compactedPathIndices;
-    delete wf.numCompactedPaths;
-    wf.cubTempStorage = nullptr;
-    wf.sortedPathIndices = nullptr;
-    wf.compactedPathIndices = nullptr;
-    wf.numCompactedPaths = nullptr;
+    wf.cubTempStorage.reset();
+    wf.sortedPathIndices.reset();
+    wf.compactedPathIndices.reset();
+    wf.numCompactedPaths.reset();
     
     for (int i = 0; i < shared::NumMaterialCategories; ++i) {
-        delete wf.materialQueueIndices[i];
-        wf.materialQueueIndices[i] = nullptr;
+        wf.materialQueueIndices[i].reset();
     }
-    delete wf.materialQueueCounters;
+    wf.materialQueueCounters.reset();
     
     if (wf.launchParamsBuffer) {
         cudaFree(wf.launchParamsBuffer);
@@ -1193,6 +1197,29 @@ void Context::renderWavefront(
            renderTimeMs / numSamples,
            (width * height * numSamples) / (renderTimeMs * 1000.0f));
     fflush(stdout);
+    
+    // 执行降噪（如果启用）
+    if (m_denoiserConfig.enabled && wf.accumBuffer) {
+        printf("[VLR] Applying OptiX denoiser...\n");
+        fflush(stdout);
+        
+        // 初始化降噪器（如果尚未初始化）
+        if (!m_denoiser.isInitialized()) {
+            m_denoiser.initialize(width, height, m_denoiserConfig, m_optix.context);
+        }
+        
+        // 准备降噪输入（需要将 SpectrumStorage 转换为 float3）
+        // 注意：这里需要一个转换 kernel，暂时使用原始缓冲区
+        CUdeviceptr d_colorBuffer = reinterpret_cast<CUdeviceptr>(wf.accumBuffer->getDevicePointer());
+        CUdeviceptr d_albedoBuffer = wf.accumAlbedoBuffer ? reinterpret_cast<CUdeviceptr>(wf.accumAlbedoBuffer->getDevicePointer()) : 0;
+        CUdeviceptr d_normalBuffer = wf.accumNormalBuffer ? reinterpret_cast<CUdeviceptr>(wf.accumNormalBuffer->getDevicePointer()) : 0;
+        
+        // 执行降噪（输入和输出使用同一个缓冲区）
+        m_denoiser.denoise(d_colorBuffer, d_colorBuffer, d_albedoBuffer, d_normalBuffer, numSamples);
+        
+        printf("[VLR] Denoising completed\n");
+        fflush(stdout);
+    }
     
     // 将结果复制到输出缓冲区
     if (outputBuffer && wf.accumBuffer) {
@@ -1610,6 +1637,18 @@ void Context::checkCudaError(cudaError_t error, const char* call, const char* fi
                  file, line, call, cudaGetErrorString(error), error);
         throw std::runtime_error(msg);
     }
+}
+
+// ============================================================================
+// 降噪器配置
+// ============================================================================
+
+void Context::setDenoiserConfig(const DenoiserConfig& config) {
+    m_denoiserConfig = config;
+}
+
+const DenoiserConfig& Context::getDenoiserConfig() const {
+    return m_denoiserConfig;
 }
 
 } // namespace vlr

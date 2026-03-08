@@ -20,6 +20,8 @@
 #include <cuda_runtime.h>
 #include <vector>
 #include <cstdint>
+#include <optional>
+#include <memory>
 
 namespace vlr {
 
@@ -284,7 +286,7 @@ private:
     std::vector<uint32_t> m_lightInstIndices;
     shared::CameraDescriptor m_camera;
     shared::SceneBounds m_sceneBounds;
-    uint32_t m_envLightInstIndex;
+    std::optional<uint32_t> m_envLightInstIndex;
 
     struct InstanceRecord {
         uint32_t meshId;
@@ -303,15 +305,15 @@ private:
     size_t m_accelOutputSize;
     size_t m_accelTempSize;
 
-    cudau::Buffer<shared::GeometryInstance>* m_geomInstBuffer;
-    cudau::Buffer<shared::Instance>* m_instBuffer;
-    cudau::Buffer<uint32_t>* m_instGeomIndicesBuffer;
-    cudau::Buffer<shared::SurfaceMaterialDescriptor>* m_materialBuffer;
-    cudau::Buffer<Point3D>* m_vertexPositionBuffer;
-    cudau::Buffer<Normal3D>* m_vertexNormalBuffer;
-    cudau::Buffer<TexCoord2D>* m_vertexTexCoordBuffer;
-    cudau::Buffer<Triangle>* m_triangleBuffer;
-    cudau::Buffer<uint32_t>* m_lightInstIndicesBuffer;
+    std::unique_ptr<cudau::Buffer<shared::GeometryInstance>> m_geomInstBuffer;
+    std::unique_ptr<cudau::Buffer<shared::Instance>> m_instBuffer;
+    std::unique_ptr<cudau::Buffer<uint32_t>> m_instGeomIndicesBuffer;
+    std::unique_ptr<cudau::Buffer<shared::SurfaceMaterialDescriptor>> m_materialBuffer;
+    std::unique_ptr<cudau::Buffer<Point3D>> m_vertexPositionBuffer;
+    std::unique_ptr<cudau::Buffer<Normal3D>> m_vertexNormalBuffer;
+    std::unique_ptr<cudau::Buffer<TexCoord2D>> m_vertexTexCoordBuffer;
+    std::unique_ptr<cudau::Buffer<Triangle>> m_triangleBuffer;
+    std::unique_ptr<cudau::Buffer<uint32_t>> m_lightInstIndicesBuffer;
 
     void computeSceneBounds();
     void buildGeometryAccelerationStructures();
