@@ -15,6 +15,7 @@
 #include "shared/geometry_types.h"
 #include "shared/material_types.h"
 #include "shared/light_types.h"
+#include "shared/env_importance.h"
 #include "shared/path_types.h"
 #include <optix.h>
 #include <cuda_runtime.h>
@@ -319,7 +320,11 @@ public:
     uint32_t getNumMaterials() const;
     uint32_t getNumLightInsts() const;
     uint32_t getEnvLightInstIndex() const;
+    /// 获取环境光重要性贴图（供 GPU 使用，无贴图时返回无效结构）
+    shared::EnvironmentImportanceMap getEnvImportanceMap() const;
     OptixTraversableHandle getTopGroup() const;
+    /// 计算光源重要性权重（基于功率：强度×面积），用于 CDF 采样
+    void computeLightImportanceWeights(std::vector<float>& weights, std::vector<float>& cdf) const;
     const shared::CameraDescriptor& getCamera() const;
     const shared::SceneBounds& getSceneBounds() const;
 
@@ -336,6 +341,17 @@ private:
     shared::CameraDescriptor m_camera;
     shared::SceneBounds m_sceneBounds;
     std::optional<uint32_t> m_envLightInstIndex;
+
+    // 环境光纹理与重要性贴图
+    std::vector<float> m_envTextureData;
+    uint32_t m_envTextureWidth;
+    uint32_t m_envTextureHeight;
+    std::vector<float> m_envCdfTheta;
+    std::vector<float> m_envCdfPhi;
+    float m_envTotalLuminance;
+    std::unique_ptr<cudau::Buffer<float>> m_envCdfThetaBuffer;
+    std::unique_ptr<cudau::Buffer<float>> m_envCdfPhiBuffer;
+    std::unique_ptr<cudau::Buffer<float>> m_envTextureBuffer;
 
     struct InstanceRecord {
         uint32_t meshId;

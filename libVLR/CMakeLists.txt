@@ -80,6 +80,7 @@ set(LIBVLR_CPP_SOURCES
     context.cpp
     scene.cpp
     image_loader.cpp
+    env_importance.cpp
     tinyexr_impl.cpp
     denoiser.cpp
 )

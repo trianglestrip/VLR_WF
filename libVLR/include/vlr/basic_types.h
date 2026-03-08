@@ -721,18 +721,45 @@ struct LightPosSample {
 // ============================================================================// 分布类型（占位符）// ============================================================================
 
 struct DiscreteDistribution1D {
-    float* weights;
+    float* weights;   ///< 每个元素的权重（用于 PDF 计算），nullptr 表示均匀分布
+    float* cdf;      ///< 累积分布函数，cdf[0]=0, cdf[i]=sum(w[0..i-1])/total, cdf[n]=1；nullptr 时使用均匀
     uint32_t numValues;
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE
     uint32_t sample(float u, float* prob) const {
-        *prob = 1.0f / numValues;
-        return static_cast<uint32_t>(u * numValues);
+        if (cdf == nullptr || numValues == 0) {
+            *prob = (numValues > 0) ? (1.0f / numValues) : 0.0f;
+            return (numValues > 0) ? vlr_min(static_cast<uint32_t>(u * numValues), numValues - 1) : 0u;
+        }
+        u = vlr_max(0.0f, vlr_min(u, 1.0f - 1e-7f));
+        uint32_t lo = 0, hi = numValues;
+        while (lo + 1 < hi) {
+            uint32_t mid = (lo + hi) >> 1;
+            if (cdf[mid] <= u)
+                lo = mid;
+            else
+                hi = mid;
+        }
+        uint32_t idx = lo;
+        float total = cdf[numValues];
+        *prob = (weights != nullptr && total > 1e-10f && weights[idx] > 1e-10f)
+            ? (weights[idx] / total) : (1.0f / numValues);
+        return idx;
     }
     
     CUDA_DEVICE_FUNCTION CUDA_INLINE
     float integral() const {
-        return 1.0f;
+        if (cdf == nullptr || numValues == 0) return 1.0f;
+        return (cdf[numValues] > 1e-10f) ? cdf[numValues] : 1.0f;
+    }
+    
+    CUDA_DEVICE_FUNCTION CUDA_INLINE
+    float pdf(uint32_t index) const {
+        if (index >= numValues) return 0.0f;
+        if (weights == nullptr || cdf == nullptr) return 1.0f / numValues;
+        float total = cdf[numValues];
+        return (total > 1e-10f && weights[index] > 1e-10f)
+            ? (weights[index] / total) : (1.0f / numValues);
     }
 };
 

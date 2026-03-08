@@ -13,6 +13,7 @@
 #include "kernel_common.h"
 #include "material_types.h"
 #include "texture_types.h"
+#include "env_importance.h"
 #include <cmath>
 #include <cstdio>
 
@@ -278,6 +279,7 @@ struct WavefrontLaunchParameters {
     const uint32_t* instIndices;
     DiscreteDistribution1D lightInstDist;
     uint32_t envLightInstIndex;
+    EnvironmentImportanceMap envImportanceMap;  ///< 环境光重要性贴图（用于 NEE 和 MIS）
     
     // 相机数据
     int32_t progSampleLensPosition;

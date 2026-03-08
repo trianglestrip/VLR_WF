@@ -11,6 +11,7 @@
 
 #include "../shared/path_types.h"
 #include "../shared/geometry_common.h"
+#include "../shared/env_importance.h"
 #include "kernel_launch.h"
 #include "../shared/geometry_types.h"
 #include "../shared/bsdf_common.h"
@@ -86,6 +87,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
 
     float theta, phi;
     pathState.direction.toPolarYUp(&theta, &phi);
+    const float phiOrig = phi;
 
     float sinPhi, cosPhi;
     sinPhi = std::sin(phi);
@@ -114,15 +116,23 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
 
     SampledSpectrum Le = edfResult.Le;
 
-    // MIS 权重（简化：环境光采样难以精确 PDF，用 1）
+    // MIS 权重：BSDF 采样 vs 环境光重要性采样
     float MISWeight = 1.0f;
     if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
         float bsdfPDF = pathState.prevDirPDF;
-        float sinTheta = std::sin(theta);
-        float sinThetaSafe = (sinTheta > 1e-6f) ? sinTheta : 1e-6f;
         float cosOutSafe = (std::abs(dirOutLocal.z) > 1e-6f) ? std::abs(dirOutLocal.z) : 1e-6f;
-        float envAreaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
-        float lightPDF = envAreaPDF / cosOutSafe;
+        float lightPDF;
+        if (wlp.envImportanceMap.isValid()) {
+            // 使用未旋转的纹理坐标（importance map 基于原始贴图）
+            float u = phiOrig / VLR_M_2PI;
+            float v = theta / VLR_M_PI;
+            lightPDF = wlp.envImportanceMap.evaluatePDF(u, v) / cosOutSafe;
+        } else {
+            float sinTheta = std::sin(theta);
+            float sinThetaSafe = (sinTheta > 1e-6f) ? sinTheta : 1e-6f;
+            float envAreaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
+            lightPDF = envAreaPDF / cosOutSafe;
+        }
         if (lightPDF > 0.0f && lightPDF < 1e30f)
             MISWeight = powerHeuristicMIS(bsdfPDF, lightPDF);
     }

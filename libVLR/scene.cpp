@@ -10,6 +10,7 @@
 // ============================================================================
 
 #include "scene.h"
+#include "shared/env_importance.h"
 #include "utils/cuda_util.h"
 #include "utils/optix_util.h"
 #include <optix_stubs.h>
@@ -703,18 +704,25 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // 创建方向光几何实例
+    // 创建方向光几何实例（方向存储在 Instance.transform.z 中）
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_Directional;
     geomInst.materialIndex = materialIndex;
+    geomInst.importance = 1.0f;
+    geomInst.progDecodeHitPoint = -1;
+    geomInst.progSampleLightPosition = -1;
+    geomInst.nodeNormal = -1;
+    geomInst.nodeTangent = -1;
     uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
     m_geometryInstances.push_back(geomInst);
     
     // 创建方向光实例（方向存储在 transform.z 中）
     Instance inst;
     memset(&inst, 0, sizeof(inst));
-    inst.geomInstIndices = nullptr;
+    uint32_t* geomIndices = new uint32_t[1];
+    geomIndices[0] = geomInstIndex;
+    inst.geomInstIndices = geomIndices;
     inst.numGeomInsts = 1;
     Vector3D dir = normalize(direction);
     inst.transform = ReferenceFrame(Vector3D(1, 0, 0), Normal3D(dir.x, dir.y, dir.z));
@@ -737,14 +745,16 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
 
 void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     // 环境光实现说明：
-    // - 环境光不参与显式光源采样（NEE），不加入 m_lightInstIndices
-    // - 仅在光线 miss 时通过 processEnvironmentHit 提供背景照明
+    // - 环境光参与 NEE（加入 m_lightInstIndices）以支持重要性采样
+    // - 光线 miss 时通过 processEnvironmentHit 提供背景照明
     // - 需要创建 GeometryType_InfiniteSphere 实例供 miss shader 查询
     
     // 清理旧的环境光实例（如果存在）
     if (m_envLightInstIndex.has_value() && m_envLightInstIndex.value() < m_instances.size()) {
-        // 注意：不需要从 m_lightInstIndices 移除，因为环境光本来就不在其中
-        // TODO: 清理旧的材质和几何实例（需要更复杂的资源管理）
+        // 从 m_lightInstIndices 移除旧的环境光
+        auto it = std::find(m_lightInstIndices.begin(), m_lightInstIndices.end(), m_envLightInstIndex.value());
+        if (it != m_lightInstIndices.end())
+            m_lightInstIndices.erase(it);
     }
     
     // 创建环境光材质
@@ -782,11 +792,37 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     geomInst.nodeNormal = -1;
     geomInst.nodeTangent = -1;
     
-    // 环境光纹理数据存储在 asInfSphere 中
-    if (!params.useConstant && params.textureData) {
-        geomInst.asInfSphere.importanceMap = params.importanceMapHandle;
+    // 环境光纹理与重要性贴图
+    if (!params.useConstant && params.textureData && params.textureWidth > 0 && params.textureHeight > 0) {
+        geomInst.asInfSphere.importanceMap = 1;  // 1 = 使用重要性采样
+        // 存储纹理数据
+        size_t numPixels = static_cast<size_t>(params.textureWidth) * params.textureHeight * 3;
+        m_envTextureData.resize(numPixels);
+        std::memcpy(m_envTextureData.data(), params.textureData, numPixels * sizeof(float));
+        m_envTextureWidth = params.textureWidth;
+        m_envTextureHeight = params.textureHeight;
+        // 构建重要性贴图
+        float* cdfTheta = nullptr;
+        float* cdfPhi = nullptr;
+        if (buildEnvironmentImportanceMap(
+                m_envTextureData.data(), params.textureWidth, params.textureHeight,
+                &cdfTheta, &cdfPhi, &m_envTotalLuminance)) {
+            m_envCdfTheta.assign(cdfTheta, cdfTheta + params.textureHeight + 1);
+            m_envCdfPhi.assign(cdfPhi, cdfPhi + params.textureHeight * (params.textureWidth + 1));
+            freeEnvironmentImportanceMap(cdfTheta, cdfPhi);
+        } else {
+            m_envCdfTheta.clear();
+            m_envCdfPhi.clear();
+            m_envTotalLuminance = 1.0f;
+        }
     } else {
         geomInst.asInfSphere.importanceMap = 0;
+        m_envTextureData.clear();
+        m_envCdfTheta.clear();
+        m_envCdfPhi.clear();
+        m_envTextureWidth = 0;
+        m_envTextureHeight = 0;
+        m_envTotalLuminance = 1.0f;
     }
     
     uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
@@ -817,7 +853,8 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // 注意：环境光不加入 m_lightInstIndices（不参与显式光源采样）
+    // 环境光加入 m_lightInstIndices 以参与 NEE 重要性采样
+    m_lightInstIndices.push_back(instIndex);
     m_envLightInstIndex = instIndex;
 }
 
@@ -932,6 +969,15 @@ void Scene::buildInstanceAccelerationStructure() {
     optixInstances.reserve(m_instances.size());
     for (size_t i = 0; i < m_instances.size(); ++i) {
         const InstanceRecord& rec = m_instanceRecords[i];
+        // 排除虚拟光源：点光源、方向光、环境光不参与 IAS（无几何体，仅用于 NEE 采样）
+        if (!rec.geomInstIndices.empty()) {
+            const GeometryInstance& geomInst = m_geometryInstances[rec.geomInstIndices[0]];
+            if (geomInst.geomType == GeometryType_Point ||
+                geomInst.geomType == GeometryType_Directional ||
+                geomInst.geomType == GeometryType_InfiniteSphere) {
+                continue;
+            }
+        }
         uint32_t gasIdx = (std::min)(rec.meshId, static_cast<uint32_t>(m_gasHandles.size() - 1));
         OptixInstance oi = {};
         oi.instanceId = static_cast<uint32_t>(i);
@@ -1047,8 +1093,9 @@ void Scene::updateToGPU() {
     m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTriangles.size());
     m_triangleBuffer->copyToDevice(allTriangles.data(), allTriangles.size(), m_stream);
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
-        // 每个 geometry instance 对应一个 instance，需用 meshId 查找该 mesh 的三角形偏移
-        // 原始 VLR：每个几何实例绑定到具体 mesh，triangleBuffer 必须指向正确 mesh 的三角形数据
+        // 仅对三角形网格设置 triangleBuffer；Point/Directional/InfiniteSphere 使用 union 其他成员
+        if (m_geometryInstances[g].geomType != GeometryType_TriangleMesh)
+            continue;
         uint32_t meshId = (g < m_instanceRecords.size()) ? m_instanceRecords[g].meshId : 0;
         uint32_t offset = geomInstTriangleOffsets[(std::min)(meshId, static_cast<uint32_t>(geomInstTriangleOffsets.size() - 1))];
         m_geometryInstances[g].asTriMesh.triangleBuffer = m_triangleBuffer->getDevicePointer() + offset;
@@ -1127,6 +1174,22 @@ void Scene::updateToGPU() {
     m_lightInstIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_lightInstIndices.size());
     if (!m_lightInstIndices.empty())
         m_lightInstIndicesBuffer->copyToDevice(m_lightInstIndices.data(), m_lightInstIndices.size(), m_stream);
+
+    // 环境光重要性贴图与纹理
+    if (!m_envCdfTheta.empty() && !m_envCdfPhi.empty()) {
+        if (!m_envCdfThetaBuffer) m_envCdfThetaBuffer = std::make_unique<cudau::Buffer<float>>();
+        m_envCdfThetaBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_envCdfTheta.size());
+        m_envCdfThetaBuffer->copyToDevice(m_envCdfTheta.data(), m_envCdfTheta.size(), m_stream);
+        if (!m_envCdfPhiBuffer) m_envCdfPhiBuffer = std::make_unique<cudau::Buffer<float>>();
+        m_envCdfPhiBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_envCdfPhi.size());
+        m_envCdfPhiBuffer->copyToDevice(m_envCdfPhi.data(), m_envCdfPhi.size(), m_stream);
+    }
+    if (!m_envTextureData.empty()) {
+        if (!m_envTextureBuffer) m_envTextureBuffer = std::make_unique<cudau::Buffer<float>>();
+        m_envTextureBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_envTextureData.size());
+        m_envTextureBuffer->copyToDevice(m_envTextureData.data(), m_envTextureData.size(), m_stream);
+    }
+
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
 }
 
@@ -1187,8 +1250,79 @@ uint32_t Scene::getNumInstances() const { return static_cast<uint32_t>(m_instanc
 uint32_t Scene::getNumMaterials() const { return static_cast<uint32_t>(m_materials.size()); }
 uint32_t Scene::getNumLightInsts() const { return static_cast<uint32_t>(m_lightInstIndices.size()); }
 uint32_t Scene::getEnvLightInstIndex() const { return m_envLightInstIndex.value_or(0xFFFFFFFF); }
+
+shared::EnvironmentImportanceMap Scene::getEnvImportanceMap() const {
+    shared::EnvironmentImportanceMap m;
+    m.cdfTheta = nullptr;
+    m.cdfPhi = nullptr;
+    m.thetaRes = 0;
+    m.phiRes = 0;
+    m.totalLuminance = 1.0f;
+    if (m_envCdfThetaBuffer && m_envCdfPhiBuffer && !m_envCdfTheta.empty() && !m_envCdfPhi.empty()) {
+        m.cdfTheta = m_envCdfThetaBuffer->getDevicePointer();
+        m.cdfPhi = m_envCdfPhiBuffer->getDevicePointer();
+        m.thetaRes = m_envTextureHeight;
+        m.phiRes = m_envTextureWidth;
+        m.totalLuminance = m_envTotalLuminance;
+    }
+    return m;
+}
+
 OptixTraversableHandle Scene::getTopGroup() const { return m_topGroup; }
 const shared::CameraDescriptor& Scene::getCamera() const { return m_camera; }
 const shared::SceneBounds& Scene::getSceneBounds() const { return m_sceneBounds; }
+
+void Scene::computeLightImportanceWeights(std::vector<float>& weights, std::vector<float>& cdf) const {
+    weights.clear();
+    cdf.clear();
+    const uint32_t numLights = static_cast<uint32_t>(m_lightInstIndices.size());
+    if (numLights == 0) return;
+
+    weights.resize(numLights, 1e-6f);
+    for (uint32_t i = 0; i < numLights; ++i) {
+        const uint32_t instIndex = m_lightInstIndices[i];
+        if (instIndex >= m_instances.size() || instIndex >= m_instanceRecords.size())
+            continue;
+        const Instance& inst = m_instances[instIndex];
+        const InstanceRecord& rec = m_instanceRecords[instIndex];
+        if (rec.geomInstIndices.empty()) continue;
+
+        const uint32_t geomInstIndex = rec.geomInstIndices[0];
+        if (geomInstIndex >= m_geometryInstances.size()) continue;
+        const GeometryInstance& geomInst = m_geometryInstances[geomInstIndex];
+        const uint32_t matIndex = geomInst.materialIndex;
+        if (matIndex >= m_materials.size()) continue;
+
+        const SurfaceMaterialDescriptor& mat = m_materials[matIndex];
+        const float* d = reinterpret_cast<const float*>(mat.data);
+        const float er = d[MaterialDataLayout::EmissionR];
+        const float eg = d[MaterialDataLayout::EmissionG];
+        const float eb = d[MaterialDataLayout::EmissionB];
+        const float luminance = (er + eg + eb) / 3.0f;
+        if (luminance < 1e-10f) continue;
+
+        float power = luminance;
+        if (geomInst.geomType == GeometryType_TriangleMesh && rec.meshId < m_meshes.size()) {
+            float totalArea = 0.0f;
+            const TriangleMeshData& mesh = m_meshes[rec.meshId];
+            for (const Triangle& tri : mesh.triangles)
+                totalArea += tri.area;
+            power = luminance * std::max(totalArea, 1e-10f);
+        }
+        weights[i] = std::max(power, 1e-6f);
+    }
+
+    float sum = 0.0f;
+    for (float w : weights) sum += w;
+    if (sum < 1e-10f) {
+        for (float& w : weights) w = 1.0f / numLights;
+        sum = 1.0f;
+    }
+    cdf.resize(numLights + 1);
+    cdf[0] = 0.0f;
+    for (uint32_t i = 0; i < numLights; ++i)
+        cdf[i + 1] = cdf[i] + weights[i] / sum;
+    cdf[numLights] = 1.0f;
+}
 
 }  // namespace vlr

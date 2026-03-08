@@ -13,6 +13,9 @@
     <ClCompile Include="F:\project\VLR_WF\libVLR\image_loader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="F:\project\VLR_WF\libVLR\env_importance.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="F:\project\VLR_WF\libVLR\tinyexr_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

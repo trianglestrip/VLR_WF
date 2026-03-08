@@ -905,15 +905,42 @@ void Context::setupWavefrontLaunchParams() {
     lp.numShadowRays = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(1) : nullptr;
     lp.numTerminatedPaths = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(2) : nullptr;
     
-    // 设置光源分布
+    // 设置光源分布（支持基于功率的重要性采样）
     if (m_sceneSource) {
-        lp.lightInstDist.weights = nullptr;  // 简化实现：均匀分布
-        lp.lightInstDist.numValues = m_sceneSource->getNumLightInsts();
+        const uint32_t numLights = m_sceneSource->getNumLightInsts();
+        lp.lightInstDist.numValues = numLights;
         lp.envLightInstIndex = m_sceneSource->getEnvLightInstIndex();
+        lp.envImportanceMap = m_sceneSource->getEnvImportanceMap();
+        lp.lightInstDist.weights = nullptr;
+        lp.lightInstDist.cdf = nullptr;
+        if (numLights > 0) {
+            std::vector<float> weights, cdf;
+            m_sceneSource->computeLightImportanceWeights(weights, cdf);
+            if (!weights.empty() && !cdf.empty()) {
+                if (!wf.lightImportanceWeightsBuffer || wf.lightImportanceWeightsBuffer->size() < weights.size()) {
+                    if (!wf.lightImportanceWeightsBuffer)
+                        wf.lightImportanceWeightsBuffer = std::make_unique<cudau::Buffer<float>>();
+                    wf.lightImportanceWeightsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, weights.size());
+                    if (!wf.lightImportanceCDFBuffer)
+                        wf.lightImportanceCDFBuffer = std::make_unique<cudau::Buffer<float>>();
+                    wf.lightImportanceCDFBuffer->initialize(m_cudaContext, cudau::BufferType::Device, cdf.size());
+                }
+                wf.lightImportanceWeightsBuffer->copyToDevice(weights.data(), weights.size(), m_stream);
+                wf.lightImportanceCDFBuffer->copyToDevice(cdf.data(), cdf.size(), m_stream);
+                lp.lightInstDist.weights = wf.lightImportanceWeightsBuffer->getDevicePointer();
+                lp.lightInstDist.cdf = wf.lightImportanceCDFBuffer->getDevicePointer();
+            }
+        }
     } else {
         lp.lightInstDist.weights = nullptr;
+        lp.lightInstDist.cdf = nullptr;
         lp.lightInstDist.numValues = 0;
         lp.envLightInstIndex = 0xFFFFFFFF;
+        lp.envImportanceMap.cdfTheta = nullptr;
+        lp.envImportanceMap.cdfPhi = nullptr;
+        lp.envImportanceMap.thetaRes = 0;
+        lp.envImportanceMap.phiRes = 0;
+        lp.envImportanceMap.totalLuminance = 1.0f;
     }
 
     // 设置调试参数
@@ -1069,6 +1096,8 @@ void Context::cleanupWavefrontResources() {
     wf.rngBuffer.reset();
     wf.perfStatsBuffer.reset();
     wf.sceneBoundsBuffer.reset();
+    wf.lightImportanceWeightsBuffer.reset();
+    wf.lightImportanceCDFBuffer.reset();
     
     // 销毁 CUDA 事件
     if (wf.eventsCreated) {

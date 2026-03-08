@@ -16,6 +16,7 @@
 
 #include "light_types.h"
 #include "path_types.h"
+#include "env_importance.h"
 #include "kernel_common.h"
 #include "bsdf_common.h"
 
@@ -163,9 +164,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     switch (descriptor.type) {
     case LightType_Environment: {
         // 环境光：在无穷远球面上采样 (theta, phi)
-        // 使用 importance map 或均匀采样
-        float theta = u0 * VLR_M_PI;
-        float phi = u1 * VLR_M_2PI;
+        // 使用 importance map 重要性采样或均匀采样
+        float theta, phi, solidAnglePDF;
+        if (wlp.envImportanceMap.isValid()) {
+            wlp.envImportanceMap.sample(u0, u1, &theta, &phi, &solidAnglePDF);
+        } else {
+            theta = u0 * VLR_M_PI;
+            phi = u1 * VLR_M_2PI;
+            float sinTheta = sin(theta);
+            float sinThetaSafe = (sinTheta > 1e-6f) ? sinTheta : 1e-6f;
+            solidAnglePDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
+        }
         
         // 球面方向转笛卡尔坐标
         float sinTheta = sin(theta);
@@ -183,9 +192,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
         phi = phi - floor(phi / VLR_M_2PI) * VLR_M_2PI;
         surfPt.texCoord = TexCoord2D(phi / VLR_M_2PI, theta / VLR_M_PI);
         
-        // 无穷远球面的面积 PDF：1 / (2 * pi^2 * sin(theta))
-        float sinThetaSafe = (sinTheta > 1e-6f) ? sinTheta : 1e-6f;
-        result->areaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
+        // areaPDF：环境光在球面参数空间，转换为立体角 PDF 供 MIS 使用
+        // 无穷远球面：面积元 dA = sin(theta) dtheta dphi，面积 PDF = 1/(2*pi^2*sin(theta))
+        // 立体角 PDF = solidAnglePDF（由 importance map 或均匀分布给出）
+        result->areaPDF = solidAnglePDF;
         
         transformSurfacePoint(inst.transform, surfPt, &result->lightSurfPt);
         result->lightSurfPt.atInfinity = true;
@@ -222,24 +232,23 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     
     case LightType_Directional: {
         // 方向光：平行光，从无穷远处沿固定方向照射
-        // 方向存储在实例变换中，或从材质数据中读取
+        // 方向存储在实例变换 transform.z 中（光线照射方向，从光源指向场景）
         Vector3D lightDir = normalize(Vector3D(0, -1, 0));  // 默认向下
         
-        // 从实例变换中提取方向（假设存储在 transform.z 中）
         if (inst.transform.z.x != 0.0f || inst.transform.z.y != 0.0f || inst.transform.z.z != 0.0f) {
-            lightDir = normalize(inst.transform.z);
+            lightDir = normalize(Vector3D(inst.transform.z.x, inst.transform.z.y, inst.transform.z.z));
         }
         
-        // 光源位置在无穷远处，沿光线方向的反方向
+        // 光源位置：沿光线反方向在场景外的无穷远点（Delta 光源，位置唯一）
         SurfacePoint surfPt;
-        surfPt.position = refPosition - lightDir * 1e10f;  // 无穷远点
+        surfPt.position = refPosition - lightDir * 1e10f;
         surfPt.atInfinity = true;
         surfPt.geometricNormal = Normal3D(lightDir.x, lightDir.y, lightDir.z);
         surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
         surfPt.texCoord = TexCoord2D(0, 0);
         
         result->lightSurfPt = surfPt;
-        result->areaPDF = 1.0f;  // Delta 光源
+        result->areaPDF = 1.0f;  // Delta 光源，PDF 为 1
         result->isValid = true;
         break;
     }
@@ -360,7 +369,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool evaluateLightEmission(
         return true;
     }
     
-    // 方向光：delta 分布，辐射度与方向无关
+    // 方向光：delta 分布，辐射度常量（不随距离变化），无衰减
     if (descriptor.type == LightType_Directional) {
         result->Le = spEmittance;
         result->isValid = true;
@@ -424,9 +433,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeLightPDF(
         float sinTheta = sin(theta);
         float sinThetaSafe = (sinTheta > 1e-6f) ? sinTheta : 1e-6f;
         
-        // 简化：均匀球面 PDF
-        float envAreaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
-        float solidAnglePDF = envAreaPDF * sinThetaSafe;
+        float solidAnglePDF;
+        if (wlp.envImportanceMap.isValid()) {
+            const Instance& envInst = wlp.instBuffer[descriptor.instIndex];
+            float phiOrig = phi - envInst.rotationPhi;
+            phiOrig = phiOrig - floor(phiOrig / VLR_M_2PI) * VLR_M_2PI;
+            float u = phiOrig / VLR_M_2PI;
+            float v = theta / VLR_M_PI;
+            solidAnglePDF = wlp.envImportanceMap.evaluatePDF(u, v);
+        } else {
+            solidAnglePDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
+        }
         return lightSelectProb * solidAnglePDF;
     }
     

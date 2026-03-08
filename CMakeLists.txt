@@ -153,5 +153,13 @@ target_include_directories(texture_test PRIVATE
 )
 target_link_libraries(texture_test PRIVATE VLR CUDA::cudart)
 
+# Light System 测试（区域光、点光源、方向光、环境光、混合光源）
+add_executable(light_system_test test/light_system_test.cpp)
+target_include_directories(light_system_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(light_system_test PRIVATE VLR CUDA::cudart)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

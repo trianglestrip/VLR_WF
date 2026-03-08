@@ -195,6 +195,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{AC4CAA34-4E1D-32C6-920C-137321BDAD63}</Project>
       <Name>lambertian_scattering_test</Name>
     </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\light_system_test.vcxproj">
+      <Project>{1DE133DD-C69A-3EE9-BDD6-DBFA9E56D0AB}</Project>
+      <Name>light_system_test</Name>
+    </ProjectReference>
     <ProjectReference Include="F:\project\VLR_WF\build\material_test.vcxproj">
       <Project>{5ABBB5F0-4ED3-335F-B2D1-6476B17BBE93}</Project>
       <Name>material_test</Name>

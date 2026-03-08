@@ -199,6 +199,10 @@ private:
             std::unique_ptr<cudau::Buffer<shared::Normal3D>> accumNormalBuffer;
             std::unique_ptr<cudau::Buffer<shared::KernelRNG>> rngBuffer;
             
+            // 光源重要性采样（CDF 用于多光源重要性采样）
+            std::unique_ptr<cudau::Buffer<float>> lightImportanceWeightsBuffer;
+            std::unique_ptr<cudau::Buffer<float>> lightImportanceCDFBuffer;
+            
             // 场景设备缓冲区（从 Scene 上传）
             std::unique_ptr<cudau::Buffer<shared::GeometryInstance>> sceneGeomInstBuffer;
             std::unique_ptr<cudau::Buffer<shared::Instance>> sceneInstBuffer;
