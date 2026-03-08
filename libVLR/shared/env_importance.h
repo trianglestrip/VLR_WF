@@ -22,6 +22,8 @@ namespace shared {
 // 1. 环境光重要性贴图数据结构
 // ============================================================================
 
+#ifndef VLR_ENVIRONMENT_IMPORTANCE_MAP_DEFINED
+#define VLR_ENVIRONMENT_IMPORTANCE_MAP_DEFINED
 /// 环境光重要性贴图：基于亮度的 2D CDF 分布
 /// 用于环境贴图的重要性采样，支持旋转
 struct EnvironmentImportanceMap {
@@ -142,6 +144,7 @@ struct EnvironmentImportanceMap {
         return cellProb / cellSolidAngle;
     }
 };
+#endif
 
 // ============================================================================
 // CPU 端：重要性贴图构建（在 env_importance.cpp 中实现）

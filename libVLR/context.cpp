@@ -194,7 +194,7 @@ void Context::initializeWavefrontPipeline() {
         .numPayloadValues = 7,  // WFTracePayload: 28 字节 = 7 个双字
         .numAttributeValues = 2,  // 标准三角形属性
         .exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE,
-        .pipelineLaunchParamsVariableName = "wlp"
+        .pipelineLaunchParamsVariableName = nullptr  // 不使用 launch params（通过 SBT 传递）
     };
     
     // 创建模块编译选项
@@ -809,6 +809,15 @@ void Context::setupWavefrontLaunchParams() {
         lp.activePathQueue.pathIndices = wf.activePathIndices->getDevicePointer();
         lp.activePathQueue.counter = wf.queueCounters->getDevicePointerAt(0);
         lp.activePathQueue.capacity = wf.maxNumPaths;
+        
+        static bool firstSetup = true;
+        if (firstSetup) {
+            printf("[VLR] setupWavefrontLaunchParams: counter ptr=%p (from wf.queueCounters->getDevicePointerAt(0))\n", 
+                   lp.activePathQueue.counter);
+            printf("[VLR] setupWavefrontLaunchParams: wf.queueCounters base ptr=%p\n",
+                   wf.queueCounters->getDevicePointer());
+            firstSetup = false;
+        }
     }
     
     if (wf.nextActivePathIndices && wf.queueCounters) {
@@ -910,6 +919,8 @@ void Context::setupWavefrontLaunchParams() {
         const uint32_t numLights = m_sceneSource->getNumLightInsts();
         lp.lightInstDist.numValues = numLights;
         lp.envLightInstIndex = m_sceneSource->getEnvLightInstIndex();
+        printf("[VLR] renderWavefront: numLights=%u, envLightInstIndex=%u\n",
+            numLights, lp.envLightInstIndex);
         lp.envImportanceMap = m_sceneSource->getEnvImportanceMap();
         lp.lightInstDist.weights = nullptr;
         lp.lightInstDist.cdf = nullptr;
@@ -965,11 +976,33 @@ void Context::setupWavefrontLaunchParams() {
     // 同步以确保参数上传完成
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
     
+    // 验证：回读设备端的 counter 指针
+    static bool firstVerify = true;
+    if (firstVerify) {
+        shared::WavefrontLaunchParameters lpVerify;
+        CUDA_CHECK(cudaMemcpy(
+            &lpVerify,
+            wf.launchParamsBuffer,
+            sizeof(shared::WavefrontLaunchParameters),
+            cudaMemcpyDeviceToHost
+        ));
+        printf("[VLR] setupWavefrontLaunchParams VERIFY: Device-side counter ptr=%p (expected %p)\n",
+               lpVerify.activePathQueue.counter, lp.activePathQueue.counter);
+        firstVerify = false;
+    }
+    
     // ========================================================================
     // 更新 SBT 记录中的 launch parameters 指针
     // ========================================================================
     shared::WavefrontSBTData sbtData;
     sbtData.params = static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+    
+    static bool firstSBTUpdate = true;
+    if (firstSBTUpdate) {
+        printf("[VLR] setupWavefrontLaunchParams: sbtData.params=%p (wf.launchParamsBuffer)\n", sbtData.params);
+        printf("[VLR] setupWavefrontLaunchParams: Uploading sbtData to raygenRecord=%p\n", wf.raygenRecord);
+        firstSBTUpdate = false;
+    }
     
     // 更新 RayGen 记录
     CUDA_CHECK(cudaMemcpy(
@@ -1236,10 +1269,12 @@ void Context::renderWavefront(
         printf("[VLR] Starting render loop...\n");
         fflush(stdout);
         for (uint32_t sample = 0; sample < numSamples; ++sample) {
-            printf("[VLR] Sample %u/%u\n", sample + 1, numSamples);
+            printf("[VLR] ========== Sample %u/%u START ==========\n", sample + 1, numSamples);
             fflush(stdout);
             ++wf.numAccumFrames;
             executeWavefrontRender(1);
+            printf("[VLR] ========== Sample %u/%u END ==========\n", sample + 1, numSamples);
+            fflush(stdout);
         }
     }
     
@@ -1344,6 +1379,9 @@ void Context::executeWavefrontRenderDebug(uint32_t debugMode) {
 void Context::executeWavefrontRender(uint32_t numSamples) {
     auto& wf = m_optix.wavefrontPathTracing;
 
+    printf("[VLR] ========== executeWavefrontRender START (numSamples=%u) ==========\n", numSamples);
+    fflush(stdout);
+
 #ifdef VLR_DEBUG_NAN_TRACKING
     resetNanDebugCount();
 #endif
@@ -1372,13 +1410,18 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
     
     // 与原始 VLR 一致：在主机端可靠设置活跃队列计数，避免 GPU 内核竞态
     if (wf.queueCounters) {
+        void* counterPtr = wf.queueCounters->getDevicePointerAt(0);
+        printf("[VLR] executeWavefrontRender: Setting counter at %p to %u\n", counterPtr, numPixels);
         CUDA_CHECK(cudaMemcpyAsync(
-            wf.queueCounters->getDevicePointerAt(0),
+            counterPtr,
             &numPixels,
             sizeof(uint32_t),
             cudaMemcpyHostToDevice,
             m_stream
         ));
+        // 同步确保计数器已更新
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+        printf("[VLR] executeWavefrontRender: Counter set complete\n");
     }
     
         // 主 Wavefront 循环
@@ -1589,12 +1632,52 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 将当前深度等参数更新到设备
-    setupWavefrontLaunchParams();
+    // 完全重新上传 launchParams 以确保所有指针都是最新的
+    static bool firstCall = true;
+    if (firstCall) {
+        printf("[VLR] launchTraceRays: Re-uploading entire launchParams to ensure consistency\n");
+        printf("[VLR] launchTraceRays HOST: counter ptr=%p, imageSize=(%u,%u), maxPathLength=%u\n",
+               wf.launchParams.activePathQueue.counter,
+               wf.launchParams.imageSize.x, wf.launchParams.imageSize.y,
+               wf.launchParams.maxPathLength);
+        printf("[VLR] launchTraceRays HOST: pathStateBuffer=%p, topGroup=%llu\n",
+               wf.launchParams.pathStateBuffer, (unsigned long long)wf.launchParams.topGroup);
+        printf("[VLR] launchTraceRays HOST: sizeof(WavefrontLaunchParameters)=%zu\n",
+               sizeof(shared::WavefrontLaunchParameters));
+        printf("[VLR] launchTraceRays HOST: offsetof(pathStateBuffer)=%zu, offsetof(activePathQueue)=%zu\n",
+               offsetof(shared::WavefrontLaunchParameters, pathStateBuffer),
+               offsetof(shared::WavefrontLaunchParameters, activePathQueue));
+        firstCall = false;
+    }
+    
+    CUDA_CHECK(cudaMemcpy(
+        wf.launchParamsBuffer,
+        &wf.launchParams,
+        sizeof(shared::WavefrontLaunchParameters),
+        cudaMemcpyHostToDevice
+    ));
+    
+    // 同步确保上传完成
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+    
+    // 验证上传结果
+    static bool firstVerify = true;
+    if (firstVerify) {
+        shared::WavefrontLaunchParameters lpVerify;
+        CUDA_CHECK(cudaMemcpy(
+            &lpVerify,
+            wf.launchParamsBuffer,
+            sizeof(shared::WavefrontLaunchParameters),
+            cudaMemcpyDeviceToHost
+        ));
+        printf("[VLR] launchTraceRays VERIFY after re-upload: Device counter ptr=%p\n",
+               lpVerify.activePathQueue.counter);
+        firstVerify = false;
+    }
 
     try {
         // 注意：我们通过 SBT 数据传递 launch parameters，所以 launchParams 参数设为 0
-        OPTIX_CHECK(optixLaunch(
+        OptixResult launchResult = optixLaunch(
             wf.pipeline,
             m_stream,
             0,  // 不使用 launchParams（通过 SBT 传递）
@@ -1603,7 +1686,13 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
             numActivePaths,  // 每个线程处理一条活跃路径
             1,
             1
-        ));
+        );
+        if (launchResult != OPTIX_SUCCESS) {
+            fprintf(stderr, "[VLR] Error: optixLaunch failed - %s (%d)\n",
+                    optixGetErrorName(launchResult), launchResult);
+            throw std::runtime_error(std::string("optixLaunch failed: ") + optixGetErrorName(launchResult));
+        }
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
     } catch (const std::exception& e) {
         throw std::runtime_error(std::string("launchTraceRays: optixLaunch failed - ") + e.what());
     }

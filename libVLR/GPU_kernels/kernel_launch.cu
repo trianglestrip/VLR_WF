@@ -26,8 +26,6 @@ extern "C" __device__ __managed__ unsigned int g_vlrDebugPrintCount = 0;
 extern "C" void resetDebugCount() {
     g_vlrDebugPrintCount = 0;
 }
-
-#include "../shared/path_types.h"
 #include "../utils/cuda_util.h"
 
 #include <cuda_runtime.h>

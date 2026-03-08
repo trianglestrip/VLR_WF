@@ -81,7 +81,10 @@ namespace optixu = ::vlr::optixu;
 // ============================================================================
 // 配置常量
 // ============================================================================
+#ifndef VLR_NUM_MATERIAL_CATEGORIES_DEFINED
+#define VLR_NUM_MATERIAL_CATEGORIES_DEFINED
 constexpr uint32_t NumMaterialCategories = 6;
+#endif
 constexpr uint32_t MaxPathLength = 64;
 
 

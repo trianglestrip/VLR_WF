@@ -10,7 +10,7 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#include "../shared/path_types.h"
+#include "../shared/path_types_minimal.h"
 #include "../shared/material_types.h"
 #include "../include/vlr/basic_types.h"
 #include "kernel_launch.h"

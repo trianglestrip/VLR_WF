@@ -9,6 +9,8 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
+#define VLR_DEBUG_GENERATE_RAYS 1
+
 #include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
 
@@ -187,6 +189,16 @@ extern "C" __global__ void generateRays(
     if (wlp.hitInfoBuffer != nullptr) {
         wlp.hitInfoBuffer[pathIndex].reset();
     }
+    
+#ifdef VLR_DEBUG_GENERATE_RAYS
+    if (pixelX == 256 && pixelY == 256) {
+        printf("[GPU GenerateRays] pixel(%u,%u): origin=(%.3f,%.3f,%.3f), dir=(%.3f,%.3f,%.3f), dirPDF=%.6f\n",
+               pixelX, pixelY,
+               rayOrigin.x, rayOrigin.y, rayOrigin.z,
+               rayDirection.x, rayDirection.y, rayDirection.z,
+               dirPDF);
+    }
+#endif
     
     // ========================================================================
     // 6. 将路径加入活跃队列

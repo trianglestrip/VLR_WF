@@ -11,7 +11,7 @@
 
 #pragma once
 
-#include "shared/path_types.h"
+#include "shared/path_types_minimal.h"
 #include <cuda_runtime.h>
 #include <optix.h>
 

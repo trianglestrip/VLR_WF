@@ -9,6 +9,8 @@
 // 环境：CUDA 13.1, OptiX 7/8, VS2022
 // ============================================================================
 
+#define VLR_DEBUG_TRACE_RAYS 1
+
 #include "../shared/path_types_minimal.h"
 
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
@@ -94,15 +96,73 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setShadowPayloadOccluded() {
 extern "C" __global__ void RT_RG_NAME(traceRays)() {
     using namespace vlr::shared;
 
+#ifdef VLR_DEBUG_TRACE_RAYS
+    uint32_t workIndex_debug = optixGetLaunchIndex().x;
+    if (workIndex_debug == 0) {
+        printf("[GPU TraceRays RayGen] ENTRY: workIndex=%u\n", workIndex_debug);
+    }
+#endif
+
     // 从 SBT 数据获取 launch parameters 指针
     const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
         optixGetSbtDataPointer()
     );
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (workIndex_debug == 0) {
+        printf("[GPU TraceRays RayGen] sbtData=%p\n", sbtData);
+        if (sbtData) {
+            printf("[GPU TraceRays RayGen] sbtData->params=%p\n", sbtData->params);
+        }
+    }
+#endif
+    
+    if (!sbtData || !sbtData->params) {
+#ifdef VLR_DEBUG_TRACE_RAYS
+        if (workIndex_debug == 0) {
+            printf("[GPU TraceRays RayGen] ERROR: sbtData or params is null!\n");
+        }
+#endif
+        return;
+    }
+    
     const WavefrontLaunchParameters& wlp = *sbtData->params;
+
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (workIndex_debug == 0) {
+        printf("[GPU TraceRays RayGen] wlp loaded successfully\n");
+    }
+#endif
 
     // 工作索引：每个线程处理活跃队列中的一个路径
     uint32_t workIndex = optixGetLaunchIndex().x;
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (workIndex == 0) {
+        printf("[GPU TraceRays RayGen] workIndex=%u, counter ptr=%p\n", workIndex, wlp.activePathQueue.counter);
+        printf("[GPU TraceRays RayGen] wlp.imageSize=(%u,%u), wlp.maxPathLength=%u\n",
+               wlp.imageSize.x, wlp.imageSize.y, wlp.maxPathLength);
+        printf("[GPU TraceRays RayGen] wlp.pathStateBuffer=%p, wlp.topGroup=%llu\n",
+               wlp.pathStateBuffer, (unsigned long long)wlp.topGroup);
+    }
+#endif
+    
+    if (!wlp.activePathQueue.counter) {
+#ifdef VLR_DEBUG_TRACE_RAYS
+        if (workIndex == 0) {
+            printf("[GPU TraceRays RayGen] ERROR: counter is null!\n");
+        }
+#endif
+        return;
+    }
+    
     uint32_t numActive = *wlp.activePathQueue.counter;
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (workIndex == 0) {
+        printf("[GPU TraceRays RayGen] numActive=%u\n", numActive);
+    }
+#endif
 
     if (workIndex >= numActive)
         return;
@@ -125,6 +185,17 @@ extern "C" __global__ void RT_RG_NAME(traceRays)() {
     // 注意：在 RayGen 中，payload 通过 optixTrace 的参数传递，不使用 optixSetPayload
     float3 rayOrigin = make_float3(pathState.origin.x, pathState.origin.y, pathState.origin.z);
     float3 rayDirection = make_float3(pathState.direction.x, pathState.direction.y, pathState.direction.z);
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (pathIndex == 0) {
+        printf("[GPU TraceRays RayGen] pathIndex=%u, workIndex=%u, numActive=%u\n", pathIndex, workIndex, numActive);
+        printf("[GPU TraceRays RayGen] origin=(%.3f,%.3f,%.3f), dir=(%.3f,%.3f,%.3f)\n",
+               rayOrigin.x, rayOrigin.y, rayOrigin.z,
+               rayDirection.x, rayDirection.y, rayDirection.z);
+        printf("[GPU TraceRays RayGen] topGroup=%llu\n", (unsigned long long)wlp.topGroup);
+    }
+#endif
+    
     optixTrace(
         wlp.topGroup,
         rayOrigin,
@@ -139,6 +210,12 @@ extern "C" __global__ void RT_RG_NAME(traceRays)() {
         0,       // miss SBT index（Ray Type 0：Closest Hit）
         pd[0], pd[1], pd[2], pd[3], pd[4], pd[5], pd[6]
     );
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (pathIndex == 0) {
+        printf("[GPU TraceRays RayGen] optixTrace returned\n");
+    }
+#endif
 }
 #endif
 
@@ -169,6 +246,13 @@ extern "C" __global__ void RT_CH_NAME(closestHit)() {
     unpackWFTracePayload(pd, &payload);
 
     uint32_t pathIndex = payload.pathIndex;
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (pathIndex == 0) {
+        printf("[GPU TraceRays ClosestHit] pathIndex=%u ENTERED\n", pathIndex);
+    }
+#endif
+    
     WavefrontHitInfo& hitInfo = wlp.hitInfoBuffer[pathIndex];
 
     // OptiX 设备 API 获取命中几何信息
@@ -222,6 +306,13 @@ extern "C" __global__ void RT_MS_NAME(miss)() {
     unpackWFTracePayload(pd, &payload);
 
     uint32_t pathIndex = payload.pathIndex;
+    
+#ifdef VLR_DEBUG_TRACE_RAYS
+    if (pathIndex == 0) {
+        printf("[GPU TraceRays Miss] pathIndex=%u ENTERED\n", pathIndex);
+    }
+#endif
+    
     WavefrontHitInfo& hitInfo = wlp.hitInfoBuffer[pathIndex];
 
     hitInfo.reset();

@@ -9,6 +9,8 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
+#define VLR_DEBUG_PROCESS_HITS 1
+
 #include "../shared/path_types.h"
 #include "../shared/geometry_common.h"
 #include "../shared/env_importance.h"
@@ -162,7 +164,21 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     float hypAreaPDF,
     WavefrontLaunchParameters& wlp) {
 
+#ifdef VLR_DEBUG_PROCESS_HITS
+    if (pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 0) {
+        printf("[GPU ProcessEmissive ENTRY] px=(256,256): geomInstIndex=%u, materialIndex=%u\n",
+            geomInst.instIndex, geomInst.materialIndex);
+    }
+#endif
+
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
+
+#ifdef VLR_DEBUG_PROCESS_HITS
+    if (pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 0) {
+        printf("[GPU ProcessEmissive] px=(256,256): materialIndex=%u, hasEmission=%d\n",
+            geomInst.materialIndex, materialHasEmission(matDesc) ? 1 : 0);
+    }
+#endif
 
     if (!materialHasEmission(matDesc))
         return;
@@ -182,6 +198,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     float MISWeight = computeImplicitLightMISWeight(pathState, hypAreaPDF, dirOutLocal.z);
 
     SampledSpectrum emissiveContrib = pathState.throughput * Le * MISWeight;
+    
+#ifdef VLR_DEBUG_PROCESS_HITS
+    if (pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 0) {
+        printf("[GPU ProcessEmissive] px=(256,256): Le=(%.3f,%.3f,%.3f,%.3f), throughput=(%.3f,%.3f,%.3f,%.3f), MIS=%.3f, contrib=(%.3f,%.3f,%.3f,%.3f)\n",
+            Le.values[0], Le.values[1], Le.values[2], Le.values[3],
+            pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2], pathState.throughput.values[3],
+            MISWeight,
+            emissiveContrib.values[0], emissiveContrib.values[1], emissiveContrib.values[2], emissiveContrib.values[3]);
+    }
+#endif
+    
     if (emissiveContrib.allFinite())
         pathState.contribution += emissiveContrib;
 #ifdef VLR_DEBUG_NAN_TRACKING
@@ -223,6 +250,13 @@ extern "C" __global__ void processHits(
     uint32_t pathIndex = wlp.activePathQueue.pathIndices[workIndex];
     WavefrontPathState& pathState = wlp.pathStateBuffer[pathIndex];
     WavefrontHitInfo& hitInfo = wlp.hitInfoBuffer[pathIndex];
+
+#ifdef VLR_DEBUG_PROCESS_HITS
+    if (pathIndex == 0) {
+        printf("[GPU ProcessHits] pathIndex=0: isActive=%d, hasHit=%d, hitInfinity=%d, geomInstIndex=%u\n",
+            pathState.isActive() ? 1 : 0, hitInfo.hasHit() ? 1 : 0, hitInfo.hitInfinity() ? 1 : 0, hitInfo.geomInstIndex);
+    }
+#endif
 
     if (!pathState.isActive())
         return;

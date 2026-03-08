@@ -11,6 +11,8 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
+#define VLR_DEBUG_ACCUMULATE 1
+
 #include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
 #include "../shared/kernel_common.h"
@@ -86,6 +88,16 @@ extern "C" __global__ void accumulateResults(
     // 将光谱贡献转换为 RGB 并累加（与原始 VLR 一致：始终 add，无 hasNonZero 条件）
     // Wavefront 架构下每像素对应一条路径，无并发写，使用直接加法即可
     DiscretizedSpectrum contrib = pathState.contribution.toDiscretizedSpectrum(pathState.wls);
+    
+#ifdef VLR_DEBUG_ACCUMULATE
+    if (pathIndex == 0) {
+        printf("[GPU Accumulate] pathIndex=0: contribution=(%.6f,%.6f,%.6f,%.6f), RGB=(%.6f,%.6f,%.6f)\n",
+            pathState.contribution.values[0], pathState.contribution.values[1],
+            pathState.contribution.values[2], pathState.contribution.values[3],
+            contrib.r, contrib.g, contrib.b);
+    }
+#endif
+    
     accum[pixelIdx].r += contrib.r;
     accum[pixelIdx].g += contrib.g;
     accum[pixelIdx].b += contrib.b;

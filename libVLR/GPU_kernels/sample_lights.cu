@@ -10,6 +10,8 @@
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
+#define VLR_DEBUG_LIGHT_SAMPLING 1
+
 #include "../shared/kernel_common.h"
 #include "kernel_launch.h"
 #include "../shared/path_types.h"
@@ -139,8 +141,21 @@ extern "C" __global__ void sampleLights(
     // ========================================================================
     float uLight = pathState.rng.getFloat0cTo1o();
     LightSelectResult selectResult;
-    if (!selectLight(uLight, &selectResult, wlp))
+    if (!selectLight(uLight, &selectResult, wlp)) {
+#ifdef VLR_DEBUG_LIGHT_SAMPLING
+        if (pathIndex == 0) {
+            printf("[GPU] selectLight failed: numLights=%u\n", wlp.lightInstDist.numValues);
+        }
+#endif
         return;
+    }
+    
+#ifdef VLR_DEBUG_LIGHT_SAMPLING
+    if (pathIndex == 0) {
+        printf("[GPU] selectLight success: lightType=%u, instIndex=%u, geomInstIndex=%u\n",
+            selectResult.descriptor.type, selectResult.descriptor.instIndex, selectResult.descriptor.geomInstIndex);
+    }
+#endif
 
     // ========================================================================
     // 2. 采样光源位置

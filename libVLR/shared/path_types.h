@@ -48,6 +48,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float powerHeuristicMIS(float pdf1, float pdf2)
 /// 路径状态：存储单条光线路径的完整信息
 /// 这是波前架构的核心数据结构
 /// 大小：144 字节（针对内存对齐和缓存效率优化）
+#ifndef VLR_WAVEFRONT_PATH_STATE_MINIMAL_DEFINED
+#define VLR_WAVEFRONT_PATH_STATE_MINIMAL_DEFINED
 struct alignas(16) WavefrontPathState {
     // === 光线信息（32 字节）===
     Point3D origin;                    // 光线起点（12 字节）
@@ -125,9 +127,12 @@ struct alignas(16) WavefrontPathState {
 #if !defined(__CUDACC__)
 static_assert(sizeof(WavefrontPathState) == 144, "PathState size must be 144 bytes");
 #endif
+#endif
 
 /// 击中信息：存储光线相交结果
 /// 大小：32 字节（针对内存带宽优化）
+#ifndef VLR_WAVEFRONT_HIT_INFO_MINIMAL_DEFINED
+#define VLR_WAVEFRONT_HIT_INFO_MINIMAL_DEFINED
 struct alignas(16) WavefrontHitInfo {
     uint32_t instIndex;
     uint32_t geomInstIndex;
@@ -173,12 +178,15 @@ struct alignas(16) WavefrontHitInfo {
 #if !defined(__CUDACC__)
 static_assert(sizeof(WavefrontHitInfo) == 32, "HitInfo size must be 32 bytes");
 #endif
+#endif
 
 // ============================================================================
 // 2. 工作队列管理
 // ============================================================================
 
 /// 工作队列：管理活跃路径的索引
+#ifndef VLR_WAVEFRONT_WORK_QUEUE_MINIMAL_DEFINED
+#define VLR_WAVEFRONT_WORK_QUEUE_MINIMAL_DEFINED
 struct WavefrontWorkQueue {
     uint32_t* pathIndices;
     uint32_t* counter;
@@ -213,9 +221,12 @@ struct WavefrontWorkQueue {
         *counter = 0;
     }
 };
+#endif
 
 
 /// 材质队列集：按材质类型分类的工作队列
+#ifndef VLR_WAVEFRONT_MATERIAL_QUEUES_MINIMAL_DEFINED
+#define VLR_WAVEFRONT_MATERIAL_QUEUES_MINIMAL_DEFINED
 struct WavefrontMaterialQueues {
     WavefrontWorkQueue queues[::vlr::shared::NumMaterialCategories];
 
@@ -230,6 +241,7 @@ struct WavefrontMaterialQueues {
         }
     }
 };
+#endif
 
 
 // ============================================================================
@@ -238,6 +250,8 @@ struct WavefrontMaterialQueues {
 
 /// 波前渲染启动参数
 /// 此结构体上传到 GPU 常量内存
+#ifndef VLR_WAVEFRONT_LAUNCH_PARAMETERS_MINIMAL_DEFINED
+#define VLR_WAVEFRONT_LAUNCH_PARAMETERS_MINIMAL_DEFINED
 struct WavefrontLaunchParameters {
     // === 从 PipelineLaunchParameters 继承的公共数据 ===
     // 注意：实际实现中可能需要继承或包含 PipelineLaunchParameters
@@ -340,6 +354,7 @@ struct WavefrontLaunchParameters {
     }
 #endif
 };
+#endif
 
 
 // ============================================================================
@@ -348,11 +363,14 @@ struct WavefrontLaunchParameters {
 
 /// 波前光线追踪载荷
 /// 设计原则：最小化载荷大小，仅传递必要信息
+#ifndef VLR_WF_TRACE_PAYLOAD_MINIMAL_DEFINED
+#define VLR_WF_TRACE_PAYLOAD_MINIMAL_DEFINED
 struct WFTracePayload {
     uint32_t pathIndex;                // 路径索引（4 字节）
     WavelengthSamples wls;             // 波长采样（24 字节）
     // 总计：28 字节（7 个双字）
 };
+#endif
 
 using WFTracePayloadSignature = ::vlr::optixu::PayloadSignature<WFTracePayload>;
 
@@ -640,9 +658,12 @@ struct MaterialCategoryComparator {
 
 /// SBT 记录数据：存储 launch parameters 指针
 /// OptiX shaders 通过 optixGetSbtDataPointer() 访问此数据
+#ifndef VLR_WAVEFRONT_SBT_DATA_MINIMAL_DEFINED
+#define VLR_WAVEFRONT_SBT_DATA_MINIMAL_DEFINED
 struct WavefrontSBTData {
     const WavefrontLaunchParameters* params;
 };
+#endif
 
 // ============================================================================
 // 13. 版本信息
