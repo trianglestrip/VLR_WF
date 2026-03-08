@@ -79,6 +79,45 @@ cl <编译参数>
 - 文档目录：`docs/`
 - 使用反斜杠`\`作为Windows路径分隔符（或正斜杠`/`在git中）
 
+## API 参考（调试与可视化）
+
+### 调试渲染模式 API (v1.2.0+)
+
+| 函数 | 说明 |
+|------|------|
+| `vlrSetDebugMode(context, mode)` | 设置调试模式 (0-16) |
+| `vlrGetDebugMode(context, &mode)` | 获取当前调试模式 |
+| `vlrSetProbePixel(context, x, y)` | 设置探针像素（待完整实现） |
+
+- **头文件**: `libVLR/include/vlr/vlr.h`
+- **枚举**: `VLRDebugMode` 定义于 `libVLR/include/vlr/public_types.h`
+- **详细说明**: 参见 `.cursor/rules/debug-mode.md`
+
+## 构建与测试流程
+
+### 完整构建
+```powershell
+# 配置
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DVLR_CUDA_ARCH=75
+
+# 构建
+cmake --build build --config Release
+
+# 验证输出
+Test-Path bin\simple_render_test.exe
+Test-Path bin\VLR.dll
+```
+
+### 测试程序
+- **基础渲染**: `cornell_box_improved_test.exe`
+- **材质测试**: `material_test.exe`, `anisotropic_test.exe`, `disney_brdf_test.exe` 等
+- **调试模式**: 修改测试程序调用 `vlrSetDebugMode()` 后渲染，保存为 PNG
+
+### 调试模式测试
+1. 在 `cornell_box_improved_test.cpp` 中，`vlrRender()` 前添加 `vlrSetDebugMode(context, mode)`
+2. 使用 `numSamples=1`（调试模式自动单次采样）
+3. 循环 mode 0-16 可批量导出所有调试视图
+
 ## 第三方库管理
 
 ### 已集成的库
@@ -123,6 +162,21 @@ cl <编译参数>
 - 示例图片和数据文件
 - 文档文件（`*.md`，但保留`LICENSE`）
 
+## 调试模式
+
+- **17 种调试可视化**: BaseColor, GeometricNormal, ShadingNormal, Depth, UV, Tangent, Bitangent, Roughness, Metallic, MaterialID, InstanceID, PrimitiveID, DirectLighting, IndirectLighting, DenoiserAlbedo, DenoiserNormal
+- **实现文件**: `libVLR/GPU_kernels/debug_rendering.cu`
+- **性能**: 512×512 单次采样 < 100ms
+- **详细文档**: `docs/DEBUG_MODE_IMPLEMENTATION.md`, `.cursor/rules/debug-mode.md`
+
+## 开发最佳实践
+
+1. **新增调试模式**: 在 `public_types.h` 添加枚举 → `debug_rendering.cu` 实现 → `kernel_launch.cu` 集成
+2. **新增 API**: 在 `vlr.h` 声明 → `vlr.cpp` 实现 → `context.h/cpp` 添加状态
+3. **修改头文件后**: 执行 `cmake --build build --target VLR --config Release` 或完整重建
+4. **调试 GPU Kernel**: 使用 `cuda-memcheck` 或 Nsight Compute 分析
+5. **参考变更**: 查看 `CHANGELOG.md` 和 `docs/TODO.md` 了解最新功能状态
+
 ## 开发注意事项
 1. 确保CUDA和OptiX环境变量已正确设置
 2. 使用Visual Studio 2022的开发者命令提示符进行编译
@@ -130,3 +184,4 @@ cl <编译参数>
 4. 所有GPU代码应使用`.cu`扩展名
 5. OptiX程序应使用`.cu`文件并通过OptiX编译器编译
 6. 集成新的单头文件库时，创建专用的`*_impl.cpp`文件
+7. 调试模式开发时，修改 `debug_rendering.cu` 后需重新编译 `VLR` 目标

@@ -53,6 +53,10 @@ extern "C" __global__ void sampleBSDF(
 extern "C" __global__ void accumulateResults(
     shared::WavefrontLaunchParameters* params);
 
+extern "C" __global__ void renderDebugMode(
+    shared::WavefrontLaunchParameters* params,
+    uint32_t debugMode);
+
 // ============================================================================
 // 内核启动辅助函数实现
 // ============================================================================
@@ -128,6 +132,20 @@ void launchAccumulateKernel(
     if (gridSize == 0) return;
 
     accumulateResults<<<gridSize, blockSize, 0, stream>>>(d_params);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+void launchRenderDebugModeKernel(
+    shared::WavefrontLaunchParameters* d_params,
+    uint32_t numPixels,
+    uint32_t debugMode,
+    cudaStream_t stream)
+{
+    constexpr uint32_t blockSize = 256;
+    uint32_t gridSize = (numPixels + blockSize - 1) / blockSize;
+    if (gridSize == 0) return;
+
+    renderDebugMode<<<gridSize, blockSize, 0, stream>>>(d_params, debugMode);
     CUDA_CHECK(cudaGetLastError());
 }
 

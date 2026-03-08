@@ -94,6 +94,7 @@ set(LIBVLR_CUDA_SOURCES
     GPU_kernels/sample_bsdf.cu
     GPU_kernels/compact.cu
     GPU_kernels/accumulate.cu
+    GPU_kernels/debug_rendering.cu
     GPU_kernels/kernel_launch.cu
 )
 

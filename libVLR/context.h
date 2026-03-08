@@ -81,6 +81,12 @@ public:
     void setDenoiserConfig(const DenoiserConfig& config);
     const DenoiserConfig& getDenoiserConfig() const;
 
+    // 调试模式与探针像素
+    void setDebugMode(VLRDebugMode mode);
+    VLRDebugMode getDebugMode() const;
+    void setProbePixel(int32_t x, int32_t y);
+    void getProbePixel(int32_t* outX, int32_t* outY) const;
+
     // 缓冲区管理
     void resizeOutputBuffer(uint32_t width, uint32_t height);
     void resizeWavefrontBuffers(uint32_t width, uint32_t height);
@@ -307,6 +313,11 @@ private:
     Denoiser m_denoiser;
     DenoiserConfig m_denoiserConfig;
     
+    // 调试状态
+    VLRDebugMode m_debugMode;
+    int32_t m_probePixelX;
+    int32_t m_probePixelY;
+    
     // ========================================================================
     // 私有方法
     // ========================================================================
@@ -323,12 +334,14 @@ private:
     
     // Wavefront 渲染
     void executeWavefrontRender(uint32_t numSamples);
+    void executeWavefrontRenderDebug(uint32_t debugMode);
     void launchGenerateRays(uint32_t numPaths);
     void launchTraceRays(uint32_t numActivePaths);
     void launchProcessHits(uint32_t numActivePaths);
     void launchSampleLights(uint32_t numActivePaths);
     void launchSampleBSDF(uint32_t numActivePaths);
     void launchAccumulate(uint32_t numPaths);
+    void launchRenderDebugMode(uint32_t numPixels, uint32_t debugMode);
     
     // 工具方法
     void checkOptixError(OptixResult result, const char* call, const char* file, int line);

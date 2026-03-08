@@ -416,6 +416,37 @@ VLR_API VLRResult vlrSetDenoiserConfig(
 
 
 // ============================================================================
+// 调试与可视化
+// ============================================================================
+
+/// 设置调试渲染模式
+/// @param context 渲染上下文句柄
+/// @param mode 调试模式（参见 VLRDebugMode 枚举）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetDebugMode(
+    VLRContext context,
+    uint32_t mode);
+
+/// 获取当前调试渲染模式
+/// @param context 渲染上下文句柄
+/// @param outMode 输出当前模式
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrGetDebugMode(
+    VLRContext context,
+    uint32_t* outMode);
+
+/// 设置探针像素（用于单像素调试）
+/// @param context 渲染上下文句柄
+/// @param x 像素 X 坐标（-1 表示禁用探针）
+/// @param y 像素 Y 坐标
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetProbePixel(
+    VLRContext context,
+    int32_t x,
+    int32_t y);
+
+
+// ============================================================================
 // 版本与工具
 // ============================================================================
 

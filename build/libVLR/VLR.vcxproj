@@ -427,6 +427,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_bsdf.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\compact.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\accumulate.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\debug_rendering.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\kernel_launch.cu" />
   </ItemGroup>
   <ItemGroup />

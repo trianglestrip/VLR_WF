@@ -751,4 +751,96 @@ VLRResult vlrSetDenoiserConfig(
     }
 }
 
+// ============================================================================
+// 调试与可视化 API
+// ============================================================================
+
+VLRResult vlrSetDebugMode(VLRContext context, uint32_t mode) {
+    if (!context) {
+        printf("[VLR] vlrSetDebugMode: invalid context (null)\n");
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (mode >= static_cast<uint32_t>(vlr::NumVLRDebugModes)) {
+        printf("[VLR] vlrSetDebugMode: invalid mode %u (max %u)\n",
+               mode, static_cast<uint32_t>(vlr::NumVLRDebugModes) - 1);
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) {
+            printf("[VLR] vlrSetDebugMode: context not initialized\n");
+            fflush(stdout);
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        vlr::VLRDebugMode dm = static_cast<vlr::VLRDebugMode>(mode);
+        impl->ctx->setDebugMode(dm);
+        printf("[VLR] vlrSetDebugMode: set to %s (%u)\n",
+               vlr::getDebugModeName(dm), mode);
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrGetDebugMode(VLRContext context, uint32_t* outMode) {
+    if (!context) {
+        printf("[VLR] vlrGetDebugMode: invalid context (null)\n");
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (!outMode) {
+        printf("[VLR] vlrGetDebugMode: invalid outMode (null)\n");
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) {
+            printf("[VLR] vlrGetDebugMode: context not initialized\n");
+            fflush(stdout);
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        *outMode = static_cast<uint32_t>(impl->ctx->getDebugMode());
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetProbePixel(VLRContext context, int32_t x, int32_t y) {
+    if (!context) {
+        printf("[VLR] vlrSetProbePixel: invalid context (null)\n");
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (x != -1 && (x < 0 || y < 0)) {
+        printf("[VLR] vlrSetProbePixel: invalid pixel (%d, %d), use (-1, y) to disable\n",
+               static_cast<int>(x), static_cast<int>(y));
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) {
+            printf("[VLR] vlrSetProbePixel: context not initialized\n");
+            fflush(stdout);
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        impl->ctx->setProbePixel(x, y);
+        if (x == -1) {
+            printf("[VLR] vlrSetProbePixel: probe disabled\n");
+        } else {
+            printf("[VLR] vlrSetProbePixel: set to (%d, %d)\n",
+                   static_cast<int>(x), static_cast<int>(y));
+        }
+        fflush(stdout);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 }  // extern "C"

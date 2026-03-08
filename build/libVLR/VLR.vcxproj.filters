@@ -39,6 +39,9 @@
     <CudaCompile Include="..\..\libVLR\GPU_kernels\accumulate.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\debug_rendering.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\kernel_launch.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>

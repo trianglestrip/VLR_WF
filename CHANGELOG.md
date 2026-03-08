@@ -6,6 +6,42 @@
 
 ---
 
+## [1.2.0] - 2026-03-08
+
+### 新增
+
+#### 调试渲染模式
+
+- **17 种调试可视化模式**
+  - BaseColor, GeometricNormal, ShadingNormal, Depth, UV
+  - Tangent, Bitangent, Roughness, Metallic
+  - MaterialID, InstanceID, PrimitiveID
+  - DirectLighting, IndirectLighting (占位)
+  - DenoiserAlbedo, DenoiserNormal
+  - ✅ 所有模式已实现
+
+- **调试 API** (`vlr.h`)
+  - `vlrSetDebugMode(context, mode)` - 设置调试模式
+  - `vlrGetDebugMode(context, &mode)` - 获取当前模式
+  - `vlrSetProbePixel(context, x, y)` - 设置探针像素（待完整实现）
+
+- **GPU 实现** (`GPU_kernels/debug_rendering.cu`)
+  - 单次采样快速渲染
+  - 仅处理 primary ray（无多次反弹）
+  - Wang Hash ID → 颜色映射
+  - 性能：< 100ms (512×512)
+
+- **自动集成**
+  - 调试模式下自动跳过多次反弹
+  - 禁用降噪器
+  - 与 Wavefront 渲染循环无缝集成
+
+#### 文档
+
+- `docs/DEBUG_MODE_IMPLEMENTATION.md` - 调试模式实现文档
+
+---
+
 ## [1.1.0] - 2026-03-08
 
 ### 新增
@@ -49,8 +85,7 @@
 
 #### 文档
 
-- `docs/MATERIAL_SYSTEM_ENHANCEMENT_SUMMARY.md` - 详细实现报告
-- `docs/MATERIAL_ENHANCEMENT_RESULTS.md` - 成果展示
+- `docs/MATERIAL_SYSTEM_ENHANCEMENT_SUMMARY.md` - 材质系统增强总结
 - `CHANGELOG.md` - 变更日志
 
 ### 修改
@@ -221,5 +256,4 @@
 ## 链接
 
 - [项目路线图](docs/TODO.md)
-- [材质系统增强报告](docs/MATERIAL_SYSTEM_ENHANCEMENT_SUMMARY.md)
-- [成果展示](docs/MATERIAL_ENHANCEMENT_RESULTS.md)
+- [材质系统增强总结](docs/MATERIAL_SYSTEM_ENHANCEMENT_SUMMARY.md)

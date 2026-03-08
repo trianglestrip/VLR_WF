@@ -129,3 +129,9 @@
 - 测试文件命名：`<module>_test.cpp` 或 `<module>_test.cu`
 - 编译测试以验证类型定义和基本功能
 - 测试通过后再继续下一步
+
+### 调试模式测试
+- 修改现有测试程序（如 `cornell_box_improved_test.cpp`）添加 `vlrSetDebugMode(context, mode)`
+- 调试模式只需 1 sample，渲染应 < 100ms (512×512)
+- 批量测试：循环 mode 0-16，保存为 `debug_mode_XX.png`
+- 详细说明：`.cursor/rules/debug-mode.md`

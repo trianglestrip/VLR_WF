@@ -155,6 +155,10 @@ Test-Path bin\GPU_kernels\wavefront_trace_rays.ptx
 # 6. 运行测试
 cd bin
 .\simple_render_test.exe
+
+# 7. 调试模式测试（可选）
+# 修改 cornell_box_improved_test.cpp 添加 vlrSetDebugMode(context, mode)
+# 渲染后保存为 debug_mode_XX.png
 ```
 
 ### 增量构建
@@ -286,3 +290,4 @@ Get-Content build_log.txt | Select-String "error"
 9. ✅ **单头文件库的`*_IMPLEMENTATION`宏只在一个专用`.cpp`文件中定义**
 10. ✅ 集成tinyexr时使用`TINYEXR_USE_STB_ZLIB=1`避免miniz问题
 11. ✅ 从Git克隆第三方库后，删除`.git/`、`test/`、`examples/`、`*.md`等冗余文件
+12. ✅ 调试模式修改 `debug_rendering.cu` 后需重新编译 VLR 目标

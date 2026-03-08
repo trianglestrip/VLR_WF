@@ -102,6 +102,11 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
     m_denoiserConfig.useNormal = true;
     m_denoiserConfig.hdrIntensity = 1.0f;
     
+    // 初始化调试状态
+    m_debugMode = VLRDebugMode_Normal;
+    m_probePixelX = -1;
+    m_probePixelY = -1;
+    
     // 初始化 OptiX 上下文
     m_optix.stream = cudaStream;
     m_optix.enableLogging = enableLogging;
@@ -895,9 +900,9 @@ void Context::setupWavefrontLaunchParams() {
     }
 
     // 设置调试参数
-    lp.probePixX = -1;
-    lp.probePixY = -1;
-    lp.debugMode = 0;
+    lp.probePixX = m_probePixelX;
+    lp.probePixY = m_probePixelY;
+    lp.debugMode = static_cast<uint32_t>(m_debugMode);
     
     // 分配或更新启动参数缓冲区
     if (!wf.launchParamsBuffer) {
@@ -1170,19 +1175,25 @@ void Context::renderWavefront(
     fflush(stdout);
     setupWavefrontLaunchParams();
 
-    // 执行渲染
-    printf("[VLR] Starting render loop...\n");
-    fflush(stdout);
-    
     // 记录开始时间
     CUDA_CHECK(cudaEventRecord(wf.startEvent, m_stream));
-    
-    for (uint32_t sample = 0; sample < numSamples; ++sample) {
-        printf("[VLR] Sample %u/%u\n", sample + 1, numSamples);
+
+    // 检查调试模式：非 Normal 时使用简化渲染路径（单次采样，无多次反弹）
+    if (m_debugMode != VLRDebugMode_Normal) {
+        printf("[VLR] Debug mode: %s (single sample, no multi-bounce)\n", getDebugModeName(m_debugMode));
         fflush(stdout);
-        // 与原始 VLR 一致：在渲染前递增累加帧计数，供 accumulate 内核正确平均
-        ++wf.numAccumFrames;
-        executeWavefrontRender(1);
+        wf.numAccumFrames = 1;
+        executeWavefrontRenderDebug(static_cast<uint32_t>(m_debugMode));
+    } else {
+        // 正常路径追踪
+        printf("[VLR] Starting render loop...\n");
+        fflush(stdout);
+        for (uint32_t sample = 0; sample < numSamples; ++sample) {
+            printf("[VLR] Sample %u/%u\n", sample + 1, numSamples);
+            fflush(stdout);
+            ++wf.numAccumFrames;
+            executeWavefrontRender(1);
+        }
     }
     
     // 记录结束时间并计算渲染时间
@@ -1198,8 +1209,8 @@ void Context::renderWavefront(
            (width * height * numSamples) / (renderTimeMs * 1000.0f));
     fflush(stdout);
     
-    // 执行降噪（如果启用）
-    if (m_denoiserConfig.enabled && wf.accumBuffer) {
+    // 执行降噪（如果启用，调试模式跳过）
+    if (m_denoiserConfig.enabled && m_debugMode == VLRDebugMode_Normal && wf.accumBuffer) {
         printf("[VLR] Applying OptiX denoiser...\n");
         fflush(stdout);
         
@@ -1234,6 +1245,54 @@ void Context::renderWavefront(
     }
 }
 
+
+void Context::executeWavefrontRenderDebug(uint32_t debugMode) {
+    auto& wf = m_optix.wavefrontPathTracing;
+
+#ifdef VLR_DEBUG_NAN_TRACKING
+    resetNanDebugCount();
+#endif
+
+    uint32_t numPixels = wf.currentWidth * wf.currentHeight;
+
+    // 重置队列
+    resetWavefrontQueues();
+    setupWavefrontLaunchParams();
+
+    if (wf.queueCounters) {
+        uint32_t zero[2] = {0, 0};
+        CUDA_CHECK(cudaMemcpy(
+            wf.queueCounters->getDevicePointer(),
+            zero,
+            2 * sizeof(uint32_t),
+            cudaMemcpyHostToDevice
+        ));
+    }
+
+    // 阶段 1: 生成初始光线
+    launchGenerateRays(numPixels);
+
+    if (wf.queueCounters) {
+        CUDA_CHECK(cudaMemcpyAsync(
+            wf.queueCounters->getDevicePointerAt(0),
+            &numPixels,
+            sizeof(uint32_t),
+            cudaMemcpyHostToDevice,
+            m_stream
+        ));
+    }
+
+    // 阶段 2: 光线追踪（单次，无多次反弹）
+    launchTraceRays(numPixels);
+
+    // 阶段 3: 处理命中（填充 surfacePointBuffer、accumAlbedo、accumNormal）
+    launchProcessHits(numPixels);
+
+    // 阶段 4: 调试可视化（直接写入 accumBuffer）
+    launchRenderDebugMode(numPixels, debugMode);
+
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+}
 
 void Context::executeWavefrontRender(uint32_t numSamples) {
     auto& wf = m_optix.wavefrontPathTracing;
@@ -1559,6 +1618,17 @@ void Context::launchAccumulate(uint32_t numPaths) {
     launchAccumulateKernel(d_params, numPaths, m_stream);
 }
 
+void Context::launchRenderDebugMode(uint32_t numPixels, uint32_t debugMode) {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+    if (numPixels == 0) return;
+
+    shared::WavefrontLaunchParameters* d_params =
+        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+    launchRenderDebugModeKernel(d_params, numPixels, debugMode, m_stream);
+}
+
 
 // ============================================================================
 // 配置方法
@@ -1649,6 +1719,28 @@ void Context::setDenoiserConfig(const DenoiserConfig& config) {
 
 const DenoiserConfig& Context::getDenoiserConfig() const {
     return m_denoiserConfig;
+}
+
+// ============================================================================
+// 调试模式与探针像素
+// ============================================================================
+
+void Context::setDebugMode(VLRDebugMode mode) {
+    m_debugMode = mode;
+}
+
+VLRDebugMode Context::getDebugMode() const {
+    return m_debugMode;
+}
+
+void Context::setProbePixel(int32_t x, int32_t y) {
+    m_probePixelX = x;
+    m_probePixelY = y;
+}
+
+void Context::getProbePixel(int32_t* outX, int32_t* outY) const {
+    if (outX) *outX = m_probePixelX;
+    if (outY) *outY = m_probePixelY;
 }
 
 } // namespace vlr

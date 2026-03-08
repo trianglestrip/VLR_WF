@@ -68,6 +68,17 @@ void launchAccumulateKernel(
     uint32_t numPaths,
     cudaStream_t stream);
 
+/// 启动 RenderDebugMode kernel（调试渲染，单次采样无多次反弹）
+/// @param d_params 设备端启动参数指针
+/// @param numPixels 像素总数
+/// @param debugMode 调试模式（VLRDebugMode 枚举值）
+/// @param stream CUDA 流
+void launchRenderDebugModeKernel(
+    shared::WavefrontLaunchParameters* d_params,
+    uint32_t numPixels,
+    uint32_t debugMode,
+    cudaStream_t stream);
+
 /// 初始化 RNG 缓冲区（每个像素一个独立的 RNG 状态）
 /// @param rngBuffer 设备端 RNG 缓冲区指针
 /// @param numPixels 像素数量

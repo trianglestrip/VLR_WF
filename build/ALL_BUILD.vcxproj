@@ -179,9 +179,29 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{605F9820-D9FF-383D-A867-7E9B383F9303}</Project>
       <Name>VLR</Name>
     </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\anisotropic_test.vcxproj">
+      <Project>{93F0511B-37FA-30F2-A906-D33E94D21E03}</Project>
+      <Name>anisotropic_test</Name>
+    </ProjectReference>
     <ProjectReference Include="F:\project\VLR_WF\build\cornell_box_improved_test.vcxproj">
       <Project>{A472DDEF-7C59-31A2-B897-378FBF797B9B}</Project>
       <Name>cornell_box_improved_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\disney_brdf_test.vcxproj">
+      <Project>{8DDE5E1C-E091-3BCE-B10B-4401AEAF7668}</Project>
+      <Name>disney_brdf_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\lambertian_scattering_test.vcxproj">
+      <Project>{AC4CAA34-4E1D-32C6-920C-137321BDAD63}</Project>
+      <Name>lambertian_scattering_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\material_test.vcxproj">
+      <Project>{5ABBB5F0-4ED3-335F-B2D1-6476B17BBE93}</Project>
+      <Name>material_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\multi_surface_test.vcxproj">
+      <Project>{6B94400B-47E5-3292-BF37-8122F9BB6EEA}</Project>
+      <Name>multi_surface_test</Name>
     </ProjectReference>
     <ProjectReference Include="F:\project\VLR_WF\build\libVLR\trace_rays_ptx.vcxproj">
       <Project>{6F5C7D06-6FDE-333A-800D-7387949D4F41}</Project>

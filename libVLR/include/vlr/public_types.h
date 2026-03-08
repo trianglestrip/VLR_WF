@@ -68,6 +68,33 @@ struct WavefrontConfig {
 
 
 // ============================================================================
+// Debug Rendering Modes (defined before RenderSettings which uses it)
+// ============================================================================
+
+/// Debug rendering modes for visualization and debugging
+enum VLRDebugMode : uint32_t {
+    VLRDebugMode_Normal = 0,              // Normal rendering (path tracing)
+    VLRDebugMode_BaseColor,               // Visualize base/albedo color
+    VLRDebugMode_GeometricNormal,         // Visualize geometric normal
+    VLRDebugMode_ShadingNormal,           // Visualize shading normal
+    VLRDebugMode_Depth,                   // Visualize depth (linear)
+    VLRDebugMode_UV,                      // Visualize texture coordinates
+    VLRDebugMode_Tangent,                 // Visualize tangent vector
+    VLRDebugMode_Bitangent,               // Visualize bitangent vector
+    VLRDebugMode_Roughness,               // Visualize surface roughness
+    VLRDebugMode_Metallic,                // Visualize metallic parameter
+    VLRDebugMode_MaterialID,              // Visualize material ID
+    VLRDebugMode_InstanceID,              // Visualize instance ID
+    VLRDebugMode_PrimitiveID,             // Visualize primitive ID
+    VLRDebugMode_DirectLighting,          // Visualize direct lighting only
+    VLRDebugMode_IndirectLighting,        // Visualize indirect lighting only
+    VLRDebugMode_DenoiserAlbedo,          // Visualize denoiser albedo AOV
+    VLRDebugMode_DenoiserNormal,          // Visualize denoiser normal AOV
+    NumVLRDebugModes
+};
+
+
+// ============================================================================
 // Render Settings
 // ============================================================================
 
@@ -77,6 +104,7 @@ struct RenderSettings {
     uint32_t maxPathLength;            // Maximum path length
     uint32_t numSamplesPerPixel;       // Samples per pixel
     bool enableDenoiser;               // Enable denoiser
+    VLRDebugMode debugMode;            // Debug rendering mode
     
     // Wavefront-specific settings (only used when renderer == VLRRenderer_WavefrontPathTracing)
     WavefrontConfig wavefrontConfig;
@@ -87,8 +115,37 @@ struct RenderSettings {
         , maxPathLength(25)
         , numSamplesPerPixel(1)
         , enableDenoiser(false)
+        , debugMode(VLRDebugMode_Normal)
     {}
 };
+
+
+/// Get debug mode name as string
+inline const char* getDebugModeName(VLRDebugMode mode) {
+    static const char* names[] = {
+        "Normal Rendering",
+        "Base Color",
+        "Geometric Normal",
+        "Shading Normal",
+        "Depth",
+        "UV Coordinates",
+        "Tangent",
+        "Bitangent",
+        "Roughness",
+        "Metallic",
+        "Material ID",
+        "Instance ID",
+        "Primitive ID",
+        "Direct Lighting Only",
+        "Indirect Lighting Only",
+        "Denoiser Albedo",
+        "Denoiser Normal"
+    };
+    
+    if (mode < NumVLRDebugModes)
+        return names[mode];
+    return "Unknown";
+}
 
 
 // ============================================================================
