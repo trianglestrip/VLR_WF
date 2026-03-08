@@ -459,6 +459,29 @@ VLRResult vlrSetEnvironmentLightFromImage(VLRScene scene, const char* imagePath,
     }
 }
 
+VLRResult vlrAddPointLight(
+    VLRScene scene,
+    const float position[3],
+    const float intensity[3])
+{
+    if (!scene || !position || !intensity) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+
+        vlr::PointLightParams params;
+        params.position = vlr::Point3D(position[0], position[1], position[2]);
+        params.intensity.values[0] = intensity[0];
+        params.intensity.values[1] = intensity[1];
+        params.intensity.values[2] = intensity[2];
+
+        sceneImpl->scene->addPointLight(params);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrAddDirectionalLight(
     VLRScene scene,
     const float direction[3],
@@ -468,13 +491,13 @@ VLRResult vlrAddDirectionalLight(
     try {
         VLRSceneImpl* sceneImpl = TO_SCENE(scene);
         if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
-        
+
         vlr::Vector3D dir(direction[0], direction[1], direction[2]);
         vlr::SampledSpectrum rad;
         rad.values[0] = radiance[0];
         rad.values[1] = radiance[1];
         rad.values[2] = radiance[2];
-        
+
         sceneImpl->scene->addDirectionalLight(dir, rad);
         return static_cast<VLRResult>(VLRResult_Success);
     } catch (...) {

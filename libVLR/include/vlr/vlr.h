@@ -256,6 +256,16 @@ VLR_API VLRResult vlrSetEnvironmentLight(VLRScene scene, const float color[3]);
 /// @return VLRResult_Success 或错误码
 VLR_API VLRResult vlrSetEnvironmentLightFromImage(VLRScene scene, const char* imagePath, float rotation);
 
+/// 添加点光源
+/// @param scene 所属场景
+/// @param position 光源位置（世界坐标）
+/// @param intensity 辐射强度 RGB [0..∞]（W/sr）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrAddPointLight(
+    VLRScene scene,
+    const float position[3],
+    const float intensity[3]);
+
 /// 添加方向光（平行光，如太阳光）
 /// @param scene 所属场景
 /// @param direction 光线方向（归一化，指向场景）

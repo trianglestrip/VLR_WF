@@ -196,16 +196,26 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
     
     case LightType_Point: {
         // 点光源：位置唯一，无面积采样，返回 delta
-        // 点光源位置需从几何解码获取，此处简化从实例原点
+        // 点光源位置存储在 geomInst.asPoint 中
         SurfacePoint surfPt;
-        surfPt.position = Point3D(0, 0, 0);
+        surfPt.position = Point3D(geomInst.asPoint.x, geomInst.asPoint.y, geomInst.asPoint.z);
         surfPt.atInfinity = false;
-        surfPt.geometricNormal = Normal3D(0, 1, 0);
+        
+        // 点光源的法线指向着色点
+        Vector3D dirToShading = refPosition - surfPt.position;
+        float dist = length(dirToShading);
+        if (dist > 1e-8f) {
+            dirToShading = dirToShading / dist;
+            surfPt.geometricNormal = Normal3D(dirToShading.x, dirToShading.y, dirToShading.z);
+        } else {
+            surfPt.geometricNormal = Normal3D(0, 1, 0);
+        }
+        
         surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
         surfPt.texCoord = TexCoord2D(0, 0);
         
-        transformSurfacePoint(inst.transform, surfPt, &result->lightSurfPt);
-        result->areaPDF = 1.0f;  // Delta 光源
+        result->lightSurfPt = surfPt;
+        result->areaPDF = 1.0f;  // Delta 光源，PDF 为 1（离散分布）
         result->isValid = true;
         break;
     }
@@ -341,13 +351,22 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool evaluateLightEmission(
         return false;
     }
     
+    // 点光源：delta 分布，辐射强度 / 距离平方
+    if (descriptor.type == LightType_Point) {
+        // 点光源发射辐射强度（W/sr），需除以距离平方得到辐照度
+        // 但在 NEE 中，几何项 G 已经包含了 1/r^2，所以这里直接返回强度
+        result->Le = spEmittance;
+        result->isValid = true;
+        return true;
+    }
+    
     // 方向光：delta 分布，辐射度与方向无关
     if (descriptor.type == LightType_Directional) {
         result->Le = spEmittance;
         result->isValid = true;
         return true;
     }
-    
+
     // Lambertian 发光：辐射度与方向无关，仅当着色点在发光半球内有效
     // dirToShading = 从光源指向着色点；发光方向即 dirToShading，需 dot(dirToShading, normal) > 0
     float cosLight = dot(dirToShading, lightSurfPt.geometricNormal);
@@ -355,10 +374,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool evaluateLightEmission(
         result->isValid = false;
         return false;
     }
-    
+
     result->Le = spEmittance;
     result->isValid = true;
-    
+
     return result->isValid;
 }
 

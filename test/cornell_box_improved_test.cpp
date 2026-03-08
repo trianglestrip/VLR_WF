@@ -248,7 +248,7 @@ int main(int argc, char** argv) {
     uint32_t height = 512;
     uint32_t numSamples = 1024;
     uint32_t maxDepth = 8;
-    float exposure = 1.0f;
+    float exposure = 0.5f;  // 降低曝光，参考图较暗
     std::string outputFile = "cornell_box_improved.png";
     std::string outputFormat = "png";
 
@@ -474,11 +474,14 @@ int main(int argc, char** argv) {
     res = vlrAddAreaLight(scene, instLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add area light\n"); goto cleanup; }
 
-    // 注释掉方向光 - Cornell Box 只需要顶部面光源
-    // float dirLightDir[] = { -0.3f, -0.8f, -0.2f };
-    // float dirLightRadiance[] = { 2.0f, 2.0f, 2.0f };
-    // res = vlrAddDirectionalLight(scene, dirLightDir, dirLightRadiance);
-    // if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add directional light\n"); goto cleanup; }
+    // 点光源测试（参考 VLR scene.cpp 的 PointEmitter 配置）
+    // 位置：(0.0f, 2.9f, 0.0f) - 顶部中心
+    // 强度：2.4 W/sr（参考值）
+    // 注：默认注释掉，与参考场景一致；需要时可取消注释测试
+    // float pointLightPos[] = { 0.0f, 2.9f, 0.0f };
+    // float pointLightIntensity[] = { 2.4f, 2.4f, 2.4f };
+    // res = vlrAddPointLight(scene, pointLightPos, pointLightIntensity);
+    // if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add point light\n"); goto cleanup; }
 
     // ========================================================================
     // Camera: from config or defaults
@@ -510,15 +513,15 @@ int main(int argc, char** argv) {
     // ========================================================================
     // Environment Light (optional, for ambient lighting)
     // ========================================================================
-    // Environment Light (IBL) - WhiteOne.exr
-    res = vlrSetEnvironmentLightFromImage(scene, "resources/environments/WhiteOne.exr", 0.0f);
-    if (res != VLRResult_Success) {
-        fprintf(stderr, "[Warning] Failed to load environment map, using constant color fallback\n");
-        float envColor[] = { 0.05f, 0.05f, 0.05f };
-        res = vlrSetEnvironmentLight(scene, envColor);
-    } else {
-        printf("[Info] Environment light loaded from EXR\n");
-    }
+    // 暂时禁用环境光，测试区域光效果
+    // res = vlrSetEnvironmentLightFromImage(scene, "resources/environments/WhiteOne.exr", 0.0f);
+    // if (res != VLRResult_Success) {
+    //     fprintf(stderr, "[Warning] Failed to load environment map, using constant color fallback\n");
+    //     float envColor[] = { 0.05f, 0.05f, 0.05f };
+    //     res = vlrSetEnvironmentLight(scene, envColor);
+    // } else {
+    //     printf("[Info] Environment light loaded from EXR\n");
+    // }
 
     // ========================================================================
     // Render

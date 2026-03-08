@@ -622,10 +622,14 @@ struct GeometryInstance {
             const Triangle* triangleBuffer;
             uint32_t numTriangles;  ///< 三角形数量（用于区域光多三角形采样）
         } asTriMesh;
-        
+
         struct {
             uint32_t importanceMap;
         } asInfSphere;
+        
+        struct {
+            float x, y, z;  ///< 点光源位置（世界坐标）
+        } asPoint;
     };
 };
 

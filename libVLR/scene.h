@@ -121,6 +121,7 @@ struct EnvironmentLightParams {
     uint32_t textureWidth;         ///< 纹理宽度
     uint32_t textureHeight;        ///< 纹理高度
     float rotation;                ///< 环境旋转（弧度）
+    uint32_t importanceMapHandle;  ///< 重要性采样贴图句柄（CUDA纹理对象或缓冲区ID）
     
     EnvironmentLightParams()
         : useConstant(false)
@@ -128,6 +129,7 @@ struct EnvironmentLightParams {
         , textureWidth(0)
         , textureHeight(0)
         , rotation(0.0f)
+        , importanceMapHandle(0)
     {}
 };
 

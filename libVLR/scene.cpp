@@ -401,7 +401,65 @@ void Scene::addAreaLight(const AreaLightParams& params) {
 }
 
 void Scene::addPointLight(const PointLightParams& params) {
-    (void)params;
+    // 创建点光源材质
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
+    mat.bsdfProcedureSetIndex = bsdfType;
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<const uint32_t*>(&bsdfType);
+    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<const uint32_t*>(&params.intensity.values[0]);
+    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<const uint32_t*>(&params.intensity.values[1]);
+    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<const uint32_t*>(&params.intensity.values[2]);
+    uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
+    m_materials.push_back(mat);
+    
+    // 创建点光源几何实例
+    GeometryInstance geomInst;
+    memset(&geomInst, 0, sizeof(geomInst));
+    geomInst.geomType = GeometryType_Point;
+    geomInst.materialIndex = materialIndex;
+    geomInst.importance = 1.0f;
+    geomInst.progDecodeHitPoint = -1;
+    geomInst.progSampleLightPosition = -1;
+    geomInst.nodeNormal = -1;
+    geomInst.nodeTangent = -1;
+    
+    // 点光源位置存储在 asPoint 中
+    geomInst.asPoint.x = params.position.x;
+    geomInst.asPoint.y = params.position.y;
+    geomInst.asPoint.z = params.position.z;
+    
+    uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
+    m_geometryInstances.push_back(geomInst);
+    
+    // 创建实例（点光源不需要变换）
+    shared::Instance inst;
+    memset(&inst, 0, sizeof(inst));
+    
+    // 分配并设置几何实例索引数组
+    uint32_t* geomIndices = new uint32_t[1];
+    geomIndices[0] = geomInstIndex;
+    inst.geomInstIndices = geomIndices;
+    inst.numGeomInsts = 1;
+    inst.transform = ReferenceFrame(Vector3D(1, 0, 0), Normal3D(0, 1, 0));
+    inst.rotationPhi = 0.0f;
+    inst.lightGeomInstDistribution = 0;
+    
+    uint32_t instIndex = static_cast<uint32_t>(m_instances.size());
+    m_instances.push_back(inst);
+    
+    // 创建实例记录
+    InstanceRecord rec;
+    rec.meshId = 0;
+    rec.materialId = materialIndex;
+    rec.geomInstIndex = geomInstIndex;
+    rec.transform = InstanceTransform();
+    rec.geomInstIndices.push_back(geomInstIndex);
+    m_instanceRecords.push_back(rec);
+    
+    // 添加到光源列表
+    m_lightInstIndices.push_back(instIndex);
 }
 
 void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum& radiance) {
@@ -451,13 +509,89 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
 }
 
 void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
-    // 原始 VLR：环境光使用独立的 m_envInst 实例槽位（InfiniteSphereSurfaceNode）
-    // VLR_WF 简化实现：暂无 InfiniteSphere 环境实例，useConstant 时 envLightInstIndex 语义受限
-    // 待完善：添加专用环境实例后，应使 envLightInstIndex 指向该实例，并将该实例加入 lightInstIndices 首位
-    if (params.useConstant)
-        m_envLightInstIndex = 0;
-    else
-        m_envLightInstIndex = 0xFFFFFFFF;
+    // 环境光实现说明：
+    // - 环境光不参与显式光源采样（NEE），不加入 m_lightInstIndices
+    // - 仅在光线 miss 时通过 processEnvironmentHit 提供背景照明
+    // - 需要创建 GeometryType_InfiniteSphere 实例供 miss shader 查询
+    
+    // 清理旧的环境光实例（如果存在）
+    if (m_envLightInstIndex != 0xFFFFFFFF && m_envLightInstIndex < m_instances.size()) {
+        // 注意：不需要从 m_lightInstIndices 移除，因为环境光本来就不在其中
+        // TODO: 清理旧的材质和几何实例（需要更复杂的资源管理）
+    }
+    
+    // 创建环境光材质
+    SurfaceMaterialDescriptor mat;
+    memset(&mat, 0, sizeof(mat));
+    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
+    mat.bsdfProcedureSetIndex = bsdfType;
+    mat.edfProcedureSetIndex = 0xFFFFFFFF;
+    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<const uint32_t*>(&bsdfType);
+    
+    // 设置发光强度
+    if (params.useConstant) {
+        mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<const uint32_t*>(&params.constantColor.values[0]);
+        mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<const uint32_t*>(&params.constantColor.values[1]);
+        mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<const uint32_t*>(&params.constantColor.values[2]);
+    } else {
+        // 纹理环境光：材质发光强度设为 1.0，实际颜色从纹理采样
+        float defaultEmission = 1.0f;
+        mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<const uint32_t*>(&defaultEmission);
+        mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<const uint32_t*>(&defaultEmission);
+        mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<const uint32_t*>(&defaultEmission);
+    }
+    
+    uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
+    m_materials.push_back(mat);
+    
+    // 创建环境光几何实例
+    GeometryInstance geomInst;
+    memset(&geomInst, 0, sizeof(geomInst));
+    geomInst.geomType = GeometryType_InfiniteSphere;
+    geomInst.materialIndex = materialIndex;
+    geomInst.importance = 1.0f;
+    geomInst.progDecodeHitPoint = -1;
+    geomInst.progSampleLightPosition = -1;
+    geomInst.nodeNormal = -1;
+    geomInst.nodeTangent = -1;
+    
+    // 环境光纹理数据存储在 asInfSphere 中
+    if (!params.useConstant && params.textureData) {
+        geomInst.asInfSphere.importanceMap = params.importanceMapHandle;
+    } else {
+        geomInst.asInfSphere.importanceMap = 0;
+    }
+    
+    uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
+    m_geometryInstances.push_back(geomInst);
+    
+    // 创建实例
+    shared::Instance inst;
+    memset(&inst, 0, sizeof(inst));
+    
+    uint32_t* geomIndices = new uint32_t[1];
+    geomIndices[0] = geomInstIndex;
+    inst.geomInstIndices = geomIndices;
+    inst.numGeomInsts = 1;
+    inst.transform = ReferenceFrame(Vector3D(1, 0, 0), Normal3D(0, 1, 0));
+    inst.rotationPhi = params.rotation;
+    inst.lightGeomInstDistribution = 0;
+    
+    uint32_t instIndex = static_cast<uint32_t>(m_instances.size());
+    m_instances.push_back(inst);
+    
+    // 创建实例记录
+    InstanceRecord rec;
+    rec.meshId = 0;
+    rec.materialId = materialIndex;
+    rec.geomInstIndex = geomInstIndex;
+    rec.transform = InstanceTransform();
+    rec.transform.rotationRadians = params.rotation;
+    rec.geomInstIndices.push_back(geomInstIndex);
+    m_instanceRecords.push_back(rec);
+    
+    // 注意：环境光不加入 m_lightInstIndices（不参与显式光源采样）
+    m_envLightInstIndex = instIndex;
 }
 
 // ============================================================================
