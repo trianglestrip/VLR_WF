@@ -20,6 +20,9 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
 
 namespace {
 constexpr float VLR_PI = 3.14159265358979323846f;
@@ -56,12 +59,22 @@ struct VLRInstanceImpl {
     VLRInstanceImpl() : sceneImpl(nullptr), instanceIndex(0xFFFFFFFF) {}
 };
 
+struct VLRTextureImpl {
+    VLRContextImpl* contextImpl;
+    uint32_t textureIndex;
+    VLRTextureImpl() : contextImpl(nullptr), textureIndex(0xFFFFFFFF) {}
+};
+
+// 纹理句柄注册表：Context 销毁时使所有关联纹理句柄失效
+static std::unordered_map<VLRContextImpl*, std::vector<VLRTextureImpl*>> g_textureHandles;
+
 // 将 C 句柄转换为实现
 #define TO_CTX(h) (reinterpret_cast<VLRContextImpl*>(h))
 #define TO_SCENE(h) (reinterpret_cast<VLRSceneImpl*>(h))
 #define TO_MESH(h) (reinterpret_cast<VLRTriangleMeshImpl*>(h))
 #define TO_MAT(h) (reinterpret_cast<VLRMaterialImpl*>(h))
 #define TO_INST(h) (reinterpret_cast<VLRInstanceImpl*>(h))
+#define TO_TEXTURE(h) (reinterpret_cast<VLRTextureImpl*>(h))
 
 // 从实现获取句柄
 #define FROM_CTX(p) (reinterpret_cast<VLRContext>(p))
@@ -69,6 +82,7 @@ struct VLRInstanceImpl {
 #define FROM_MESH(p) (reinterpret_cast<VLRTriangleMesh>(p))
 #define FROM_MAT(p) (reinterpret_cast<VLRMaterial>(p))
 #define FROM_INST(p) (reinterpret_cast<VLRInstance>(p))
+#define FROM_TEXTURE(p) (reinterpret_cast<VLRTexture>(p))
 
 static VLRResult translateException() {
     try {
@@ -128,6 +142,15 @@ VLRResult vlrCreateContext(void* cudaStream, int enableLogging, VLRContext* outC
 void vlrDestroyContext(VLRContext context) {
     if (!context) return;
     VLRContextImpl* impl = TO_CTX(context);
+    // 使所有关联纹理句柄失效（避免悬空指针）
+    auto it = g_textureHandles.find(impl);
+    if (it != g_textureHandles.end()) {
+        for (VLRTextureImpl* tex : it->second) {
+            tex->contextImpl = nullptr;
+            tex->textureIndex = 0xFFFFFFFF;
+        }
+        g_textureHandles.erase(it);
+    }
     if (impl->ctx) {
         delete impl->ctx;
         impl->ctx = nullptr;
@@ -504,6 +527,258 @@ VLRResult vlrCreateInstance(
 void vlrDestroyInstance(VLRInstance instance) {
     if (!instance) return;
     delete TO_INST(instance);
+}
+
+// ============================================================================
+// 纹理 API
+// ============================================================================
+
+VLRResult vlrCreateTexture2D(
+    VLRContext context,
+    const char* imagePath,
+    VLRTexture* outTexture)
+{
+    if (!context || !imagePath || !outTexture) {
+        printf("[VLR] vlrCreateTexture2D: invalid argument (null)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    *outTexture = nullptr;
+    try {
+        VLRContextImpl* ctxImpl = TO_CTX(context);
+        if (!ctxImpl->ctx) {
+            printf("[VLR] vlrCreateTexture2D: context not initialized\n");
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        uint32_t texIndex = 0;
+        if (!ctxImpl->ctx->createTexture2D(imagePath, &texIndex)) {
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        VLRTextureImpl* texImpl = new VLRTextureImpl();
+        texImpl->contextImpl = ctxImpl;
+        texImpl->textureIndex = texIndex;
+        g_textureHandles[ctxImpl].push_back(texImpl);
+        *outTexture = FROM_TEXTURE(texImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrCreateTexture2DFromMemory(
+    VLRContext context,
+    const void* data,
+    uint32_t width,
+    uint32_t height,
+    uint32_t format,
+    VLRTexture* outTexture)
+{
+    if (!context || !data || !outTexture) {
+        printf("[VLR] vlrCreateTexture2DFromMemory: invalid argument (null)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (width == 0 || height == 0) {
+        printf("[VLR] vlrCreateTexture2DFromMemory: invalid dimensions %ux%u\n", width, height);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (format > 2) {
+        printf("[VLR] vlrCreateTexture2DFromMemory: invalid format %u\n", format);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    *outTexture = nullptr;
+    try {
+        VLRContextImpl* ctxImpl = TO_CTX(context);
+        if (!ctxImpl->ctx) {
+            printf("[VLR] vlrCreateTexture2DFromMemory: context not initialized\n");
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        uint32_t texIndex = 0;
+        if (!ctxImpl->ctx->createTexture2DFromMemory(data, width, height, format, &texIndex)) {
+            return static_cast<VLRResult>(VLRResult_InternalError);
+        }
+        VLRTextureImpl* texImpl = new VLRTextureImpl();
+        texImpl->contextImpl = ctxImpl;
+        texImpl->textureIndex = texIndex;
+        g_textureHandles[ctxImpl].push_back(texImpl);
+        *outTexture = FROM_TEXTURE(texImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrDestroyTexture(VLRTexture texture) {
+    if (!texture) return static_cast<VLRResult>(VLRResult_Success);
+    try {
+        VLRTextureImpl* texImpl = TO_TEXTURE(texture);
+        if (texImpl->contextImpl && texImpl->contextImpl->ctx &&
+            texImpl->textureIndex != 0xFFFFFFFF) {
+            texImpl->contextImpl->ctx->destroyTexture(texImpl->textureIndex);
+            // 从注册表移除
+            auto it = g_textureHandles.find(texImpl->contextImpl);
+            if (it != g_textureHandles.end()) {
+                auto& vec = it->second;
+                vec.erase(std::remove(vec.begin(), vec.end(), texImpl), vec.end());
+            }
+        }
+        texImpl->contextImpl = nullptr;
+        texImpl->textureIndex = 0xFFFFFFFF;
+        delete texImpl;
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetTextureFilterMode(VLRTexture texture, uint32_t filterMode) {
+    if (!texture) {
+        printf("[VLR] vlrSetTextureFilterMode: invalid texture (null)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (filterMode > 1) {
+        printf("[VLR] vlrSetTextureFilterMode: invalid filterMode %u\n", filterMode);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRTextureImpl* texImpl = TO_TEXTURE(texture);
+        if (!texImpl->contextImpl || !texImpl->contextImpl->ctx) {
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        if (!texImpl->contextImpl->ctx->setTextureFilterMode(texImpl->textureIndex, filterMode)) {
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetTextureWrapMode(VLRTexture texture, uint32_t wrapU, uint32_t wrapV) {
+    if (!texture) {
+        printf("[VLR] vlrSetTextureWrapMode: invalid texture (null)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    if (wrapU > 1 || wrapV > 1) {
+        printf("[VLR] vlrSetTextureWrapMode: invalid wrap mode (0=Repeat, 1=Clamp)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRTextureImpl* texImpl = TO_TEXTURE(texture);
+        if (!texImpl->contextImpl || !texImpl->contextImpl->ctx) {
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        if (!texImpl->contextImpl->ctx->setTextureWrapMode(texImpl->textureIndex, wrapU, wrapV)) {
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+// ============================================================================
+// 材质纹理绑定 API
+// ============================================================================
+
+namespace {
+    constexpr uint32_t InvalidTextureIdx = 0xFFFFFFFF;
+}
+
+static VLRResult setMaterialTextureSlot(VLRMaterial material, VLRTexture texture,
+    void (vlr::Scene::*setter)(uint32_t, uint32_t), const char* slotName) {
+    if (!material) {
+        printf("[VLR] vlrSetMaterial%sTexture: invalid material (null)\n", slotName);
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRMaterialImpl* matImpl = TO_MAT(material);
+        if (!matImpl->sceneImpl || !matImpl->sceneImpl->scene) {
+            printf("[VLR] vlrSetMaterial%sTexture: material has no scene\n", slotName);
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        uint32_t texIdx = InvalidTextureIdx;
+        if (texture) {
+            VLRTextureImpl* texImpl = TO_TEXTURE(texture);
+            if (!texImpl->contextImpl || !texImpl->contextImpl->ctx) {
+                printf("[VLR] vlrSetMaterial%sTexture: invalid texture\n", slotName);
+                return static_cast<VLRResult>(VLRResult_InvalidArgument);
+            }
+            if (matImpl->sceneImpl->contextImpl != texImpl->contextImpl) {
+                printf("[VLR] vlrSetMaterial%sTexture: material and texture must belong to same context\n", slotName);
+                return static_cast<VLRResult>(VLRResult_InvalidArgument);
+            }
+            texIdx = texImpl->textureIndex;
+        }
+        (matImpl->sceneImpl->scene->*setter)(matImpl->materialIndex, texIdx);
+        printf("[VLR] vlrSetMaterial%sTexture: material %u -> texture %u\n", slotName, matImpl->materialIndex, texIdx);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetMaterialBaseColorTexture(VLRMaterial material, VLRTexture texture) {
+    return setMaterialTextureSlot(material, texture, &vlr::Scene::setMaterialBaseColorTexture, "BaseColor");
+}
+
+VLRResult vlrSetMaterialRoughnessTexture(VLRMaterial material, VLRTexture texture) {
+    return setMaterialTextureSlot(material, texture, &vlr::Scene::setMaterialRoughnessTexture, "Roughness");
+}
+
+VLRResult vlrSetMaterialMetallicTexture(VLRMaterial material, VLRTexture texture) {
+    return setMaterialTextureSlot(material, texture, &vlr::Scene::setMaterialMetallicTexture, "Metallic");
+}
+
+VLRResult vlrSetMaterialNormalTexture(VLRMaterial material, VLRTexture texture, float normalScale) {
+    if (!material) {
+        printf("[VLR] vlrSetMaterialNormalTexture: invalid material (null)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRMaterialImpl* matImpl = TO_MAT(material);
+        if (!matImpl->sceneImpl || !matImpl->sceneImpl->scene) {
+            printf("[VLR] vlrSetMaterialNormalTexture: material has no scene\n");
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        uint32_t texIdx = InvalidTextureIdx;
+        if (texture) {
+            VLRTextureImpl* texImpl = TO_TEXTURE(texture);
+            if (!texImpl->contextImpl || !texImpl->contextImpl->ctx) {
+                printf("[VLR] vlrSetMaterialNormalTexture: invalid texture\n");
+                return static_cast<VLRResult>(VLRResult_InvalidArgument);
+            }
+            if (matImpl->sceneImpl->contextImpl != texImpl->contextImpl) {
+                printf("[VLR] vlrSetMaterialNormalTexture: material and texture must belong to same context\n");
+                return static_cast<VLRResult>(VLRResult_InvalidArgument);
+            }
+            texIdx = texImpl->textureIndex;
+        }
+        matImpl->sceneImpl->scene->setMaterialNormalTexture(matImpl->materialIndex, texIdx, normalScale);
+        printf("[VLR] vlrSetMaterialNormalTexture: material %u -> texture %u, normalScale=%.2f\n",
+            matImpl->materialIndex, texIdx, normalScale);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetMaterialTextureTransform(VLRMaterial material, float scaleU, float scaleV, float offsetU, float offsetV) {
+    if (!material) {
+        printf("[VLR] vlrSetMaterialTextureTransform: invalid material (null)\n");
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    }
+    try {
+        VLRMaterialImpl* matImpl = TO_MAT(material);
+        if (!matImpl->sceneImpl || !matImpl->sceneImpl->scene) {
+            printf("[VLR] vlrSetMaterialTextureTransform: material has no scene\n");
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        matImpl->sceneImpl->scene->setMaterialTextureTransform(matImpl->materialIndex, scaleU, scaleV, offsetU, offsetV);
+        printf("[VLR] vlrSetMaterialTextureTransform: material %u scale(%.2f,%.2f) offset(%.2f,%.2f)\n",
+            matImpl->materialIndex, scaleU, scaleV, offsetU, offsetV);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
 }
 
 VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance) {

@@ -560,6 +560,66 @@ void Scene::setInstanceTransform(uint32_t instanceId, const InstanceTransform& t
 }
 
 // ============================================================================
+// 材质纹理绑定
+// ============================================================================
+
+namespace {
+    constexpr uint32_t InvalidTexIdx = 0xFFFFFFFF;
+}
+
+static void ensureMaterialTextureArraysSize(std::vector<uint32_t>& albedo,
+    std::vector<uint32_t>& rough, std::vector<uint32_t>& metal, std::vector<uint32_t>& normal,
+    std::vector<shared::MaterialTextureParams>& params, size_t numMaterials) {
+    if (albedo.size() < numMaterials) {
+        albedo.resize(numMaterials, InvalidTexIdx);
+        rough.resize(numMaterials, InvalidTexIdx);
+        metal.resize(numMaterials, InvalidTexIdx);
+        normal.resize(numMaterials, InvalidTexIdx);
+        params.resize(numMaterials);
+    }
+}
+
+void Scene::setMaterialBaseColorTexture(uint32_t materialId, uint32_t textureIndex) {
+    if (materialId >= m_materials.size()) return;
+    ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
+        m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
+    m_materialAlbedoTextureIndices[materialId] = textureIndex;
+}
+
+void Scene::setMaterialRoughnessTexture(uint32_t materialId, uint32_t textureIndex) {
+    if (materialId >= m_materials.size()) return;
+    ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
+        m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
+    m_materialRoughnessTextureIndices[materialId] = textureIndex;
+}
+
+void Scene::setMaterialMetallicTexture(uint32_t materialId, uint32_t textureIndex) {
+    if (materialId >= m_materials.size()) return;
+    ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
+        m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
+    m_materialMetallicTextureIndices[materialId] = textureIndex;
+}
+
+void Scene::setMaterialNormalTexture(uint32_t materialId, uint32_t textureIndex, float normalScale) {
+    if (materialId >= m_materials.size()) return;
+    ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
+        m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
+    m_materialNormalMapIndices[materialId] = textureIndex;
+    m_materialTextureParams[materialId].normalScale = normalScale;
+}
+
+void Scene::setMaterialTextureTransform(uint32_t materialId,
+    float scaleU, float scaleV, float offsetU, float offsetV) {
+    if (materialId >= m_materials.size()) return;
+    ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
+        m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
+    m_materialTextureParams[materialId].scaleU = scaleU;
+    m_materialTextureParams[materialId].scaleV = scaleV;
+    m_materialTextureParams[materialId].offsetU = offsetU;
+    m_materialTextureParams[materialId].offsetV = offsetV;
+}
+
+// ============================================================================
 // 光源管理
 // ============================================================================
 
@@ -1041,6 +1101,28 @@ void Scene::updateToGPU() {
 #endif
     
     m_materialBuffer->copyToDevice(m_materials.data(), m_materials.size(), m_stream);
+
+    // 材质纹理索引与参数：确保数组大小与材质数量一致
+    ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
+        m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
+    if (!m_materialAlbedoTextureIndices.empty()) {
+        if (!m_materialAlbedoTextureIndicesBuffer) m_materialAlbedoTextureIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
+        m_materialAlbedoTextureIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materialAlbedoTextureIndices.size());
+        m_materialAlbedoTextureIndicesBuffer->copyToDevice(m_materialAlbedoTextureIndices.data(), m_materialAlbedoTextureIndices.size(), m_stream);
+        if (!m_materialRoughnessTextureIndicesBuffer) m_materialRoughnessTextureIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
+        m_materialRoughnessTextureIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materialRoughnessTextureIndices.size());
+        m_materialRoughnessTextureIndicesBuffer->copyToDevice(m_materialRoughnessTextureIndices.data(), m_materialRoughnessTextureIndices.size(), m_stream);
+        if (!m_materialMetallicTextureIndicesBuffer) m_materialMetallicTextureIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
+        m_materialMetallicTextureIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materialMetallicTextureIndices.size());
+        m_materialMetallicTextureIndicesBuffer->copyToDevice(m_materialMetallicTextureIndices.data(), m_materialMetallicTextureIndices.size(), m_stream);
+        if (!m_materialNormalMapIndicesBuffer) m_materialNormalMapIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
+        m_materialNormalMapIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materialNormalMapIndices.size());
+        m_materialNormalMapIndicesBuffer->copyToDevice(m_materialNormalMapIndices.data(), m_materialNormalMapIndices.size(), m_stream);
+        if (!m_materialTextureParamsBuffer) m_materialTextureParamsBuffer = std::make_unique<cudau::Buffer<shared::MaterialTextureParams>>();
+        m_materialTextureParamsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materialTextureParams.size());
+        m_materialTextureParamsBuffer->copyToDevice(m_materialTextureParams.data(), m_materialTextureParams.size(), m_stream);
+    }
+
     if (!m_lightInstIndicesBuffer) m_lightInstIndicesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
     m_lightInstIndicesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_lightInstIndices.size());
     if (!m_lightInstIndices.empty())
@@ -1062,6 +1144,26 @@ const shared::Instance* Scene::getInstBuffer() const {
 
 const shared::SurfaceMaterialDescriptor* Scene::getMaterialBuffer() const {
     return m_materialBuffer ? m_materialBuffer->getDevicePointer() : nullptr;
+}
+
+const uint32_t* Scene::getMaterialAlbedoTextureIndices() const {
+    return m_materialAlbedoTextureIndicesBuffer ? m_materialAlbedoTextureIndicesBuffer->getDevicePointer() : nullptr;
+}
+
+const uint32_t* Scene::getMaterialRoughnessTextureIndices() const {
+    return m_materialRoughnessTextureIndicesBuffer ? m_materialRoughnessTextureIndicesBuffer->getDevicePointer() : nullptr;
+}
+
+const uint32_t* Scene::getMaterialMetallicTextureIndices() const {
+    return m_materialMetallicTextureIndicesBuffer ? m_materialMetallicTextureIndicesBuffer->getDevicePointer() : nullptr;
+}
+
+const uint32_t* Scene::getMaterialNormalMapIndices() const {
+    return m_materialNormalMapIndicesBuffer ? m_materialNormalMapIndicesBuffer->getDevicePointer() : nullptr;
+}
+
+const shared::MaterialTextureParams* Scene::getMaterialTextureParams() const {
+    return m_materialTextureParamsBuffer ? m_materialTextureParamsBuffer->getDevicePointer() : nullptr;
 }
 
 const Point3D* Scene::getVertexPositions() const {

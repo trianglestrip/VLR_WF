@@ -262,14 +262,23 @@ extern "C" __global__ void processHits(
             }
         }
 
-        // 应用法线贴图（若有纹理和材质绑定）
+        // 应用法线贴图（若有纹理和材质绑定，支持纹理坐标变换与法线强度）
         if (wlp.textureDescriptorBuffer != nullptr && wlp.materialNormalMapIndices != nullptr) {
-            const uint32_t matIdx = wlp.geomInstBuffer[hitInfo.geomInstIndex].materialIndex;
-            const uint32_t normalMapTexIdx = wlp.materialNormalMapIndices[matIdx];
+            const uint32_t matIdxForNorm = wlp.geomInstBuffer[hitInfo.geomInstIndex].materialIndex;
+            const uint32_t normalMapTexIdx = wlp.materialNormalMapIndices[matIdxForNorm];
             TextureSampler normSampler = getNormalMapSampler(
                 wlp.textureDescriptorBuffer, normalMapTexIdx, TextureFilter_Linear);
-            const TextureSampler* normPtr = normSampler.isValid() ? &normSampler : nullptr;
-            applyBumpMapping(Normal3D(0, 0, 1), &surfPt, normPtr);
+            if (normSampler.isValid()) {
+                float normU, normV;
+                if (wlp.materialTextureParamsBuffer != nullptr) {
+                    const MaterialTextureParams& mtp = wlp.materialTextureParamsBuffer[matIdxForNorm];
+                    transformTexCoord(surfPt.texCoord.x, surfPt.texCoord.y,
+                        mtp.scaleU, mtp.scaleV, mtp.offsetU, mtp.offsetV, &normU, &normV);
+                    applyBumpMappingWithUV(Normal3D(0, 0, 1), &surfPt, &normSampler, normU, normV, mtp.normalScale);
+                } else {
+                    applyBumpMapping(Normal3D(0, 0, 1), &surfPt, &normSampler);
+                }
+            }
         }
     } else {
         // 无顶点数据时：使用简化几何信息
@@ -313,6 +322,78 @@ extern "C" __global__ void processHits(
     // ========================================================================
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
+    const uint32_t matIdx = geomInst.materialIndex;
+
+    // ========================================================================
+    // 3.1 纹理采样：BaseColor、Roughness、Metallic
+    // ========================================================================
+    if (wlp.pathTexturedParamsBuffer != nullptr) {
+        PathTexturedMaterialParams& tp = wlp.pathTexturedParamsBuffer[pathIndex];
+        tp.flags = 0;
+
+        // 纹理坐标变换（使用材质级 scale/offset，若无则恒等变换）
+        float tu, tv;
+        if (wlp.materialTextureParamsBuffer != nullptr) {
+            const MaterialTextureParams& mtp = wlp.materialTextureParamsBuffer[matIdx];
+            transformTexCoord(surfPt.texCoord.x, surfPt.texCoord.y,
+                mtp.scaleU, mtp.scaleV, mtp.offsetU, mtp.offsetV, &tu, &tv);
+        } else {
+            transformTexCoordIdentity(surfPt.texCoord.x, surfPt.texCoord.y, &tu, &tv);
+        }
+
+        const float* d = getMaterialDataAsFloats(matDesc);
+
+        // 采样 BaseColor 纹理
+        if (wlp.textureDescriptorBuffer != nullptr && wlp.materialAlbedoTextureIndices != nullptr) {
+            const uint32_t albedoTexIdx = wlp.materialAlbedoTextureIndices[matIdx];
+            TextureSampler albedoSampler = getTextureSampler(
+                wlp.textureDescriptorBuffer, albedoTexIdx, TextureFilter_Linear);
+            if (albedoSampler.isValid()) {
+                TextureSampleRGBA sample = sampleTexture2D(albedoSampler, tu, tv);
+                tp.baseColorR = sample.r;
+                tp.baseColorG = sample.g;
+                tp.baseColorB = sample.b;
+                tp.flags |= PathTexturedFlags::HasBaseColorTex;
+            }
+        }
+        if (!(tp.flags & PathTexturedFlags::HasBaseColorTex)) {
+            tp.baseColorR = d[MaterialDataLayout::AlbedoR];
+            tp.baseColorG = d[MaterialDataLayout::AlbedoG];
+            tp.baseColorB = d[MaterialDataLayout::AlbedoB];
+        }
+
+        // 采样 Roughness 纹理
+        if (wlp.textureDescriptorBuffer != nullptr && wlp.materialRoughnessTextureIndices != nullptr) {
+            const uint32_t roughTexIdx = wlp.materialRoughnessTextureIndices[matIdx];
+            TextureSampler roughSampler = getTextureSampler(
+                wlp.textureDescriptorBuffer, roughTexIdx, TextureFilter_Linear);
+            if (roughSampler.isValid()) {
+                TextureSampleRGBA sample = sampleTexture2D(roughSampler, tu, tv);
+                tp.roughness = sample.r;  // 粗糙度通常在 R 通道
+                tp.flags |= PathTexturedFlags::HasRoughnessTex;
+            }
+        }
+        if (!(tp.flags & PathTexturedFlags::HasRoughnessTex)) {
+            tp.roughness = d[MaterialDataLayout::Roughness];
+        }
+        tp.roughness = ::vlr::vlr_max(0.001f, tp.roughness);
+
+        // 采样 Metallic 纹理
+        if (wlp.textureDescriptorBuffer != nullptr && wlp.materialMetallicTextureIndices != nullptr) {
+            const uint32_t metalTexIdx = wlp.materialMetallicTextureIndices[matIdx];
+            TextureSampler metalSampler = getTextureSampler(
+                wlp.textureDescriptorBuffer, metalTexIdx, TextureFilter_Linear);
+            if (metalSampler.isValid()) {
+                TextureSampleRGBA sample = sampleTexture2D(metalSampler, tu, tv);
+                tp.metallic = sample.r;  // 金属度通常在 R 通道
+                tp.flags |= PathTexturedFlags::HasMetallicTex;
+            }
+        }
+        if (!(tp.flags & PathTexturedFlags::HasMetallicTex)) {
+            tp.metallic = d[MaterialDataLayout::Metallic];
+        }
+        tp.metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, tp.metallic));
+    }
 
     // BSDFContext 将在 SampleBSDF kernel 中从 surfacePointBuffer 重建
     // 此处 surfacePointBuffer 已填充，SampleLights/SampleBSDF 可直接使用
@@ -373,7 +454,7 @@ extern "C" __global__ void processHits(
     uint32_t pixelIdx = pathState.pixelY * stride + pathState.pixelX;
 
     if (wlp.accumAlbedoBuffer != nullptr) {
-        // 反照率：从材质获取（用于 Denoiser），棋盘格材质需按 UV 采样
+        // 反照率：优先使用纹理化参数，否则从材质获取（用于 Denoiser）
         BSDFType type = getBSDFType(matDesc);
         if (type == BSDFType_LambertCheckerboard) {
             SampledSpectrum albedo;
@@ -381,6 +462,12 @@ extern "C" __global__ void processHits(
             wlp.accumAlbedoBuffer[pixelIdx].r = albedo.values[0];
             wlp.accumAlbedoBuffer[pixelIdx].g = albedo.values[1];
             wlp.accumAlbedoBuffer[pixelIdx].b = albedo.values[2];
+        } else if (wlp.pathTexturedParamsBuffer != nullptr &&
+                   (wlp.pathTexturedParamsBuffer[pathIndex].flags & PathTexturedFlags::HasBaseColorTex)) {
+            const PathTexturedMaterialParams& tp = wlp.pathTexturedParamsBuffer[pathIndex];
+            wlp.accumAlbedoBuffer[pixelIdx].r = tp.baseColorR;
+            wlp.accumAlbedoBuffer[pixelIdx].g = tp.baseColorG;
+            wlp.accumAlbedoBuffer[pixelIdx].b = tp.baseColorB;
         } else {
             const float* d = getMaterialDataAsFloats(matDesc);
             wlp.accumAlbedoBuffer[pixelIdx].r = d[MaterialDataLayout::AlbedoR];

@@ -1,6 +1,6 @@
 # VLR_WF 开发路线图
 
-**最后更新**: 2026-03-08 | **当前版本**: 1.2
+**最后更新**: 2026-03-08 | **当前版本**: 1.3
 
 ---
 
@@ -22,7 +22,6 @@
 
 ### 高优先级
 1. **光源系统** (2-3周): DirectionalEmitter, EnvironmentEmitter 重要性采样
-2. **纹理系统** (2-3周): Image2DTexture, GeometryShaderNode
 
 ### 中优先级
 3. **降噪与后处理** (3-4周): OptiX Denoiser, AOV 系统
@@ -52,4 +51,5 @@
 
 - ✅ 材质系统完善 (MicrofacetReflection/Scattering, MultiSurface, Disney BRDF, 各向异性)
 - ✅ 调试渲染模式 (17 种)
+- ✅ 纹理系统 (Image2D 加载、材质绑定、UV 变换、法线贴图)
 - ✅ 性能优化阶段 1-5 (3.07x 加速)

@@ -12,6 +12,7 @@
 #pragma once
 
 #include "kernel_common.h"
+#include "texture_types.h"
 
 namespace vlr {
 namespace shared {
@@ -168,6 +169,28 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedo(
     albedo->values[3] = (r + g + b) / 3.0f;  // 亮度用于重要性采样
 }
 
+/// 从纹理化参数获取 Lambert 反照率
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedoFromTextured(
+    const PathTexturedMaterialParams& tp,
+    SampledSpectrum* albedo) {
+    albedo->values[0] = tp.baseColorR;
+    albedo->values[1] = tp.baseColorG;
+    albedo->values[2] = tp.baseColorB;
+    albedo->values[3] = (tp.baseColorR + tp.baseColorG + tp.baseColorB) / 3.0f;
+}
+
+/// 获取有效 Lambert 反照率（优先纹理化参数）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getEffectiveLambertAlbedo(
+    const SurfaceMaterialDescriptor& matDesc,
+    const PathTexturedMaterialParams* texParams,
+    SampledSpectrum* albedo) {
+    if (texParams != nullptr && (texParams->flags & PathTexturedFlags::HasBaseColorTex)) {
+        getLambertAlbedoFromTextured(*texParams, albedo);
+    } else {
+        getLambertAlbedo(matDesc, albedo);
+    }
+}
+
 /// 从材质描述符获取 Lambert 棋盘格反照率（按 UV 在两种颜色间切换）
 /// 对于水平表面（法线接近 ±Y）使用 position.x/z 作为 UV；否则使用 texCoord
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedoCheckerboard(
@@ -260,6 +283,25 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getGGXParams(
     reflectance->values[3] = (r + g + b) / 3.0f;
     *roughness = d[MaterialDataLayout::Roughness];
     *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;  // 避免除零
+}
+
+/// 获取有效 GGX 参数（优先纹理化参数）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getEffectiveGGXParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    const PathTexturedMaterialParams* texParams,
+    SampledSpectrum* reflectance,
+    float* roughness) {
+    if (texParams != nullptr) {
+        reflectance->values[0] = texParams->baseColorR;
+        reflectance->values[1] = texParams->baseColorG;
+        reflectance->values[2] = texParams->baseColorB;
+        reflectance->values[3] = (texParams->baseColorR + texParams->baseColorG + texParams->baseColorB) / 3.0f;
+        *roughness = (texParams->flags & PathTexturedFlags::HasRoughnessTex) ? texParams->roughness : getMaterialDataAsFloats(matDesc)[MaterialDataLayout::Roughness];
+    } else {
+        getGGXParams(matDesc, reflectance, roughness);
+        return;
+    }
+    *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;
 }
 
 /// 从材质描述符获取镜面反射率（简单镜面，无 Fresnel）
@@ -407,6 +449,27 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getFresnelBlendParams(
     *roughness = ::vlr::vlr_max(d[MaterialDataLayout::Roughness], 0.001f);
 }
 
+/// 获取有效 FresnelBlend 参数（优先纹理化参数）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getEffectiveFresnelBlendParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    const PathTexturedMaterialParams* texParams,
+    SampledSpectrum* diffuseReflectance,
+    SampledSpectrum* specularReflectance,
+    float* roughness) {
+    if (texParams != nullptr) {
+        diffuseReflectance->values[0] = texParams->baseColorR;
+        diffuseReflectance->values[1] = texParams->baseColorG;
+        diffuseReflectance->values[2] = texParams->baseColorB;
+        diffuseReflectance->values[3] = (texParams->baseColorR + texParams->baseColorG + texParams->baseColorB) / 3.0f;
+        *specularReflectance = *diffuseReflectance;
+        *roughness = (texParams->flags & PathTexturedFlags::HasRoughnessTex) ? texParams->roughness : getMaterialDataAsFloats(matDesc)[MaterialDataLayout::Roughness];
+    } else {
+        getFresnelBlendParams(matDesc, diffuseReflectance, specularReflectance, roughness);
+        return;
+    }
+    *roughness = ::vlr::vlr_max(*roughness, 0.001f);
+}
+
 /// 从材质描述符获取 UE4/Frostbite BRDF 参数
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getUE4Params(
     const SurfaceMaterialDescriptor& matDesc,
@@ -423,6 +486,27 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getUE4Params(
     baseColor->values[3] = (r + g + b) / 3.0f;
     *metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Metallic]));
     *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
+}
+
+/// 获取有效 UE4 参数（优先纹理化参数）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getEffectiveUE4Params(
+    const SurfaceMaterialDescriptor& matDesc,
+    const PathTexturedMaterialParams* texParams,
+    SampledSpectrum* baseColor,
+    float* metallic,
+    float* roughness) {
+    if (texParams != nullptr) {
+        baseColor->values[0] = texParams->baseColorR;
+        baseColor->values[1] = texParams->baseColorG;
+        baseColor->values[2] = texParams->baseColorB;
+        baseColor->values[3] = (texParams->baseColorR + texParams->baseColorG + texParams->baseColorB) / 3.0f;
+        *metallic = (texParams->flags & PathTexturedFlags::HasMetallicTex) ? texParams->metallic : getMaterialDataAsFloats(matDesc)[MaterialDataLayout::Metallic];
+        *roughness = (texParams->flags & PathTexturedFlags::HasRoughnessTex) ? texParams->roughness : getMaterialDataAsFloats(matDesc)[MaterialDataLayout::Roughness];
+        *metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, *metallic));
+        *roughness = ::vlr::vlr_max(0.001f, *roughness);
+    } else {
+        getUE4Params(matDesc, baseColor, metallic, roughness);
+    }
 }
 
 /// 从材质描述符获取 Disney Principled BRDF 参数
@@ -545,19 +629,22 @@ struct BSDFContext {
     const WavelengthSamples* wls;               ///< 波长采样
     Normal3D geomNormalLocal;                  ///< 几何法线（局部坐标）
     bool singleWlSelected;                    ///< 色散材质是否已选择单波长
+    const PathTexturedMaterialParams* texturedParams;  ///< 纹理化材质参数覆盖（可选）
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFContext() : singleWlSelected(false) {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFContext() : singleWlSelected(false), texturedParams(nullptr) {}
 
     CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFContext(
         const SurfaceMaterialDescriptor& desc,
         const SurfacePoint& sp,
         const WavelengthSamples& wavelengthSamples,
-        bool singleWl = false)
+        bool singleWl = false,
+        const PathTexturedMaterialParams* texParams = nullptr)
         : matDesc(&desc)
         , surfPt(&sp)
         , wls(&wavelengthSamples)
         , geomNormalLocal(sp.shadingFrame.toLocal(sp.geometricNormal))
         , singleWlSelected(singleWl)
+        , texturedParams(texParams)
     {}
 };
 

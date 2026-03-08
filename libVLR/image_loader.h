@@ -81,4 +81,35 @@ bool loadHDR(const char* filename, HDRImage& outImage, std::string* outError = n
 /// @return 成功返回 true
 bool loadHDRImage(const char* filename, HDRImage& outImage, std::string* outError = nullptr);
 
+// ============================================================================
+// 纹理图像加载（PNG/JPG/EXR/HDR）
+// ============================================================================
+
+/// 纹理图像格式（与 API format 参数对应）
+enum class TextureImageFormat : uint32_t {
+    RGBA8 = 0,      ///< 8 位 RGBA（PNG/JPG）
+    RGB32F = 1,      ///< 32 位浮点 RGB（EXR/HDR）
+    RGBA32F = 2,     ///< 32 位浮点 RGBA
+};
+
+/// 纹理图像数据（用于 vlrCreateTexture2D）
+struct TextureImage {
+    void* data;              ///< 像素数据（RGBA8: uint8_t*, 浮点: float*）
+    uint32_t width;
+    uint32_t height;
+    TextureImageFormat format;
+
+    TextureImage() : data(nullptr), width(0), height(0), format(TextureImageFormat::RGBA8) {}
+};
+
+/// 加载纹理图像（支持 PNG, JPG, EXR, HDR）
+/// @param filename 图像文件路径
+/// @param outImage 输出图像数据（调用者需用 freeTextureImage 释放 data）
+/// @param outError 错误信息（可选）
+/// @return 成功返回 true
+bool loadTextureImage(const char* filename, TextureImage& outImage, std::string* outError = nullptr);
+
+/// 释放 loadTextureImage 分配的数据
+void freeTextureImage(TextureImage& image);
+
 } // namespace vlr

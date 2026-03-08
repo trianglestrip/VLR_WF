@@ -145,5 +145,13 @@ target_include_directories(multi_surface_test PRIVATE
 )
 target_link_libraries(multi_surface_test PRIVATE VLR CUDA::cudart)
 
+# Texture System 测试（纹理加载、程序化纹理、Cornell Box）
+add_executable(texture_test test/texture_test.cpp)
+target_include_directories(texture_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(texture_test PRIVATE VLR CUDA::cudart)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

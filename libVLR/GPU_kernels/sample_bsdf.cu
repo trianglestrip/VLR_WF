@@ -16,6 +16,7 @@
 #include "../shared/bsdf_common.h"
 #include "../shared/geometry_common.h"
 #include "../shared/material_types.h"
+#include "../shared/texture_types.h"
 #include "../shared/performance_config.h"
 #include "../include/vlr/basic_types.h"
 #include "warp_utils.cuh"
@@ -132,7 +133,13 @@ extern "C" __global__ void sampleBSDF(
         Vector3D(-pathState.direction.x, -pathState.direction.y, -pathState.direction.z));
     Normal3D geomNormalLocal = surfPt.shadingFrame.toLocal(surfPt.geometricNormal);
 
-    BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls, pathState.singleWlSelected());
+    // 纹理化材质参数：ProcessHits 已采样并写入 pathTexturedParamsBuffer
+    const PathTexturedMaterialParams* texturedParams = nullptr;
+    if (wlp.pathTexturedParamsBuffer != nullptr && pathIndex < wlp.maxNumPaths) {
+        texturedParams = &wlp.pathTexturedParamsBuffer[pathIndex];
+    }
+
+    BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls, pathState.singleWlSelected(), texturedParams);
     bsdfCtx.geomNormalLocal = geomNormalLocal;
 
     // ========================================================================

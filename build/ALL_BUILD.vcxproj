@@ -203,6 +203,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Project>{6B94400B-47E5-3292-BF37-8122F9BB6EEA}</Project>
       <Name>multi_surface_test</Name>
     </ProjectReference>
+    <ProjectReference Include="F:\project\VLR_WF\build\texture_test.vcxproj">
+      <Project>{012A86B2-9203-3CC3-989B-ADBF94C40409}</Project>
+      <Name>texture_test</Name>
+    </ProjectReference>
     <ProjectReference Include="F:\project\VLR_WF\build\libVLR\trace_rays_ptx.vcxproj">
       <Project>{6F5C7D06-6FDE-333A-800D-7387949D4F41}</Project>
       <Name>trace_rays_ptx</Name>

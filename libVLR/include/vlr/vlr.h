@@ -56,6 +56,7 @@ struct VLRSceneImpl;
 struct VLRTriangleMeshImpl;
 struct VLRMaterialImpl;
 struct VLRInstanceImpl;
+struct VLRTextureImpl;
 
 /// 上下文句柄：管理渲染资源与管线
 typedef struct VLRContextImpl* VLRContext;
@@ -71,6 +72,9 @@ typedef struct VLRMaterialImpl* VLRMaterial;
 
 /// 实例句柄：场景中的几何实例（网格+变换）
 typedef struct VLRInstanceImpl* VLRInstance;
+
+/// 纹理句柄：2D 纹理（从文件或内存创建）
+typedef struct VLRTextureImpl* VLRTexture;
 
 
 // ============================================================================
@@ -308,6 +312,102 @@ VLR_API VLRResult vlrCreateInstance(
 /// 销毁实例
 /// @param instance 实例句柄（可为 NULL，无操作）
 VLR_API void vlrDestroyInstance(VLRInstance instance);
+
+// ============================================================================
+// 纹理 API
+// ============================================================================
+
+/// 从图像文件创建 2D 纹理（支持 PNG, JPG, EXR, HDR）
+/// @param context 所属上下文
+/// @param imagePath 图像文件路径
+/// @param outTexture 输出纹理句柄
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrCreateTexture2D(
+    VLRContext context,
+    const char* imagePath,
+    VLRTexture* outTexture);
+
+/// 从内存创建 2D 纹理
+/// @param context 所属上下文
+/// @param data 像素数据指针
+/// @param width 纹理宽度
+/// @param height 纹理高度
+/// @param format 像素格式：0=RGBA8, 1=RGB32F, 2=RGBA32F
+/// @param outTexture 输出纹理句柄
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrCreateTexture2DFromMemory(
+    VLRContext context,
+    const void* data,
+    uint32_t width,
+    uint32_t height,
+    uint32_t format,
+    VLRTexture* outTexture);
+
+/// 销毁纹理
+/// @param texture 纹理句柄（可为 NULL，无操作）
+VLR_API VLRResult vlrDestroyTexture(VLRTexture texture);
+
+/// 设置纹理滤波模式
+/// @param texture 纹理句柄
+/// @param filterMode 0=Nearest, 1=Linear
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetTextureFilterMode(
+    VLRTexture texture,
+    uint32_t filterMode);
+
+/// 设置纹理环绕模式
+/// @param texture 纹理句柄
+/// @param wrapU U 方向：0=Repeat, 1=Clamp
+/// @param wrapV V 方向：0=Repeat, 1=Clamp
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetTextureWrapMode(
+    VLRTexture texture,
+    uint32_t wrapU,
+    uint32_t wrapV);
+
+// ============================================================================
+// 材质纹理绑定 API
+// ============================================================================
+
+/// 设置材质基础色纹理
+/// @param material 材质句柄
+/// @param texture 纹理句柄（可为 NULL 清除绑定）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetMaterialBaseColorTexture(
+    VLRMaterial material,
+    VLRTexture texture);
+
+/// 设置材质粗糙度纹理
+VLR_API VLRResult vlrSetMaterialRoughnessTexture(
+    VLRMaterial material,
+    VLRTexture texture);
+
+/// 设置材质金属度纹理
+VLR_API VLRResult vlrSetMaterialMetallicTexture(
+    VLRMaterial material,
+    VLRTexture texture);
+
+/// 设置材质法线贴图
+/// @param material 材质句柄
+/// @param texture 法线贴图纹理（可为 NULL 清除绑定）
+/// @param normalScale 法线强度，默认 1.0
+VLR_API VLRResult vlrSetMaterialNormalTexture(
+    VLRMaterial material,
+    VLRTexture texture,
+    float normalScale);
+
+/// 设置材质纹理坐标变换
+/// @param material 材质句柄
+/// @param scaleU U 方向缩放（默认 1.0）
+/// @param scaleV V 方向缩放（默认 1.0）
+/// @param offsetU U 方向偏移（默认 0）
+/// @param offsetV V 方向偏移（默认 0）
+VLR_API VLRResult vlrSetMaterialTextureTransform(
+    VLRMaterial material,
+    float scaleU,
+    float scaleV,
+    float offsetU,
+    float offsetV);
 
 /// 添加区域光
 /// @param scene 所属场景

@@ -2120,7 +2120,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
     switch (type) {
     case BSDFType_Lambert: {
         SampledSpectrum albedo;
-        getLambertAlbedo(matDesc, &albedo);
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &albedo);
         return evaluateLambertBSDF(albedo, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_LambertCheckerboard: {
@@ -2130,18 +2130,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
     }
     case BSDFType_LambertianScattering: {
         SampledSpectrum albedo;
-        getLambertAlbedo(matDesc, &albedo);
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &albedo);
         return evaluateLambertianScatteringBSDF(albedo, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
         float roughness;
-        getGGXParams(matDesc, &reflectance, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &reflectance, &roughness);
         return evaluateGGXBSDF(reflectance, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_MicrofacetReflection: {
         SampledSpectrum coeffR, eta, kappa;
-        getLambertAlbedo(matDesc, &coeffR);
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &coeffR);
         float roughness;
         getMicrofacetReflectionParams(matDesc, &eta, &kappa, &roughness);
         return evaluateMicrofacetReflectionBSDF(coeffR, eta, kappa, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
@@ -2160,7 +2160,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
         float ior, disp;
         getTransmissionParams(matDesc, &ior, &disp);
         SampledSpectrum trans;
-        for (int i = 0; i < NumSpectralSamples; ++i) trans.values[i] = 1.0f;
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &trans);
         return evaluateSpecularTransmissionBSDF(ior, trans, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_GGXTransmission: {
@@ -2168,7 +2168,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
         getTransmissionParams(matDesc, &ior, &disp);
         SampledSpectrum refl;
         float roughness;
-        getGGXParams(matDesc, &refl, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &refl, &roughness);
         SampledSpectrum trans;
         for (int i = 0; i < NumSpectralSamples; ++i) trans.values[i] = 1.0f;
         return evaluateGGXTransmissionBSDF(trans, roughness, 1.0f, ior, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
@@ -2176,14 +2176,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
     case BSDFType_FresnelBlend: {
         SampledSpectrum diff, spec;
         float roughness;
-        getFresnelBlendParams(matDesc, &diff, &spec, &roughness);
+        getEffectiveFresnelBlendParams(matDesc, ctx.texturedParams, &diff, &spec, &roughness);
         return evaluateFresnelBlendBSDF(diff, spec, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_UE4BRDF:
     case BSDFType_FrostbiteBRDF: {
         SampledSpectrum baseColor;
         float metallic, roughness;
-        getUE4Params(matDesc, &baseColor, &metallic, &roughness);
+        getEffectiveUE4Params(matDesc, ctx.texturedParams, &baseColor, &metallic, &roughness);
         return evaluateUE4BRDF(baseColor, metallic, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_DisneyBRDF: {
@@ -2247,7 +2247,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
     switch (type) {
     case BSDFType_Lambert: {
         SampledSpectrum albedo;
-        getLambertAlbedo(matDesc, &albedo);
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &albedo);
         sampleLambertBSDF(albedo, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
         break;
     }
@@ -2267,7 +2267,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
         float roughness;
-        getGGXParams(matDesc, &reflectance, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &reflectance, &roughness);
         sampleGGXBSDF(reflectance, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
         break;
     }
@@ -2278,7 +2278,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         }
 #endif
         SampledSpectrum coeffR, eta, kappa;
-        getLambertAlbedo(matDesc, &coeffR);
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &coeffR);
         float roughness, anisotropy;
         getMicrofacetReflectionParamsAniso(matDesc, &eta, &kappa, &roughness, &anisotropy);
 #if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
@@ -2324,7 +2324,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         }
 #endif
         SampledSpectrum transmittance;
-        getLambertAlbedo(matDesc, &transmittance);
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &transmittance);
         sampleSpecularTransmissionBSDF(1.0f, ior, disp, transmittance, wls, singleWl,
             dirInLocal, ctx.geomNormalLocal, u0, u1, result);
         break;
@@ -2333,10 +2333,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         float ior, disp;
         getTransmissionParams(matDesc, &ior, &disp);
         SampledSpectrum trans;
-        for (int i = 0; i < NumSpectralSamples; ++i) trans.values[i] = 1.0f;
+        getEffectiveLambertAlbedo(matDesc, ctx.texturedParams, &trans);
         SampledSpectrum refl;
         float roughness;
-        getGGXParams(matDesc, &refl, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &refl, &roughness);
         sampleGGXTransmissionBSDF(trans, roughness, 1.0f, ior,
             dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
         break;
@@ -2344,7 +2344,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
     case BSDFType_FresnelBlend: {
         SampledSpectrum diff, spec;
         float roughness;
-        getFresnelBlendParams(matDesc, &diff, &spec, &roughness);
+        getEffectiveFresnelBlendParams(matDesc, ctx.texturedParams, &diff, &spec, &roughness);
         sampleFresnelBlendBSDF(diff, spec, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
         break;
     }
@@ -2352,7 +2352,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
     case BSDFType_FrostbiteBRDF: {
         SampledSpectrum baseColor;
         float metallic, roughness;
-        getUE4Params(matDesc, &baseColor, &metallic, &roughness);
+        getEffectiveUE4Params(matDesc, ctx.texturedParams, &baseColor, &metallic, &roughness);
         sampleGGXBSDF(baseColor, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
         result->sampledBSDFType = type;
         break;
@@ -2420,7 +2420,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
         float roughness;
-        getGGXParams(matDesc, &reflectance, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &reflectance, &roughness);
         return getGGXBSDFPDF(reflectance, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_MicrofacetReflection: {
@@ -2450,7 +2450,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
     case BSDFType_GGXTransmission: {
         SampledSpectrum refl;
         float roughness;
-        getGGXParams(matDesc, &refl, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &refl, &roughness);
         return getGGXBSDFPDF(refl, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_FresnelBlend:
@@ -2458,7 +2458,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
     case BSDFType_FrostbiteBRDF: {
         SampledSpectrum refl;
         float roughness;
-        getGGXParams(matDesc, &refl, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &refl, &roughness);
         return getGGXBSDFPDF(refl, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_DisneyBRDF: {
@@ -2475,7 +2475,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
         SampledSpectrum a0, a1;
         getMixedParams(matDesc, &a0, &a1, &weight, &roughness);
         SampledSpectrum refl;
-        getGGXParams(matDesc, &refl, &roughness);
+        getEffectiveGGXParams(matDesc, ctx.texturedParams, &refl, &roughness);
         float pdfGGX = getGGXBSDFPDF(refl, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
         float pdfLambert = getLambertBSDFPDF(dirOutLocal, ctx.geomNormalLocal);
         return (1.0f - weight) * pdfLambert + weight * pdfGGX;

@@ -12,6 +12,7 @@
 
 #include "include/vlr/public_types.h"
 #include "shared/path_types.h"
+#include "shared/texture_types.h"
 #include "config_loader.h"
 #include "denoiser.h"
 #include "utils/cuda_util.h"
@@ -103,6 +104,40 @@ public:
     
     /// 设置性能配置（从 INI 加载后应用）
     void setPerformanceConfig(const RuntimePerformanceConfig& config);
+
+    // ------------------------------------------------------------------------
+    // 纹理管理
+    // ------------------------------------------------------------------------
+
+    /// 创建 2D 纹理（从图像文件加载）
+    /// @param imagePath 图像路径（PNG/JPG/EXR/HDR）
+    /// @param outTextureIndex 输出纹理索引
+    /// @return 成功返回 true
+    bool createTexture2D(const char* imagePath, uint32_t* outTextureIndex);
+
+    /// 从内存创建 2D 纹理
+    /// @param data 像素数据
+    /// @param width 宽度
+    /// @param height 高度
+    /// @param format 0=RGBA8, 1=RGB32F, 2=RGBA32F
+    /// @param outTextureIndex 输出纹理索引
+    bool createTexture2DFromMemory(const void* data, uint32_t width, uint32_t height,
+                                   uint32_t format, uint32_t* outTextureIndex);
+
+    /// 销毁纹理
+    void destroyTexture(uint32_t textureIndex);
+
+    /// 设置纹理滤波模式（0=Nearest, 1=Linear）
+    bool setTextureFilterMode(uint32_t textureIndex, uint32_t filterMode);
+
+    /// 设置纹理环绕模式（0=Repeat, 1=Clamp）
+    bool setTextureWrapMode(uint32_t textureIndex, uint32_t wrapU, uint32_t wrapV);
+
+    /// 获取纹理描述符（供 Scene/渲染使用）
+    const shared::Texture2DDescriptor* getTextureDescriptor(uint32_t textureIndex) const;
+
+    /// 获取纹理描述符数组的设备指针（供 Wavefront 启动参数使用）
+    const shared::Texture2DDescriptor* getTextureDescriptorBuffer() const;
     
     // 统计信息
     const shared::WavefrontPerformanceStats& getPerformanceStats() const;
@@ -147,6 +182,7 @@ private:
             std::unique_ptr<cudau::Buffer<shared::WavefrontPathState>> pathStateBuffer;
             std::unique_ptr<cudau::Buffer<shared::WavefrontHitInfo>> hitInfoBuffer;
             std::unique_ptr<cudau::Buffer<shared::SurfacePoint>> surfacePointBuffer;
+            std::unique_ptr<cudau::Buffer<shared::PathTexturedMaterialParams>> pathTexturedParamsBuffer;
             
             // 工作队列
             std::unique_ptr<cudau::Buffer<uint32_t>> activePathIndices;
@@ -317,6 +353,22 @@ private:
     VLRDebugMode m_debugMode;
     int32_t m_probePixelX;
     int32_t m_probePixelY;
+
+    // ========================================================================
+    // 纹理资源
+    // ========================================================================
+    struct TextureRecord {
+        std::unique_ptr<cudau::Buffer<uint8_t>> gpuBuffer;
+        shared::Texture2DDescriptor descriptor;
+        shared::TextureFilterMode filterMode;
+        shared::TextureWrapMode wrapU;
+        shared::TextureWrapMode wrapV;
+    };
+    std::vector<TextureRecord> m_textures;
+    mutable std::unique_ptr<cudau::Buffer<shared::Texture2DDescriptor>> m_textureDescriptorBuffer;
+    mutable bool m_textureDescriptorBufferDirty = true;
+
+    void updateTextureDescriptorBuffer() const;
     
     // ========================================================================
     // 私有方法

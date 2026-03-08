@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // VLR Wavefront TraceRays - 鏈€灏忓寲绫诲瀷瀹氫箟
 //
 // 鏈枃浠朵粎鍖呭惈 TraceRays OptiX 绋嬪簭鎵€闇€鐨勬渶灏忕被鍨嬮泦鍚堛€?
@@ -55,6 +55,8 @@ struct BlockBuffer2D {
 
 // 鍓嶅悜澹版槑锛岄伩鍏嶅寘鍚?texture_types.h
 struct Texture2DDescriptor;
+struct PathTexturedMaterialParams;
+struct MaterialTextureParams;
 
 // 鏉愯川绫诲埆鏁伴噺锛堜笌 kernel_common.h 淇濇寔涓€鑷达紝鐢ㄤ簬 WavefrontMaterialQueues 甯冨眬锛?
 constexpr uint32_t NumMaterialCategories = 6;
@@ -158,6 +160,11 @@ struct WavefrontLaunchParameters {
 
     const Texture2DDescriptor* textureDescriptorBuffer;
     const uint32_t* materialNormalMapIndices;
+    const uint32_t* materialAlbedoTextureIndices;
+    const uint32_t* materialRoughnessTextureIndices;
+    const uint32_t* materialMetallicTextureIndices;
+    const MaterialTextureParams* materialTextureParamsBuffer;
+    PathTexturedMaterialParams* pathTexturedParamsBuffer;
 
     const NodeProcedureSet* nodeProcedureSetBuffer;
     const SmallNodeDescriptor* smallNodeDescriptorBuffer;

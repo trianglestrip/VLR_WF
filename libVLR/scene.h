@@ -242,6 +242,19 @@ public:
         float emissionR = 0.0f, float emissionG = 0.0f, float emissionB = 0.0f);
 
     // ------------------------------------------------------------------------
+    // 材质纹理绑定
+    // ------------------------------------------------------------------------
+
+    /// 设置材质基础色纹理（textureIndex 为 Context 纹理缓冲区中的索引，0xFFFFFFFF 表示清除）
+    void setMaterialBaseColorTexture(uint32_t materialId, uint32_t textureIndex);
+    void setMaterialRoughnessTexture(uint32_t materialId, uint32_t textureIndex);
+    void setMaterialMetallicTexture(uint32_t materialId, uint32_t textureIndex);
+    void setMaterialNormalTexture(uint32_t materialId, uint32_t textureIndex, float normalScale = 1.0f);
+    /// 设置材质纹理坐标变换
+    void setMaterialTextureTransform(uint32_t materialId,
+        float scaleU, float scaleV, float offsetU, float offsetV);
+
+    // ------------------------------------------------------------------------
     // 实例管理
     // ------------------------------------------------------------------------
 
@@ -292,6 +305,11 @@ public:
     const shared::GeometryInstance* getGeomInstBuffer() const;
     const shared::Instance* getInstBuffer() const;
     const shared::SurfaceMaterialDescriptor* getMaterialBuffer() const;
+    const uint32_t* getMaterialAlbedoTextureIndices() const;
+    const uint32_t* getMaterialRoughnessTextureIndices() const;
+    const uint32_t* getMaterialMetallicTextureIndices() const;
+    const uint32_t* getMaterialNormalMapIndices() const;
+    const shared::MaterialTextureParams* getMaterialTextureParams() const;
     const Point3D* getVertexPositions() const;
     const Normal3D* getVertexNormals() const;
     const TexCoord2D* getVertexTexCoords() const;
@@ -340,6 +358,16 @@ private:
     std::unique_ptr<cudau::Buffer<shared::Instance>> m_instBuffer;
     std::unique_ptr<cudau::Buffer<uint32_t>> m_instGeomIndicesBuffer;
     std::unique_ptr<cudau::Buffer<shared::SurfaceMaterialDescriptor>> m_materialBuffer;
+    std::vector<uint32_t> m_materialAlbedoTextureIndices;
+    std::vector<uint32_t> m_materialRoughnessTextureIndices;
+    std::vector<uint32_t> m_materialMetallicTextureIndices;
+    std::vector<uint32_t> m_materialNormalMapIndices;
+    std::vector<shared::MaterialTextureParams> m_materialTextureParams;
+    std::unique_ptr<cudau::Buffer<uint32_t>> m_materialAlbedoTextureIndicesBuffer;
+    std::unique_ptr<cudau::Buffer<uint32_t>> m_materialRoughnessTextureIndicesBuffer;
+    std::unique_ptr<cudau::Buffer<uint32_t>> m_materialMetallicTextureIndicesBuffer;
+    std::unique_ptr<cudau::Buffer<uint32_t>> m_materialNormalMapIndicesBuffer;
+    std::unique_ptr<cudau::Buffer<shared::MaterialTextureParams>> m_materialTextureParamsBuffer;
     std::unique_ptr<cudau::Buffer<Point3D>> m_vertexPositionBuffer;
     std::unique_ptr<cudau::Buffer<Normal3D>> m_vertexNormalBuffer;
     std::unique_ptr<cudau::Buffer<TexCoord2D>> m_vertexTexCoordBuffer;

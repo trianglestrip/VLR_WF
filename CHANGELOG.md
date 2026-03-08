@@ -6,6 +6,55 @@
 
 ---
 
+## [1.3.0] - 2026-03-08
+
+### 新增
+
+#### 纹理系统
+
+- **图像加载** (`image_loader.h/cpp`)
+  - PNG/JPG：使用 stb_image
+  - EXR：使用 tinyexr
+  - HDR：使用 stb_image
+  - 自动格式检测
+  - ✅ 所有格式已支持
+
+- **纹理 API** (`vlr.h`)
+  - `vlrCreateTexture2D(context, path, &tex)` - 从文件加载
+  - `vlrCreateTexture2DFromMemory(...)` - 从内存创建
+  - `vlrDestroyTexture(tex)` - 销毁纹理
+  - `vlrSetTextureFilterMode(tex, mode)` - 滤波模式
+  - `vlrSetTextureWrapMode(tex, wrapU, wrapV)` - 环绕模式
+
+- **材质纹理绑定** (`vlr.h`)
+  - `vlrSetMaterialBaseColorTexture(mat, tex)` - BaseColor 纹理
+  - `vlrSetMaterialRoughnessTexture(mat, tex)` - Roughness 纹理
+  - `vlrSetMaterialMetallicTexture(mat, tex)` - Metallic 纹理
+  - `vlrSetMaterialNormalTexture(mat, tex, scale)` - Normal Map
+  - `vlrSetMaterialTextureTransform(mat, ...)` - UV 变换
+
+- **GPU 实现** (`texture_types.h`, `texture_common.h`)
+  - 双线性/最近邻滤波
+  - Repeat/Clamp 环绕
+  - 法线贴图解码和切线空间变换
+  - UV Scale/Offset 变换
+  - 棋盘格程序化纹理
+
+- **渲染集成** (`process_hits.cu`, `sample_bsdf.cu`)
+  - ProcessHits 中采样纹理
+  - 纹理化参数传递到 BSDF
+  - 法线贴图自动应用
+
+#### 测试程序
+
+- `test/texture_test.cpp` - 纹理系统测试 ✅
+
+#### 文档
+
+- `docs/TEXTURE_SYSTEM.md` - 纹理系统完整文档
+
+---
+
 ## [1.2.0] - 2026-03-08
 
 ### 新增

@@ -247,9 +247,14 @@ struct WavefrontLaunchParameters {
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_zbar;
     float DiscretizedSpectrum_integralCMF;
     
-    // 纹理数据（法线贴图等）
+    // 纹理数据（法线贴图、BaseColor、Roughness、Metallic）
     const Texture2DDescriptor* textureDescriptorBuffer;  ///< 纹理描述符数组
     const uint32_t* materialNormalMapIndices;            ///< 每材质的法线贴图纹理索引（InvalidTextureIndex 表示无）
+    const uint32_t* materialAlbedoTextureIndices;       ///< 每材质的 BaseColor 纹理索引
+    const uint32_t* materialRoughnessTextureIndices;    ///< 每材质的 Roughness 纹理索引
+    const uint32_t* materialMetallicTextureIndices;     ///< 每材质的 Metallic 纹理索引
+    const MaterialTextureParams* materialTextureParamsBuffer; ///< 每材质的纹理变换参数（scale/offset/normalScale）
+    PathTexturedMaterialParams* pathTexturedParamsBuffer; ///< 每路径纹理化材质参数（ProcessHits 写入，SampleBSDF 读取）
 
     // 材质和节点数据
     const NodeProcedureSet* nodeProcedureSetBuffer;

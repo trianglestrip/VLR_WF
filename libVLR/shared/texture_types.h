@@ -190,14 +190,51 @@ enum ProceduralTextureType : uint32_t {
 // 7. 材质纹理插槽索引（与 material_types.h 协同）
 // ============================================================================
 
-/// 材质纹理参数插槽 - 使用 MaterialDataLayout 中的索引
-/// 本命名空间仅为兼容性保留，实际索引见 material_types.h::MaterialDataLayout
+/// 材质纹理插槽索引（用于 materialTextureIndices 数组）
+/// 每个材质有 4 个纹理槽位：baseColor, roughness, metallic, normalMap
 namespace MaterialTextureSlots {
-    // 与 MaterialDataLayout 保持一致
-    constexpr int NormalMapTextureIndex = 10;
-    constexpr int AlbedoTextureIndex = 11;
-    constexpr int RoughnessTextureIndex = 12;
+    constexpr int BaseColor = 0;
+    constexpr int Roughness = 1;
+    constexpr int Metallic = 2;
+    constexpr int NormalMap = 3;
+    constexpr int NumSlots = 4;
     constexpr uint32_t InvalidTextureIndex = 0xFFFFFFFF;
+}
+
+// ============================================================================
+// 8. 材质纹理变换参数（scale/offset/normalScale）
+// ============================================================================
+
+/// 每材质的纹理坐标变换参数
+struct MaterialTextureParams {
+    float scaleU;
+    float scaleV;
+    float offsetU;
+    float offsetV;
+    float normalScale;
+
+    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+    MaterialTextureParams()
+        : scaleU(1.0f), scaleV(1.0f), offsetU(0.0f), offsetV(0.0f), normalScale(1.0f) {}
+};
+
+// ============================================================================
+// 9. 路径级纹理化材质参数（ProcessHits 写入，SampleBSDF 读取）
+// ============================================================================
+
+/// 每路径的纹理化材质参数
+/// 当材质绑定纹理时，ProcessHits 采样后写入，SampleBSDF 使用覆盖值
+struct PathTexturedMaterialParams {
+    float baseColorR, baseColorG, baseColorB;
+    float roughness;
+    float metallic;
+    uint32_t flags;  ///< bit0: hasBaseColorTex, bit1: hasRoughnessTex, bit2: hasMetallicTex
+};
+
+namespace PathTexturedFlags {
+    constexpr uint32_t HasBaseColorTex = 1u << 0;
+    constexpr uint32_t HasRoughnessTex = 1u << 1;
+    constexpr uint32_t HasMetallicTex  = 1u << 2;
 }
 
 } // namespace shared

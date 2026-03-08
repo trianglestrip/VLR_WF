@@ -289,10 +289,12 @@ Normal3D tangentToWorld(const Normal3D& tangentSpaceNormal,
 /// 应用法线贴图扰动
 /// 从纹理采样切线空间法线，变换到世界空间，更新 surfacePoint 的着色法线
 /// texSampler: 法线贴图纹理采样器；nullptr 表示无贴图，不修改
+/// normalScale: 法线强度 [0,1] 混合平坦与采样法线，>1 增强凹凸，默认 1.0
 CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
 void applyBumpMapping(const Normal3D& localNormal,
                      SurfacePoint* surfPt,
-                     const TextureSampler* normalMapSampler = nullptr) {
+                     const TextureSampler* normalMapSampler = nullptr,
+                     float normalScale = 1.0f) {
     if (surfPt == nullptr)
         return;
 
@@ -301,6 +303,18 @@ void applyBumpMapping(const Normal3D& localNormal,
     if (normalMapSampler != nullptr && normalMapSampler->isValid()) {
         effectiveLocal = sampleNormalMap(*normalMapSampler,
                                         surfPt->texCoord.x, surfPt->texCoord.y);
+        // 法线强度：缩放 xy 分量后重新归一化（切线空间 z 向上）
+        if (normalScale != 1.0f) {
+            effectiveLocal.x *= normalScale;
+            effectiveLocal.y *= normalScale;
+            float lenSq = effectiveLocal.x * effectiveLocal.x + effectiveLocal.y * effectiveLocal.y + effectiveLocal.z * effectiveLocal.z;
+            if (lenSq > 1e-12f) {
+                float invLen = 1.0f / std::sqrt(lenSq);
+                effectiveLocal.x *= invLen;
+                effectiveLocal.y *= invLen;
+                effectiveLocal.z *= invLen;
+            }
+        }
     }
 
     // 将切线空间法线变换到世界空间
@@ -314,6 +328,35 @@ void applyBumpMapping(const Normal3D& localNormal,
     surfPt->shadingFrame = ReferenceFrame(surfPt->shadingFrame.x, worldNormal);
 }
 
+
+/// 应用法线贴图（指定 UV 坐标，用于纹理变换后采样）
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+void applyBumpMappingWithUV(const Normal3D& localNormal,
+                           SurfacePoint* surfPt,
+                           const TextureSampler* normalMapSampler,
+                           float u, float v,
+                           float normalScale = 1.0f) {
+    if (surfPt == nullptr) return;
+    Normal3D effectiveLocal = localNormal;
+    if (normalMapSampler != nullptr && normalMapSampler->isValid()) {
+        effectiveLocal = sampleNormalMap(*normalMapSampler, u, v);
+        if (normalScale != 1.0f) {
+            effectiveLocal.x *= normalScale;
+            effectiveLocal.y *= normalScale;
+            float lenSq = effectiveLocal.x * effectiveLocal.x + effectiveLocal.y * effectiveLocal.y + effectiveLocal.z * effectiveLocal.z;
+            if (lenSq > 1e-12f) {
+                float invLen = 1.0f / std::sqrt(lenSq);
+                effectiveLocal.x *= invLen;
+                effectiveLocal.y *= invLen;
+                effectiveLocal.z *= invLen;
+            }
+        }
+    }
+    Normal3D worldNormal = tangentToWorld(effectiveLocal, surfPt->shadingFrame);
+    if (::vlr::dot(worldNormal, surfPt->geometricNormal) < 0.0f)
+        worldNormal = worldNormal * (-1.0f);
+    surfPt->shadingFrame = ReferenceFrame(surfPt->shadingFrame.x, worldNormal);
+}
 
 /// 无纹理版本：仅使用传入的 localNormal 更新着色法线
 /// 与 basic_types.h 中 applyBumpMapping 签名兼容
@@ -380,6 +423,44 @@ TextureSampler getNormalMapSampler(const Texture2DDescriptor* textureBuffer,
         return TextureSampler();
 
     return TextureSampler(tex, filter);
+}
+
+/// 从纹理缓冲区获取通用纹理采样器
+/// textureIndex: 纹理描述符数组中的索引；InvalidTextureIndex 表示无
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+TextureSampler getTextureSampler(const Texture2DDescriptor* textureBuffer,
+                                 uint32_t textureIndex,
+                                 TextureFilterMode filter = TextureFilter_Linear) {
+    if (textureBuffer == nullptr || textureIndex == MaterialTextureSlots::InvalidTextureIndex)
+        return TextureSampler();
+
+    const Texture2DDescriptor& tex = textureBuffer[textureIndex];
+    if (!tex.isValid())
+        return TextureSampler();
+
+    return TextureSampler(tex, filter);
+}
+
+// ============================================================================
+// 11. 纹理坐标变换
+// ============================================================================
+
+/// 应用纹理坐标变换：uv' = uv * scale + offset
+/// 用于支持材质级别的 UV 缩放和平移
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+void transformTexCoord(float u, float v,
+                      float scaleU, float scaleV,
+                      float offsetU, float offsetV,
+                      float* outU, float* outV) {
+    *outU = u * scaleU + offsetU;
+    *outV = v * scaleV + offsetV;
+}
+
+/// 默认恒等变换（scale=1, offset=0）
+CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
+void transformTexCoordIdentity(float u, float v, float* outU, float* outV) {
+    *outU = u;
+    *outV = v;
 }
 
 } // namespace shared
