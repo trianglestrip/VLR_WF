@@ -103,6 +103,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Scripts 文件夹（无用脚本）
+scripts/
+
 # 文档临时文件
 *.tmp.md
 
