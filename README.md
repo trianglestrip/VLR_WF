@@ -20,7 +20,8 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 - ✅ **Advanced Optimizations**: Multi-stage performance tuning (阶段 1-5)
 - ✅ **High Performance**: 3.51x faster than traditional implementation
 - ✅ **Rich Materials**: Lambert, GGX, Conductor, Glass, Rough Glass, Specular
-- ✅ **Multiple Lights**: Area, Point, Directional, Environment
+- ✅ **Multiple Lights**: Area Light, Environment Light (IBL)
+- ✅ **Image-Based Lighting**: HDR environment maps (.exr, .hdr) with importance sampling
 - ✅ **Scalable**: Supports resolutions from 512x512 to 4K
 - ✅ **Production Ready**: Fully tested and validated
 - ✅ **Configurable**: Fine-grained performance control via `PerformanceConfig`

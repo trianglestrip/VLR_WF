@@ -1,7 +1,7 @@
 # 开发环境配置
 
 ## 验证日期
-2026-03-07
+2026-03-08
 
 ## 系统环境
 
@@ -79,9 +79,54 @@ cl <编译参数>
 - 文档目录：`docs/`
 - 使用反斜杠`\`作为Windows路径分隔符（或正斜杠`/`在git中）
 
+## 第三方库管理
+
+### 已集成的库
+
+#### tinyexr (v2.7MB)
+- **位置**: `external/tinyexr/`
+- **用途**: 加载EXR格式的HDR环境贴图
+- **依赖**: miniz（zlib压缩）、nanozlib
+- **集成方式**: 单头文件库，在`libVLR/tinyexr_impl.cpp`中定义`TINYEXR_IMPLEMENTATION`
+- **配置**: 使用`TINYEXR_USE_STB_ZLIB=1`避免miniz编译问题
+
+#### stb_image / stb_image_write
+- **位置**: `external/stb/`
+- **用途**: 
+  - `stb_image.h`: 加载HDR格式图像，提供zlib解压缩
+  - `stb_image_write.h`: 提供zlib压缩支持
+- **集成方式**: 在`libVLR/tinyexr_impl.cpp`中统一定义`STB_IMAGE_IMPLEMENTATION`和`STB_IMAGE_WRITE_IMPLEMENTATION`
+
+### 单头文件库集成规范
+
+**重要原则**：避免多重定义错误
+
+1. **创建专用实现文件**：`tinyexr_impl.cpp`
+   - 在此文件中定义所有`*_IMPLEMENTATION`宏
+   - 配置库的编译选项（如`TINYEXR_USE_STB_ZLIB`）
+   - 禁用不需要的功能（如`STBI_NO_JPEG`）
+
+2. **其他文件只包含头文件**
+   - 不定义`*_IMPLEMENTATION`宏
+   - 只声明接口
+
+3. **CMake配置**
+   - 将实现文件添加到`LIBVLR_CPP_SOURCES`
+   - 添加必要的`include_directories`
+
+### 第三方库清理规范
+
+从Git仓库克隆第三方库后，应删除：
+- `.git/` 目录
+- `test/`, `tests/`, `examples/` 目录
+- 构建配置文件（`.yml`, `.bat`, `.lua`, `CMakeLists.txt`）
+- 示例图片和数据文件
+- 文档文件（`*.md`，但保留`LICENSE`）
+
 ## 开发注意事项
 1. 确保CUDA和OptiX环境变量已正确设置
 2. 使用Visual Studio 2022的开发者命令提示符进行编译
 3. CMake配置时需要指定CUDA和OptiX路径
 4. 所有GPU代码应使用`.cu`扩展名
 5. OptiX程序应使用`.cu`文件并通过OptiX编译器编译
+6. 集成新的单头文件库时，创建专用的`*_impl.cpp`文件

@@ -1,7 +1,7 @@
 # 构建问题排查指南
 
 ## 验证日期
-2026-03-07
+2026-03-08
 
 ## 常见构建错误及解决方案
 
@@ -212,6 +212,67 @@ Get-Content build_log.txt | Select-String "error"
 
 ---
 
+### 8. 单头文件库多重定义错误
+
+#### 症状
+- LNK2019: 无法解析的外部符号 `stbi_loadf`, `stbi_zlib_compress`, `mz_compress` 等
+- LNK2005: 符号已经在其他对象中定义
+- C2086: 重定义错误
+
+#### 原因
+单头文件库（如`stb_image.h`, `tinyexr.h`）的`*_IMPLEMENTATION`宏在多个编译单元中定义
+
+#### 解决方案
+1. **创建专用实现文件**（如`tinyexr_impl.cpp`）：
+   ```cpp
+   // tinyexr_impl.cpp - 统一管理所有单头文件库的实现
+   
+   // 定义 STB_IMAGE 实现（提供 zlib 和 HDR 加载）
+   #define STB_IMAGE_IMPLEMENTATION
+   #define STBI_NO_JPEG
+   #define STBI_NO_PNG
+   #define STBI_NO_BMP
+   // ... 其他 STBI_NO_* 宏
+   #include "stb/stb_image.h"
+   
+   // 定义 STB_IMAGE_WRITE 实现（提供 zlib 压缩）
+   #define STB_IMAGE_WRITE_IMPLEMENTATION
+   #define STBIW_ZLIB_COMPRESS stbi_zlib_compress
+   #include "stb/stb_image_write.h"
+   
+   // 定义 tinyexr 实现（使用 STB zlib）
+   #define TINYEXR_USE_MINIZ 0
+   #define TINYEXR_USE_STB_ZLIB 1
+   #define TINYEXR_IMPLEMENTATION
+   #pragma warning(disable: 4717) // 递归警告
+   #include "tinyexr/tinyexr.h"
+   ```
+
+2. **其他文件只包含头文件**：
+   ```cpp
+   // image_loader.cpp - 不定义 IMPLEMENTATION
+   #include "stb/stb_image.h"
+   #include "tinyexr/tinyexr.h"
+   // 使用库函数...
+   ```
+
+3. **CMake配置**：
+   ```cmake
+   set(LIBVLR_CPP_SOURCES
+       # ... 其他源文件
+       libVLR/tinyexr_impl.cpp  # 专用实现文件
+       libVLR/image_loader.cpp
+   )
+   ```
+
+#### 关键点
+- ✅ `*_IMPLEMENTATION`宏只在一个`.cpp`文件中定义
+- ✅ 使用`TINYEXR_USE_STB_ZLIB=1`避免miniz编译问题
+- ✅ 禁用不需要的stb_image格式以减少编译时间
+- ✅ 使用`#pragma warning(disable: 4717)`忽略stb_zlib递归警告
+
+---
+
 ## 记住的教训
 
 1. ✅ **换行符必须是 CRLF**（最重要，忘记这个会浪费大量时间）
@@ -222,3 +283,6 @@ Get-Content build_log.txt | Select-String "error"
 6. ✅ build/ 和 bin/ 目录不提交到 Git
 7. ✅ 每次修改头文件后，清理重新构建
 8. ✅ 使用 Task 并行执行独立的构建任务
+9. ✅ **单头文件库的`*_IMPLEMENTATION`宏只在一个专用`.cpp`文件中定义**
+10. ✅ 集成tinyexr时使用`TINYEXR_USE_STB_ZLIB=1`避免miniz问题
+11. ✅ 从Git克隆第三方库后，删除`.git/`、`test/`、`examples/`、`*.md`等冗余文件

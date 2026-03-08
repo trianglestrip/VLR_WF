@@ -407,19 +407,19 @@ int main(int argc, char** argv) {
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Back wall mesh\n"); goto cleanup; }
 
     VLRTriangleMesh meshLeftWall = nullptr;
-    res = vlrCreateTriangleMesh(scene, kLeftWallVertices, 4, kLeftWallIndices, 2, matRed, &meshLeftWall);
+    res = vlrCreateTriangleMesh(scene, kLeftWallVertices, 4, kLeftWallIndices, 2, matBlue, &meshLeftWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Left wall mesh\n"); goto cleanup; }
 
     VLRTriangleMesh meshRightWall = nullptr;
-    res = vlrCreateTriangleMesh(scene, kRightWallVertices, 4, kRightWallIndices, 2, matBlue, &meshRightWall);
+    res = vlrCreateTriangleMesh(scene, kRightWallVertices, 4, kRightWallIndices, 2, matRed, &meshRightWall);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Right wall mesh\n"); goto cleanup; }
 
     VLRTriangleMesh meshLight = nullptr;
     res = vlrCreateTriangleMesh(scene, kLightVertices, 4, kLightIndices, 2, matLight, &meshLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light mesh\n"); goto cleanup; }
 
-    createSphere(sphereVerts, sphereInds, 0.6f, 0.5f, 0.0f, 0.5f, 64, 48);  // glass sphere on right
-    createRotatedBox(boxVerts, boxInds, -0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);  // metal box on left
+    createSphere(sphereVerts, sphereInds, -0.6f, 0.5f, 0.0f, 0.5f, 64, 48);  // glass sphere on left
+    createRotatedBox(boxVerts, boxInds, 0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);  // metal box on right
 
     VLRTriangleMesh meshSphere = nullptr;
     res = vlrCreateTriangleMesh(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
