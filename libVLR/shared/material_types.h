@@ -84,6 +84,7 @@ namespace MaterialDataLayout {
     constexpr int CheckerboardColor1G = 11; ///< data[11]: 棋盘格第二种颜色 G
     constexpr int CheckerboardColor1B = 12; ///< data[12]: 棋盘格第二种颜色 B
     constexpr int CheckerboardGridSize = 13;///< data[13]: 棋盘格密度 (如 8 表示 8x8)
+    constexpr int CheckerboardExtent = 14;  ///< data[14]: 水平面 extent（半边长，>0 时将 position 归一化到 [0,1]，0=使用 frac 周期）
     // FresnelBlend: Roughness=镜面粗糙度, Albedo=漫反射
     // GGXTransmission: IOR + Roughness
     // MixedBSDF: Metallic=混合权重
@@ -142,27 +143,45 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getLambertAlbedoCheckerboard(
     float gridSize = d[MaterialDataLayout::CheckerboardGridSize];
     if (gridSize < 1.0f) gridSize = 8.0f;
 
+    float extent = d[MaterialDataLayout::CheckerboardExtent];
     float u, v;
     if (surfPt == nullptr) {
         u = v = 0.0f;
     } else {
         float ny = (surfPt->geometricNormal.y >= 0) ? surfPt->geometricNormal.y : -surfPt->geometricNormal.y;
         if (ny > 0.9f) {
-            u = surfPt->position.x;
-            v = surfPt->position.z;
+            if (extent > 0.0f) {
+                // 将 position 归一化到 [0,1]，使 gridSize 个格子均匀覆盖整个平面
+                u = (surfPt->position.x + extent) / (2.0f * extent);
+                v = (surfPt->position.z + extent) / (2.0f * extent);
+                u = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, u));
+                v = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, v));
+            } else {
+                u = surfPt->position.x;
+                v = surfPt->position.z;
+#ifdef __CUDACC__
+                u = u - floorf(u);
+                v = v - floorf(v);
+#else
+                u = u - std::floor(u);
+                v = v - std::floor(v);
+#endif
+                if (u < 0.0f) u += 1.0f;
+                if (v < 0.0f) v += 1.0f;
+            }
         } else {
             u = surfPt->texCoord.x;
             v = surfPt->texCoord.y;
-        }
 #ifdef __CUDACC__
-        u = u - floorf(u);
-        v = v - floorf(v);
+            u = u - floorf(u);
+            v = v - floorf(v);
 #else
-        u = u - std::floor(u);
-        v = v - std::floor(v);
+            u = u - std::floor(u);
+            v = v - std::floor(v);
 #endif
-        if (u < 0.0f) u += 1.0f;
-        if (v < 0.0f) v += 1.0f;
+            if (u < 0.0f) u += 1.0f;
+            if (v < 0.0f) v += 1.0f;
+        }
     }
 
 #ifdef __CUDACC__

@@ -12,6 +12,7 @@
 #include "context.h"
 #include "scene.h"
 #include "config_loader.h"
+#include "image_loader.h"
 #include "include/vlr/public_types.h"
 #include "include/vlr/basic_types.h"
 #include <cuda_runtime.h>
@@ -327,6 +328,7 @@ VLRResult vlrCreateMaterialCheckerboard(
     const float color0[3],
     const float color1[3],
     uint32_t gridSize,
+    float extent,
     VLRMaterial* outMaterial)
 {
     if (!scene || !outMaterial || !color0 || !color1) return static_cast<VLRResult>(VLRResult_InvalidArgument);
@@ -337,7 +339,8 @@ VLRResult vlrCreateMaterialCheckerboard(
         uint32_t materialIndex = sceneImpl->scene->createMaterialCheckerboard(
             color0[0], color0[1], color0[2],
             color1[0], color1[1], color1[2],
-            gridSize > 0 ? gridSize : 8);
+            gridSize > 0 ? gridSize : 8,
+            extent);
         VLRMaterialImpl* matImpl = new VLRMaterialImpl();
         matImpl->sceneImpl = sceneImpl;
         matImpl->materialIndex = materialIndex;
@@ -400,6 +403,56 @@ VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance) {
         params.geomInstIndex = 0;
         params.radiance = vlr::SampledSpectrum(1.0f);
         sceneImpl->scene->addAreaLight(params);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetEnvironmentLight(VLRScene scene, const float color[3]) {
+    if (!scene || !color) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        vlr::EnvironmentLightParams params;
+        params.useConstant = true;
+        // SampledSpectrum uses RGB for simplicity (NumSpectralSamples = 3)
+        params.constantColor = vlr::SampledSpectrum(0.0f);
+        params.constantColor.values[0] = color[0];
+        params.constantColor.values[1] = color[1];
+        params.constantColor.values[2] = color[2];
+        sceneImpl->scene->setEnvironmentLight(params);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrSetEnvironmentLightFromImage(VLRScene scene, const char* imagePath, float rotation) {
+    if (!scene || !imagePath) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        
+        // 加载 HDR 图像
+        vlr::HDRImage image;
+        std::string error;
+        if (!vlr::loadHDRImage(imagePath, image, &error)) {
+            fprintf(stderr, "[VLR] Failed to load environment image '%s': %s\n", imagePath, error.c_str());
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        
+        vlr::EnvironmentLightParams params;
+        params.useConstant = false;
+        params.textureData = image.data;
+        params.textureWidth = image.width;
+        params.textureHeight = image.height;
+        params.rotation = rotation;
+        
+        // 转移所有权给 Scene
+        image.data = nullptr;
+        
+        sceneImpl->scene->setEnvironmentLight(params);
         return static_cast<VLRResult>(VLRResult_Success);
     } catch (...) {
         return translateException();

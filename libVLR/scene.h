@@ -114,10 +114,20 @@ struct PointLightParams {
 /// 环境光设置参数（恒色或 IBL 占位）
 struct EnvironmentLightParams {
     SampledSpectrum constantColor;  ///< 恒色环境光
-    bool useConstant;              ///< 是否使用恒色（否则留空）
-
+    bool useConstant;              ///< 是否使用恒色（否则使用纹理）
+    
+    // 纹理环境光
+    float* textureData;            ///< HDR 纹理数据（RGB float，线性空间）
+    uint32_t textureWidth;         ///< 纹理宽度
+    uint32_t textureHeight;        ///< 纹理高度
+    float rotation;                ///< 环境旋转（弧度）
+    
     EnvironmentLightParams()
         : useConstant(false)
+        , textureData(nullptr)
+        , textureWidth(0)
+        , textureHeight(0)
+        , rotation(0.0f)
     {}
 };
 
@@ -183,10 +193,12 @@ public:
     /// @param color0 第一种颜色 RGB（如黑色）
     /// @param color1 第二种颜色 RGB（如白色）
     /// @param gridSize 棋盘格密度（默认 8 表示 8x8）
+    /// @param extent 水平面半边长（>0 时将 position 归一化到 [0,1] 使格子均匀，0=使用 frac 周期）
     uint32_t createMaterialCheckerboard(
         float color0R, float color0G, float color0B,
         float color1R, float color1G, float color1B,
-        uint32_t gridSize = 8);
+        uint32_t gridSize = 8,
+        float extent = 0.0f);
 
     /// 设置材质参数
     void setMaterial(uint32_t materialId,

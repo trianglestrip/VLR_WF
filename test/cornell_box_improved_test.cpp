@@ -27,7 +27,6 @@
 #include <string>
 
 #include "ini_parser.h"
-#include "config_loader.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -330,14 +329,9 @@ int main(int argc, char** argv) {
     }
 
     // Load performance config (delegated to libVLR)
-    // When vlrLoadPerformanceConfig(context, file) is available in libVLR API, use that.
-    // For now, use ConfigLoader and apply exposed C API settings.
     if (perfConfigFile) {
-        vlr::RuntimePerformanceConfig perfConfig;
-        if (vlr::ConfigLoader::loadPerformanceConfig(perfConfigFile, perfConfig)) {
-            vlrContextSetWavefrontPathSorting(context, perfConfig.enablePathSorting ? 1 : 0);
-            vlrContextSetWavefrontStreamCompaction(context, perfConfig.enableStreamCompaction ? 1 : 0);
-        } else {
+        res = vlrLoadPerformanceConfig(context, perfConfigFile);
+        if (res != VLRResult_Success) {
             fprintf(stderr, "[Warning] Failed to load performance config: %s, using defaults\n", perfConfigFile);
         }
     }
@@ -375,7 +369,7 @@ int main(int argc, char** argv) {
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Blue material\n"); goto cleanup; }
 
     VLRMaterial matFloor = nullptr;
-    res = vlrCreateMaterialCheckerboard(scene, blackColor, whiteColor, 5, &matFloor);
+    res = vlrCreateMaterialCheckerboard(scene, blackColor, whiteColor, 20, 1.5f, &matFloor);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor material\n"); goto cleanup; }
 
     VLRMaterial matLight = nullptr;
@@ -383,17 +377,18 @@ int main(int argc, char** argv) {
     res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, lightEmission, &matLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light material\n"); goto cleanup; }
 
-    // Rough glass sphere: MicrofacetScattering, IOR 1.5, roughness 0.1
+    // Glass sphere: SpecularTransmission, IOR 1.5 (standard glass)
     VLRMaterial matGlass = nullptr;
-    res = vlrCreateMaterialMicrofacetScattering(scene, 1.5f, 0.1f, &matGlass);
+    float glassColor[] = { 0.999f, 0.999f, 0.999f };  // Minimal absorption
+    res = vlrCreateMaterialEx(scene, 4 /* SpecularTransmission */, glassColor, 0.0f, 0.0f, 1.5f, nullptr, &matGlass);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Glass material\n"); goto cleanup; }
 
-    // Aluminum metal box: MicrofacetReflection, roughness 0.15
-    VLRMaterial matAluminum = nullptr;
-    float etaAluminum[] = { 1.27579f, 0.940922f, 0.574879f };
-    float kappaAluminum[] = { 7.30257f, 6.33458f, 5.16694f };
-    res = vlrCreateMaterialConductor(scene, etaAluminum, kappaAluminum, 0.15f, &matAluminum);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Aluminum material\n"); goto cleanup; }
+    // Gold metal box: MicrofacetReflection, roughness 0.15
+    VLRMaterial matGold = nullptr;
+    float etaGold[] = { 0.143f, 0.374f, 1.442f };
+    float kappaGold[] = { 3.984f, 2.386f, 1.603f };
+    res = vlrCreateMaterialConductor(scene, etaGold, kappaGold, 0.15f, &matGold);
+    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Gold material\n"); goto cleanup; }
 
     // ========================================================================
     // Geometry
@@ -433,7 +428,7 @@ int main(int argc, char** argv) {
 
     VLRTriangleMesh meshBox = nullptr;
     res = vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),
-                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matAluminum, &meshBox);
+                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box mesh\n"); goto cleanup; }
 
     // ========================================================================
@@ -513,6 +508,19 @@ int main(int argc, char** argv) {
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Set camera\n"); goto cleanup; }
 
     // ========================================================================
+    // Environment Light (optional, for ambient lighting)
+    // ========================================================================
+    // Environment Light (IBL) - WhiteOne.exr
+    res = vlrSetEnvironmentLightFromImage(scene, "resources/environments/WhiteOne.exr", 0.0f);
+    if (res != VLRResult_Success) {
+        fprintf(stderr, "[Warning] Failed to load environment map, using constant color fallback\n");
+        float envColor[] = { 0.05f, 0.05f, 0.05f };
+        res = vlrSetEnvironmentLight(scene, envColor);
+    } else {
+        printf("[Info] Environment light loaded from EXR\n");
+    }
+
+    // ========================================================================
     // Render
     // ========================================================================
 
@@ -523,7 +531,7 @@ int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    res = vlrRender(context, scene, width, height, numSamples, VLRRenderer_WavefrontPathTracing);
+    res = vlrRender(context, scene, width, height, numSamples, vlr::VLRRenderer_WavefrontPathTracing);
     if (res != VLRResult_Success) {
         fprintf(stderr, "[Error] Render failed: %d\n", res);
         free(outputBuffer);

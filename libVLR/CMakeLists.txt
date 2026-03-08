@@ -79,6 +79,8 @@ set(LIBVLR_CPP_SOURCES
     vlr.cpp
     context.cpp
     scene.cpp
+    image_loader.cpp
+    tinyexr_impl.cpp
 )
 
 # ----------------------------------------------------------------------------
@@ -111,6 +113,9 @@ target_include_directories(VLR PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/shared
+    ${CMAKE_SOURCE_DIR}/external
+    ${CMAKE_SOURCE_DIR}/external/tinyexr
+    ${CMAKE_SOURCE_DIR}/external/tinyexr/deps/miniz
 )
 
 target_compile_options(VLR PRIVATE

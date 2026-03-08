@@ -29,13 +29,8 @@
 extern "C" {
 #endif
 
-// C 兼容：结果码与渲染器类型
-#ifdef __cplusplus
+// C compatible: result codes and renderer types
 typedef int32_t VLRResult;
-#else
-typedef int32_t VLRResult;
-#endif
-typedef uint32_t VLRRenderer;
 #define VLRResult_Success 0
 #define VLRResult_InvalidArgument (-1)
 #define VLRResult_OutOfMemory (-2)
@@ -43,10 +38,14 @@ typedef uint32_t VLRRenderer;
 #define VLRResult_InternalError (-4)
 #define VLRResult_CUDAError (-5)
 #define VLRResult_OptiXError (-6)
+
+#ifndef __cplusplus
+typedef uint32_t VLRRenderer;
 #define VLRRenderer_PathTracing 0
 #define VLRRenderer_LightTracing 1
 #define VLRRenderer_BidirectionalPathTracing 2
 #define VLRRenderer_WavefrontPathTracing 3
+#endif
 
 // ============================================================================
 // 前置声明：不透明句柄（使用不同结构体名避免 C++ 歧义）
@@ -213,6 +212,7 @@ VLR_API VLRResult vlrCreateMaterialCheckerboard(
     const float color0[3],
     const float color1[3],
     uint32_t gridSize,
+    float extent,
     VLRMaterial* outMaterial);
 
 /// 创建实例（将网格放入场景）
@@ -242,6 +242,19 @@ VLR_API void vlrDestroyInstance(VLRInstance instance);
 /// @param instance 发光几何的实例句柄（其材质需设置 emissionColor）
 /// @return VLRResult_Success 或错误码
 VLR_API VLRResult vlrAddAreaLight(VLRScene scene, VLRInstance instance);
+
+/// 设置环境光
+/// @param scene 所属场景
+/// @param color 环境光颜色 RGB [0..∞]（3 个 float，线性空间）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetEnvironmentLight(VLRScene scene, const float color[3]);
+
+/// 从图像文件设置环境光（IBL）
+/// @param scene 所属场景
+/// @param imagePath HDR 图像文件路径（.exr 或 .hdr）
+/// @param rotation 环境旋转角度（弧度，0 表示不旋转）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrSetEnvironmentLightFromImage(VLRScene scene, const char* imagePath, float rotation);
 
 /// 添加方向光（平行光，如太阳光）
 /// @param scene 所属场景

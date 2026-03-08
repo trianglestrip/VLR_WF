@@ -290,7 +290,8 @@ uint32_t Scene::createMaterialMicrofacetScattering(
 uint32_t Scene::createMaterialCheckerboard(
     float color0R, float color0G, float color0B,
     float color1R, float color1G, float color1B,
-    uint32_t gridSize)
+    uint32_t gridSize,
+    float extent)
 {
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
@@ -305,6 +306,7 @@ uint32_t Scene::createMaterialCheckerboard(
     mat.data[MaterialDataLayout::CheckerboardColor1B] = *reinterpret_cast<uint32_t*>(&color1B);
     float gridSizeF = static_cast<float>(gridSize > 0 ? gridSize : 8);
     mat.data[MaterialDataLayout::CheckerboardGridSize] = *reinterpret_cast<uint32_t*>(&gridSizeF);
+    mat.data[MaterialDataLayout::CheckerboardExtent] = *reinterpret_cast<uint32_t*>(&extent);
     float roughness = 0.5f;
     mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
     float zero = 0.0f;
