@@ -24,9 +24,34 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <string>
+
+#include "ini_parser.h"
+#include "config_loader.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+
+// ============================================================================
+// Usage
+// ============================================================================
+static void printUsage(const char* prog) {
+    printf("\nUsage:\n");
+    printf("  %s [scene.ini] [performance.ini]\n", prog);
+    printf("  %s -w <width> -h <height> -s <samples> -o <output>\n", prog);
+    printf("\nModes:\n");
+    printf("  1. INI mode:  %s scene.ini [performance.ini]\n", prog);
+    printf("     - scene.ini: [Render] Width,Height,Samples,MaxDepth,Exposure\n");
+    printf("                   [Output] Filename, Format\n");
+    printf("                   [Camera] PositionX/Y/Z, TargetX/Y/Z, FOV, LensRadius, FocusDistance\n");
+    printf("     - performance.ini: delegated to libVLR (Optimization, KernelConfig, etc.)\n");
+    printf("  2. Legacy mode: -w -h -s -o (used when no INI provided)\n");
+    printf("\nPriority: INI file > command line > defaults\n");
+    printf("\nExamples:\n");
+    printf("  %s config_presets/preview_scene.ini config_presets/preview_performance.ini\n", prog);
+    printf("  %s -w 800 -h 600 -s 512 -o output.png\n", prog);
+    printf("\n");
+}
 
 // ============================================================================
 // Helper: Save PNG Image
@@ -219,24 +244,76 @@ int main(int argc, char** argv) {
     printf("=== VLR Improved Cornell Box Test START ===\n");
     fflush(stdout);
 
+    // Defaults (priority: INI file > command line > these values)
     uint32_t width = 512;
     uint32_t height = 512;
     uint32_t numSamples = 1024;
-    const char* outputFile = "cornell_box_improved.png";
+    uint32_t maxDepth = 8;
+    float exposure = 1.0f;
+    std::string outputFile = "cornell_box_improved.png";
+    std::string outputFormat = "png";
 
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
-            width = (uint32_t)atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
-            height = (uint32_t)atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-            numSamples = (uint32_t)atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-            outputFile = argv[++i];
+    float camPosX = 0.0f, camPosY = 1.5f, camPosZ = 6.0f;
+    float camTargetX = 0.0f, camTargetY = 1.5f, camTargetZ = 0.0f;
+    float camFOV = 40.0f, lensRadius = 0.0f, focusDistance = 1.0f;
+
+    bool useIniScene = false;
+    const char* perfConfigFile = nullptr;
+
+    // 1. Load scene.ini if provided (argc >= 2, argv[1] not a flag)
+    if (argc >= 2 && argv[1][0] != '-') {
+        INIParser parser;
+        if (parser.load(argv[1])) {
+            useIniScene = true;
+            width = (uint32_t)parser.getInt("Render", "Width", 512);
+            height = (uint32_t)parser.getInt("Render", "Height", 512);
+            numSamples = (uint32_t)parser.getInt("Render", "Samples", 1024);
+            maxDepth = (uint32_t)parser.getInt("Render", "MaxDepth", 8);
+            exposure = parser.getFloat("Render", "Exposure", 1.0f);
+            outputFile = parser.getString("Output", "Filename", "cornell_box_improved.png");
+            outputFormat = parser.getString("Output", "Format", "png");
+            camPosX = parser.getFloat("Camera", "PositionX", 0.0f);
+            camPosY = parser.getFloat("Camera", "PositionY", 1.5f);
+            camPosZ = parser.getFloat("Camera", "PositionZ", 6.0f);
+            camTargetX = parser.getFloat("Camera", "TargetX", 0.0f);
+            camTargetY = parser.getFloat("Camera", "TargetY", 1.5f);
+            camTargetZ = parser.getFloat("Camera", "TargetZ", 0.0f);
+            camFOV = parser.getFloat("Camera", "FOV", 40.0f);
+            lensRadius = parser.getFloat("Camera", "LensRadius", 0.0f);
+            focusDistance = parser.getFloat("Camera", "FocusDistance", 1.0f);
+        } else {
+            fprintf(stderr, "[Warning] Failed to load scene config: %s, using defaults\n", argv[1]);
+        }
+        if (argc >= 3 && argv[2][0] != '-') {
+            perfConfigFile = argv[2];
         }
     }
 
-    printf("Resolution: %u x %u, Samples: %u, Output: %s\n", width, height, numSamples, outputFile);
+    // 2. Command line: legacy mode (when no INI) or --help
+    if (!useIniScene) {
+        for (int i = 1; i < argc; ++i) {
+            if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
+                width = (uint32_t)atoi(argv[++i]);
+            } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
+                height = (uint32_t)atoi(argv[++i]);
+            } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+                numSamples = (uint32_t)atoi(argv[++i]);
+            } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+                outputFile = argv[++i];
+            }
+        }
+    }
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-?") == 0 || strcmp(argv[i], "--help") == 0) {
+            printUsage(argv[0]);
+            return 0;
+        }
+    }
+
+    printf("Resolution: %u x %u, Samples: %u, MaxDepth: %u, Exposure: %.2f\n", width, height, numSamples, maxDepth, exposure);
+    printf("Output: %s (%s)\n", outputFile.c_str(), outputFormat.c_str());
+    if (useIniScene) printf("Scene config: %s\n", argv[1]);
+    if (perfConfigFile) printf("Performance config: %s (delegated to libVLR)\n", perfConfigFile);
     fflush(stdout);
 
     VLRContext context = nullptr;
@@ -250,6 +327,19 @@ int main(int argc, char** argv) {
     if (res != VLRResult_Success || !context) {
         fprintf(stderr, "[Error] Failed to create Context: %d\n", res);
         return 1;
+    }
+
+    // Load performance config (delegated to libVLR)
+    // When vlrLoadPerformanceConfig(context, file) is available in libVLR API, use that.
+    // For now, use ConfigLoader and apply exposed C API settings.
+    if (perfConfigFile) {
+        vlr::RuntimePerformanceConfig perfConfig;
+        if (vlr::ConfigLoader::loadPerformanceConfig(perfConfigFile, perfConfig)) {
+            vlrContextSetWavefrontPathSorting(context, perfConfig.enablePathSorting ? 1 : 0);
+            vlrContextSetWavefrontStreamCompaction(context, perfConfig.enableStreamCompaction ? 1 : 0);
+        } else {
+            fprintf(stderr, "[Warning] Failed to load performance config: %s, using defaults\n", perfConfigFile);
+        }
     }
 
     res = vlrCreateScene(context, &scene);
@@ -389,29 +479,33 @@ int main(int argc, char** argv) {
     res = vlrAddAreaLight(scene, instLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add area light\n"); goto cleanup; }
 
-    // 添加方向光（从右上方照射，模拟太阳光）
-    float dirLightDir[] = { -0.3f, -0.8f, -0.2f };  // 从右上方向下照射
-    float dirLightRadiance[] = { 2.0f, 2.0f, 2.0f };  // 较弱的白光
-    res = vlrAddDirectionalLight(scene, dirLightDir, dirLightRadiance);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add directional light\n"); goto cleanup; }
+    // 注释掉方向光 - Cornell Box 只需要顶部面光源
+    // float dirLightDir[] = { -0.3f, -0.8f, -0.2f };
+    // float dirLightRadiance[] = { 2.0f, 2.0f, 2.0f };
+    // res = vlrAddDirectionalLight(scene, dirLightDir, dirLightRadiance);
+    // if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add directional light\n"); goto cleanup; }
 
     // ========================================================================
-    // Camera: position (0, 1.5, 6.0), target (0, 1.5, 0), fovY 40°
+    // Camera: from config or defaults
     // ========================================================================
-
-    camera.position[0] = 0.0f;
-    camera.position[1] = 1.5f;
-    camera.position[2] = 6.0f;
-    camera.direction[0] = 0.0f;
-    camera.direction[1] = 0.0f;
-    camera.direction[2] = -1.0f;  // Look at (0, 1.5, 0)
+    float dx = camTargetX - camPosX;
+    float dy = camTargetY - camPosY;
+    float dz = camTargetZ - camPosZ;
+    float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1e-6f) len = 1.0f;
+    camera.position[0] = camPosX;
+    camera.position[1] = camPosY;
+    camera.position[2] = camPosZ;
+    camera.direction[0] = dx / len;
+    camera.direction[1] = dy / len;
+    camera.direction[2] = dz / len;
     camera.up[0] = 0.0f;
     camera.up[1] = 1.0f;
     camera.up[2] = 0.0f;
-    camera.fovY = 40.0f * PI / 180.0f;
+    camera.fovY = camFOV * PI / 180.0f;
     camera.aspect = (float)width / (float)height;
-    camera.lensRadius = 0.0f;
-    camera.focusDistance = 1.0f;
+    camera.lensRadius = lensRadius;
+    camera.focusDistance = focusDistance;
     camera.focalLength = 0.0f;
     camera.cameraType = 0;
 
@@ -450,7 +544,7 @@ int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    savePNG(outputFile, width, height, outputBuffer, numSamples, 0.5f);  // 降低曝光测试洋红色是否为过曝
+    savePNG(outputFile.c_str(), width, height, outputBuffer, numSamples, exposure);
     free(outputBuffer);
 
     printf("=== Test complete ===\n");

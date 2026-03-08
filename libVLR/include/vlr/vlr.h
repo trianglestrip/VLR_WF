@@ -299,6 +299,13 @@ VLR_API VLRResult vlrContextSetWavefrontPathSorting(VLRContext context, int enab
 /// @return VLRResult_Success 或错误码
 VLR_API VLRResult vlrContextSetWavefrontStreamCompaction(VLRContext context, int enable);
 
+/// 从 INI 文件加载性能配置
+/// @param context 上下文句柄
+/// @param perfConfigFile INI 配置文件路径（仅包含 Optimization、KernelConfig、EarlyTermination 等性能相关节）
+/// @return VLRResult_Success 成功，VLRResult_InvalidArgument 参数无效或文件加载失败
+/// @note 仅加载性能优化参数，不涉及场景参数（分辨率、采样数等）
+VLR_API VLRResult vlrLoadPerformanceConfig(VLRContext context, const char* perfConfigFile);
+
 
 // ============================================================================
 // 版本与工具

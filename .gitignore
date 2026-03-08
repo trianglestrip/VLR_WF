@@ -14,7 +14,7 @@
 [Rr]elease/
 x64/
 x86/
-[Bb]in/
+# [Bb]in/ 注释掉，改用下面更精确的规则
 [Oo]bj/
 [Ll]og/
 *.exe
@@ -66,13 +66,20 @@ cmake_install.cmake
 *.cmake
 !CMakeLists.txt
 
-# 输出目录
-bin/
+# 输出目录（忽略bin下的文件，但不忽略目录本身）
+bin/*.exe
+bin/*.dll
+bin/*.lib
+bin/*.exp
+bin/*.pdb
+bin/*.png
+bin/*.jpg
+bin/*.ptx
+bin/*.cu
+bin/GPU_kernels/
 # 但保留配置文件
 !bin/*.ini
 !bin/config_presets/
-!bin/config_presets/*.ini
-!bin/config_presets/*.md
 
 # IDE 配置
 .idea/

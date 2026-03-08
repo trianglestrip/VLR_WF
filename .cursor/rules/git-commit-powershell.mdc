@@ -1,0 +1,53 @@
+---
+description: Git commit conventions for PowerShell on Windows
+alwaysApply: true
+---
+
+# Git Commit on PowerShell
+
+PowerShell 不支持 HEREDOC 语法（`<<'EOF'`）。在 Windows 环境下提交代码时，必须使用 PowerShell 兼容的方式。
+
+## ❌ 错误方式（HEREDOC - 仅适用于 Bash）
+
+```bash
+git commit -m "$(cat <<'EOF'
+Commit message here.
+
+EOF
+)"
+```
+
+## ✅ 正确方式（PowerShell 兼容）
+
+### 方式 1: 使用 -m 参数（单行消息）
+
+```powershell
+git commit -m "Commit message here"
+```
+
+### 方式 2: 使用多个 -m 参数（多行消息）
+
+```powershell
+git commit -m "Title line" -m "Description paragraph 1" -m "Description paragraph 2"
+```
+
+### 方式 3: 使用临时文件
+
+```powershell
+"Commit message`nwith multiple lines" | Out-File -Encoding UTF8 commit_msg.txt
+git commit -F commit_msg.txt
+Remove-Item commit_msg.txt
+```
+
+### 方式 4: 让 Git 打开编辑器
+
+```powershell
+git commit
+# Git 会自动打开配置的编辑器（如 vim、notepad 等）
+```
+
+## 注意事项
+
+- 在 Windows 上始终使用上述方式之一
+- 避免使用 Bash 特有的语法（HEREDOC、HERE-STRING 等）
+- 多个命令应使用 `&&` 分开多次执行，而不是用 `;` 或换行符连接

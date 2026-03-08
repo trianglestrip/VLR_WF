@@ -1551,6 +1551,14 @@ void Context::setWavefrontConfig(const WavefrontConfig& config) {
     wf.useStreamCompaction = config.useStreamCompaction;
 }
 
+void Context::setPerformanceConfig(const RuntimePerformanceConfig& config) {
+    m_perfConfig = config;
+    auto& wf = m_optix.wavefrontPathTracing;
+    wf.usePathSorting = config.enablePathSorting;
+    wf.useStreamCompaction = config.enableStreamCompaction;
+    // 其他字段（syncInterval、block sizes 等）已存储于 m_perfConfig，供后续 kernel 启动使用
+}
+
 
 // ============================================================================
 // 统计方法

@@ -11,6 +11,7 @@
 #include "include/vlr/vlr.h"
 #include "context.h"
 #include "scene.h"
+#include "config_loader.h"
 #include "include/vlr/public_types.h"
 #include "include/vlr/basic_types.h"
 #include <cuda_runtime.h>
@@ -512,6 +513,22 @@ VLRResult vlrContextSetWavefrontStreamCompaction(VLRContext context, int enable)
         VLRContextImpl* impl = TO_CTX(context);
         if (!impl->ctx) return static_cast<VLRResult>(VLRResult_InvalidArgument);
         impl->ctx->setWavefrontStreamCompaction(enable != 0);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrLoadPerformanceConfig(VLRContext context, const char* perfConfigFile) {
+    if (!context || !perfConfigFile) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        vlr::RuntimePerformanceConfig perfConfig;
+        if (!vlr::ConfigLoader::loadPerformanceConfig(perfConfigFile, perfConfig)) {
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        }
+        impl->ctx->setPerformanceConfig(perfConfig);
         return static_cast<VLRResult>(VLRResult_Success);
     } catch (...) {
         return translateException();

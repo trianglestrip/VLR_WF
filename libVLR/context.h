@@ -12,6 +12,7 @@
 
 #include "include/vlr/public_types.h"
 #include "shared/path_types.h"
+#include "config_loader.h"
 
 // 前向声明 Scene（避免循环依赖）
 namespace vlr { class Scene; }
@@ -86,6 +87,9 @@ public:
     void setWavefrontConfig(const WavefrontConfig& config);
     void setWavefrontPathSorting(bool enable);
     void setWavefrontStreamCompaction(bool enable);
+    
+    /// 设置性能配置（从 INI 加载后应用）
+    void setPerformanceConfig(const RuntimePerformanceConfig& config);
     
     // 统计信息
     const shared::WavefrontPerformanceStats& getPerformanceStats() const;
@@ -308,6 +312,9 @@ private:
     
     SceneData m_scene;
     const ::vlr::Scene* m_sceneSource;  // 外部场景源（setScene 设置）
+    
+    /// 运行时性能配置（从 INI 加载，供 vlrLoadPerformanceConfig 使用）
+    RuntimePerformanceConfig m_perfConfig;
     
     // ========================================================================
     // 私有方法
