@@ -18,15 +18,17 @@
 **用法**：
 
 ```bash
-# 拆分合并的配置
-python split_config.py render_config.ini scene.ini performance.ini
+# 拆分自定义的合并配置
+python split_config.py my_config.ini my_scene.ini my_performance.ini
 
-# 拆分预设配置
-python split_config.py config_presets\benchmark.ini benchmark_scene.ini benchmark_perf.ini
+# 拆分主配置文件
+python split_config.py render_config.ini scene.ini performance.ini
 
 # 批量拆分
 for %f in (*.ini) do python split_config.py %f %~nf_scene.ini %~nf_perf.ini
 ```
+
+**注意**：预设配置已经是分离的（`*_scene.ini` + `*_performance.ini`），无需再拆分。
 
 **示例输出**：
 
@@ -86,11 +88,14 @@ for %f in (*.ini) do python split_config.py %f %~nf_scene.ini %~nf_perf.ini
 # 验证配置文件
 python validate_config.py ..\bin\render_config.ini
 
-# 验证预设配置
-python validate_config.py ..\bin\config_presets\benchmark.ini
+# 验证预设配置（场景配置）
+python validate_config.py ..\bin\config_presets\benchmark_scene.ini
+
+# 验证预设配置（性能配置）
+python validate_config.py ..\bin\config_presets\benchmark_performance.ini
 
 # 验证自定义配置
-python validate_config.py my_config.ini
+python validate_config.py my_scene.ini
 ```
 
 **示例输出**：
@@ -191,17 +196,17 @@ python generate_config.py --width 3840 --height 2160 --samples 1024 --output 4k.
 # 基本用法
 python auto_tune.py
 
-# 指定基准配置
-python auto_tune.py --config ..\bin\config_presets\benchmark.ini
+# 指定基准配置（性能配置）
+python auto_tune.py --config ..\bin\config_presets\benchmark_performance.ini
 
 # 指定输出文件
-python auto_tune.py --output optimized.ini
+python auto_tune.py --output optimized_performance.ini
 
 # 完整示例
 python auto_tune.py \
   --exe ..\bin\cornell_box_improved_test.exe \
-  --config ..\bin\render_config.ini \
-  --output my_optimized.ini
+  --config ..\bin\config_presets\benchmark_performance.ini \
+  --output my_optimized_performance.ini
 ```
 
 **调优参数**：
@@ -221,7 +226,7 @@ python auto_tune.py \
 ==============================================================
   VLR Wavefront 自动调优
 ==============================================================
-  基准配置: benchmark.ini
+  基准配置: benchmark_performance.ini
   测试程序: cornell_box_improved_test.exe
 ==============================================================
 
@@ -281,14 +286,14 @@ python auto_tune.py \
 **用法**：
 
 ```bash
-# 对比预设配置
+# 对比预设配置（性能配置）
 python compare_configs.py \
-  ..\bin\config_presets\preview.ini \
-  ..\bin\config_presets\benchmark.ini \
-  ..\bin\config_presets\high_quality.ini
+  ..\bin\config_presets\preview_performance.ini \
+  ..\bin\config_presets\benchmark_performance.ini \
+  ..\bin\config_presets\high_quality_performance.ini
 
 # 对比自定义配置
-python compare_configs.py config1.ini config2.ini config3.ini
+python compare_configs.py my_perf1.ini my_perf2.ini my_perf3.ini
 
 # 指定运行次数（取平均）
 python compare_configs.py --runs 5 config1.ini config2.ini
@@ -308,17 +313,17 @@ python compare_configs.py \
   VLR Wavefront 配置性能对比
 ======================================================================
 
-测试配置: preview.ini
+测试配置: preview_performance.ini
   运行 1/3... 0.185s (141.6 Msamp/s)
   运行 2/3... 0.180s (145.8 Msamp/s)
   运行 3/3... 0.182s (144.0 Msamp/s)
 
-测试配置: benchmark.ini
+测试配置: benchmark_performance.ini
   运行 1/3... 8.050s (33.4 Msamp/s)
   运行 2/3... 7.990s (33.6 Msamp/s)
   运行 3/3... 8.020s (33.5 Msamp/s)
 
-测试配置: high_quality.ini
+测试配置: high_quality_performance.ini
   运行 1/3... 125.5s (34.2 Msamp/s)
   运行 2/3... 124.8s (34.4 Msamp/s)
   运行 3/3... 125.2s (34.3 Msamp/s)
@@ -327,11 +332,11 @@ python compare_configs.py \
   性能对比结果
 ======================================================================
 
-配置文件                       时间         吞吐量          相对性能
+配置文件                              时间         吞吐量          相对性能
 ----------------------------------------------------------------------
-preview.ini                    0.182s       143.8 Msamp/s   1.00x ✓
-benchmark.ini                  8.020s       33.5 Msamp/s    0.02x
-high_quality.ini               125.167s     34.3 Msamp/s    0.00x
+preview_performance.ini               0.182s       143.8 Msamp/s   1.00x ✓
+benchmark_performance.ini             8.020s       33.5 Msamp/s    0.02x
+high_quality_performance.ini          125.167s     34.3 Msamp/s    0.00x
 
 ======================================================================
   关键参数对比
@@ -344,7 +349,7 @@ benchmark            4          0.75         启用       启用
 high_quality         4          0.70         启用       禁用
 
 ======================================================================
-  最快配置: preview.ini
+  最快配置: preview_performance.ini
   渲染时间: 0.182s
   吞吐量: 143.8 Msamp/s
 ======================================================================
@@ -357,14 +362,14 @@ high_quality         4          0.70         启用       禁用
 ### 场景1: 为新GPU找最优配置
 
 ```bash
-# 1. 运行自动调优
-python auto_tune.py --output rtx4090_optimized.ini
+# 1. 运行自动调优（基于benchmark性能配置）
+python auto_tune.py --config ..\bin\config_presets\benchmark_performance.ini --output rtx4090_optimized_perf.ini
 
-# 2. 验证结果
-..\bin\cornell_box_improved_test.exe rtx4090_optimized.ini
+# 2. 验证结果（配合场景配置）
+..\bin\cornell_box_improved_test.exe ..\bin\config_presets\benchmark_scene.ini rtx4090_optimized_perf.ini
 
 # 3. 保存为预设
-copy rtx4090_optimized.ini ..\bin\config_presets\
+copy rtx4090_optimized_perf.ini ..\bin\config_presets\
 ```
 
 ### 场景2: 对比不同优化策略
@@ -555,22 +560,22 @@ python --version  # 确保Python 3.6+
 ```bash
 cd scripts
 
-# 对比所有预设配置
+# 对比所有预设配置（性能配置）
 python compare_configs.py ^
-  ..\bin\config_presets\preview.ini ^
-  ..\bin\config_presets\benchmark.ini ^
-  ..\bin\config_presets\high_quality.ini
+  ..\bin\config_presets\preview_performance.ini ^
+  ..\bin\config_presets\benchmark_performance.ini ^
+  ..\bin\config_presets\high_quality_performance.ini
 ```
 
 ### 3. 自动调优
 
 ```bash
-# 基于benchmark配置进行调优
+# 基于benchmark性能配置进行调优
 python auto_tune.py ^
-  --config ..\bin\config_presets\benchmark.ini ^
-  --output my_gpu_optimized.ini
+  --config ..\bin\config_presets\benchmark_performance.ini ^
+  --output my_gpu_optimized_perf.ini
 
-# 使用优化后的配置
+# 使用优化后的配置（配合场景配置）
 cd ..\bin
 .\cornell_box_improved_test.exe ..\scripts\my_gpu_optimized.ini
 ```
@@ -654,11 +659,11 @@ python compare_configs.py ..\bin\render_config.ini tuned.ini
 #   tuned.ini:         6.500s (1.23x) ✓
 
 # 5. 保存为预设
-copy tuned.ini ..\bin\config_presets\my_gpu_optimized.ini
+copy tuned.ini ..\bin\config_presets\my_gpu_optimized_perf.ini
 
-# 6. 使用优化配置
+# 6. 使用优化配置（配合场景配置）
 cd ..\bin
-.\cornell_box_improved_test.exe config_presets\my_gpu_optimized.ini
+.\cornell_box_improved_test.exe config_presets\benchmark_scene.ini config_presets\my_gpu_optimized_perf.ini
 ```
 
 ---

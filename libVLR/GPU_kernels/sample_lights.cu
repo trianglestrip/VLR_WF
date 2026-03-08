@@ -84,7 +84,7 @@ extern "C" __global__ void sampleLights(
 
 #ifdef __CUDACC__
     // 优化：Shared Memory 缓存光源数据
-    #if PerformanceConfig::UseLightCache
+#if PerformanceConfig::UseLightCache
     __shared__ LightCache<PerformanceConfig::LightCacheSize> lightCache;
     if (threadIdx.x == 0) {
         uint32_t numLights = wlp.numLights;
@@ -96,7 +96,7 @@ extern "C" __global__ void sampleLights(
         lightCache.numLights = numLights;
     }
     __syncthreads();
-    #endif
+#endif
 
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
     

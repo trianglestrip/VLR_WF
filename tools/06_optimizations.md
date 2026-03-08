@@ -1598,10 +1598,10 @@ void autoTuneConfig(WavefrontConfig& config, int computeCapability) {
 
 - **主配置**: `bin/render_config.ini`
 - **预设配置**: `bin/config_presets/`
-  - `preview.ini`: 快速预览
-  - `high_quality.ini`: 高质量渲染
-  - `benchmark.ini`: 性能测试
-  - `debug.ini`: 调试配置
+  - `preview`: 快速预览（`preview_scene.ini` + `preview_performance.ini`）
+  - `high_quality`: 高质量渲染（`high_quality_scene.ini` + `high_quality_performance.ini`）
+  - `benchmark`: 性能测试（`benchmark_scene.ini` + `benchmark_performance.ini`）
+  - `debug`: 调试配置（`debug_scene.ini` + `debug_performance.ini`）
 
 **可配置参数包括**：
 - SyncInterval（CPU-GPU同步间隔）

@@ -169,17 +169,14 @@ int main(int argc, char* argv[]) {
 **使用预设配置**：
 
 ```bash
-# 快速预览（分离配置）
+# 快速预览
 .\cornell_box_improved_test.exe config_presets\preview_scene.ini config_presets\preview_performance.ini
 
-# 高质量渲染（分离配置）
+# 高质量渲染
 .\cornell_box_improved_test.exe config_presets\high_quality_scene.ini config_presets\high_quality_performance.ini
 
-# 性能测试（分离配置）
+# 性能测试
 .\cornell_box_improved_test.exe config_presets\benchmark_scene.ini config_presets\benchmark_performance.ini
-
-# 或使用合并配置（向后兼容）
-.\cornell_box_improved_test.exe config_presets\preview.ini
 ```
 
 #### 方式2: 只加载性能配置

@@ -762,7 +762,9 @@ vlrRender(ctx, scene, 512, 512, 64, VLRRenderer_WavefrontPathTracing);
 
 ## 预设配置
 
-### preview.ini（快速预览）
+### preview（快速预览）
+
+使用 `preview_scene.ini` + `preview_performance.ini`
 
 ```ini
 [Render]
@@ -787,7 +789,9 @@ MinDepth = 3
 
 ---
 
-### high_quality.ini（高质量渲染）
+### high_quality（高质量渲染）
+
+使用 `high_quality_scene.ini` + `high_quality_performance.ini`
 
 ```ini
 [Render]
@@ -815,7 +819,9 @@ PrintKernelTiming = true
 
 ---
 
-### benchmark.ini（性能测试）
+### benchmark（性能测试）
+
+使用 `benchmark_scene.ini` + `benchmark_performance.ini`
 
 ```ini
 [Render]

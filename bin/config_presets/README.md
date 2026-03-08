@@ -21,9 +21,6 @@
 - 早期终止参数
 - 内存和高级优化
 
-### 3. 兼容配置（*.ini）
-为了向后兼容，保留了合并的配置文件。
-
 ---
 
 ## 📁 预设列表
@@ -44,11 +41,7 @@
 **使用方式**：
 
 ```bash
-# 方式1: 使用分离的配置（推荐）
 .\cornell_box_improved_test.exe config_presets\preview_scene.ini config_presets\preview_performance.ini
-
-# 方式2: 使用合并的配置（向后兼容）
-.\cornell_box_improved_test.exe config_presets\preview.ini
 ```
 
 ---
@@ -69,11 +62,7 @@
 **使用方式**：
 
 ```bash
-# 方式1: 使用分离的配置（推荐）
 .\cornell_box_improved_test.exe config_presets\benchmark_scene.ini config_presets\benchmark_performance.ini
-
-# 方式2: 使用合并的配置（向后兼容）
-.\cornell_box_improved_test.exe config_presets\benchmark.ini > benchmark_result.txt
 ```
 
 ---
@@ -94,11 +83,7 @@
 **使用方式**：
 
 ```bash
-# 方式1: 使用分离的配置（推荐）
 .\cornell_box_improved_test.exe config_presets\high_quality_scene.ini config_presets\high_quality_performance.ini
-
-# 方式2: 使用合并的配置（向后兼容）
-.\cornell_box_improved_test.exe config_presets\high_quality.ini
 ```
 
 ---
@@ -119,11 +104,7 @@
 **使用方式**：
 
 ```bash
-# 方式1: 使用分离的配置（推荐）
 .\cornell_box_improved_test.exe config_presets\debug_scene.ini config_presets\debug_performance.ini
-
-# 方式2: 使用合并的配置（向后兼容）
-.\cornell_box_improved_test.exe config_presets\debug.ini
 ```
 
 ---
@@ -143,12 +124,12 @@
 ### 配置文件组合
 
 ```
-预设名称          场景配置                    性能配置                      合并配置（兼容）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-preview          preview_scene.ini          preview_performance.ini       preview.ini
-benchmark        benchmark_scene.ini        benchmark_performance.ini     benchmark.ini
-high_quality     high_quality_scene.ini     high_quality_performance.ini  high_quality.ini
-debug            debug_scene.ini            debug_performance.ini         debug.ini
+预设名称          场景配置                    性能配置
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+preview          preview_scene.ini          preview_performance.ini
+benchmark        benchmark_scene.ini        benchmark_performance.ini
+high_quality     high_quality_scene.ini     high_quality_performance.ini
+debug            debug_scene.ini            debug_performance.ini
 ```
 
 ## 📊 性能对比
@@ -165,8 +146,6 @@ high_quality  1920×1080   2048    120秒     照片级
 ```
 
 ## 🔧 自定义配置
-
-### 方式1: 分离配置（推荐）
 
 ```bash
 # 1. 复制场景配置
@@ -187,19 +166,6 @@ notepad my_performance.ini
 - 场景和性能参数分离
 - 可以复用性能配置
 - 便于团队协作（场景设计师 vs 性能工程师）
-
-### 方式2: 合并配置（向后兼容）
-
-```bash
-# 1. 复制预设
-copy config_presets\benchmark.ini my_config.ini
-
-# 2. 编辑参数
-notepad my_config.ini
-
-# 3. 使用自定义配置
-.\cornell_box_improved_test.exe my_config.ini
-```
 
 ### 常见修改
 

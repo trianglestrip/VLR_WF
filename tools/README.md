@@ -932,11 +932,11 @@ graph TB
 ### 配置系统
 
 - **bin/render_config.ini**: 主配置文件（可调整所有性能参数）
-- **bin/config_presets/**: 预设配置文件
-  - `preview.ini`: 快速预览（~0.2秒）
-  - `high_quality.ini`: 高质量渲染（~120秒）
-  - `benchmark.ini`: 性能测试（~8秒）
-  - `debug.ini`: 调试配置
+- **bin/config_presets/**: 预设配置文件（每个预设包含场景配置和性能配置）
+  - `preview`: 快速预览（~0.2秒）
+  - `high_quality`: 高质量渲染（~120秒）
+  - `benchmark`: 性能测试（~8秒）
+  - `debug`: 调试配置
 
 📖 **配置指南**: [../docs/CONFIGURATION_GUIDE.md](../docs/CONFIGURATION_GUIDE.md)
 

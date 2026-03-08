@@ -181,13 +181,13 @@ cd ..\bin
 # 运行测试程序（使用默认配置）
 .\cornell_box_improved_test.exe
 
-# 或者使用预设配置
-.\cornell_box_improved_test.exe config_presets\preview.ini      # 快速预览
-.\cornell_box_improved_test.exe config_presets\benchmark.ini    # 性能测试
-.\cornell_box_improved_test.exe config_presets\high_quality.ini # 高质量
+# 或者使用预设配置（场景配置 + 性能配置）
+.\cornell_box_improved_test.exe config_presets\preview_scene.ini config_presets\preview_performance.ini      # 快速预览
+.\cornell_box_improved_test.exe config_presets\benchmark_scene.ini config_presets\benchmark_performance.ini    # 性能测试
+.\cornell_box_improved_test.exe config_presets\high_quality_scene.ini config_presets\high_quality_performance.ini # 高质量
 
 # 或者使用自定义配置
-.\cornell_box_improved_test.exe my_config.ini
+.\cornell_box_improved_test.exe my_scene.ini my_performance.ini
 ```
 
 ### 配置文件说明
@@ -196,12 +196,14 @@ cd ..\bin
 
 **预设配置**：
 
-| 配置文件 | 用途 | 分辨率 | 采样 | 时间 |
+| 预设名称 | 用途 | 分辨率 | 采样 | 时间 |
 |---------|------|--------|------|------|
-| preview.ini | 快速预览 | 512×512 | 16 | ~0.2秒 |
-| benchmark.ini | 性能测试 | 512×512 | 1024 | ~8秒 |
-| high_quality.ini | 高质量渲染 | 1920×1080 | 2048 | ~120秒 |
-| debug.ini | 调试 | 256×256 | 4 | ~0.05秒 |
+| preview | 快速预览 | 512×512 | 16 | ~0.2秒 |
+| benchmark | 性能测试 | 512×512 | 1024 | ~8秒 |
+| high_quality | 高质量渲染 | 1920×1080 | 2048 | ~120秒 |
+| debug | 调试 | 256×256 | 4 | ~0.05秒 |
+
+每个预设包含 2 个配置文件：`<预设>_scene.ini`（场景参数）+ `<预设>_performance.ini`（性能参数）
 
 **可配置参数**：
 - 图像分辨率、采样数、深度

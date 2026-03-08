@@ -390,8 +390,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeLightPDF(
     if (!descriptor.isValid() || lightSelectProb <= 0.0f)
         return 0.0f;
     
-    const GeometryInstance& geomInst = wlp.geomInstBuffer[descriptor.geomInstIndex];
-    
     switch (descriptor.type) {
     case LightType_Point:
     case LightType_Directional:

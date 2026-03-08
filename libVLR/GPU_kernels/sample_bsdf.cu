@@ -45,7 +45,7 @@ extern "C" __global__ void sampleBSDF(
 
 #ifdef __CUDACC__
     // 优化：Shared Memory 缓存材质数据
-    #if PerformanceConfig::UseMaterialCache
+#if PerformanceConfig::UseMaterialCache
     __shared__ MaterialCache<PerformanceConfig::MaterialCacheSize> materialCache;
     if (threadIdx.x == 0) {
         uint32_t numMaterials = wlp.numMaterials;
@@ -93,12 +93,12 @@ extern "C" __global__ void sampleBSDF(
     // ========================================================================
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
     
-    #if PerformanceConfig::UseMaterialCache
+#if PerformanceConfig::UseMaterialCache
     const SurfaceMaterialDescriptor& matDesc = *materialCache.get(
         geomInst.materialIndex, wlp.materialDescriptorBuffer);
-    #else
+#else
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
-    #endif
+#endif
 
     // 构造 BSDF 采样所需参数：入射方向（局部）、几何法线
     // 入射方向 = 光线到达表面的方向 = -pathState.direction
