@@ -301,6 +301,34 @@ VLRResult vlrCreateMaterialConductor(
     }
 }
 
+VLRResult vlrCreateMaterialConductorAniso(
+    VLRScene scene,
+    const float eta[3],
+    const float kappa[3],
+    float roughness,
+    float anisotropy,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !eta || !kappa || !outMaterial) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialConductorAniso(
+            eta[0], eta[1], eta[2],
+            kappa[0], kappa[1], kappa[2],
+            roughness,
+            anisotropy);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrCreateMaterialMicrofacetScattering(
     VLRScene scene,
     float ior,
@@ -313,6 +341,63 @@ VLRResult vlrCreateMaterialMicrofacetScattering(
         VLRSceneImpl* sceneImpl = TO_SCENE(scene);
         if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
         uint32_t materialIndex = sceneImpl->scene->createMaterialMicrofacetScattering(ior, roughness);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrCreateMaterialLambertianScattering(
+    VLRScene scene,
+    const float albedo[3],
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !outMaterial || !albedo) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialLambertianScattering(
+            albedo[0], albedo[1], albedo[2]);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrCreateMaterialDisney(
+    VLRScene scene,
+    const float baseColor[3],
+    float metallic,
+    float subsurface,
+    float specular,
+    float roughness,
+    float specularTint,
+    float anisotropic,
+    float sheen,
+    float sheenTint,
+    float clearcoat,
+    float clearcoatGloss,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !outMaterial || !baseColor) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialDisney(
+            baseColor,
+            metallic, subsurface, specular, roughness,
+            specularTint, anisotropic, sheen, sheenTint,
+            clearcoat, clearcoatGloss);
         VLRMaterialImpl* matImpl = new VLRMaterialImpl();
         matImpl->sceneImpl = sceneImpl;
         matImpl->materialIndex = materialIndex;
@@ -341,6 +426,36 @@ VLRResult vlrCreateMaterialCheckerboard(
             color1[0], color1[1], color1[2],
             gridSize > 0 ? gridSize : 8,
             extent);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
+VLRResult vlrCreateMaterialMultiSurface(
+    VLRScene scene,
+    int numLayers,
+    const uint32_t* subBSDFTypes,
+    const float* const* subAlbedos,
+    const float* subRoughness,
+    const float* weights,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !outMaterial || numLayers < 2 || numLayers > 4 ||
+        !subBSDFTypes || !subAlbedos || !subRoughness || !weights)
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialMultiSurface(
+            numLayers, subBSDFTypes, subAlbedos, subRoughness, weights);
+        if (materialIndex == 0xFFFFFFFF)
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
         VLRMaterialImpl* matImpl = new VLRMaterialImpl();
         matImpl->sceneImpl = sceneImpl;
         matImpl->materialIndex = materialIndex;

@@ -103,6 +103,80 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getLambertBSDFPDF(
 
 
 // ============================================================================
+// 2.1 LambertianScattering 次表面散射 BSDF（双向 Lambert）
+// ============================================================================
+// 简化次表面散射模型：允许光从入射半球反射，或透射到另一侧半球。
+// 与普通 Lambert 的区别：透射分量允许 dirOut 与 dirIn 在法线异侧。
+// 公式：f = albedo/π（反射和透射相同，均使用 Lambert 分布）
+// PDF：50% 反射 + 50% 透射，各为余弦加权半球，总 pdf = 0.5 * |cos(θ)|/π
+// ============================================================================
+
+/// 评估 LambertianScattering BSDF: f = albedo/π（反射和透射均适用）
+/// 入射和出射可在同半球（反射）或异半球（透射）
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateLambertianScatteringBSDF(
+    const SampledSpectrum& albedo,
+    const Vector3D& dirInLocal,
+    const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+
+    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    if (cosOut == 0.0f)
+        return SampledSpectrum::Zero();
+    // 反射：cosOut > 0（同半球）；透射：cosOut < 0（异半球），均有效
+    return albedo * VLR_M_INV_PI;
+}
+
+/// 采样 LambertianScattering BSDF：50% 反射（余弦半球）+ 50% 透射（翻转法线余弦半球）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleLambertianScatteringBSDF(
+    const SampledSpectrum& albedo,
+    const Vector3D& dirInLocal,
+    const Normal3D& geomNormalLocal,
+    float u0, float u1, float u2,
+    BSDFSampleResult* result) {
+
+    // u2 决定反射(0~0.5)还是透射(0.5~1)
+    bool sampleReflection = (u2 < 0.5f);
+    Normal3D effectiveNormal = sampleReflection ? geomNormalLocal
+        : Normal3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
+
+    // 余弦加权半球采样（与 Lambert 相同）
+    float r = safeSqrt(u0);
+    float phi = u1 * VLR_M_2PI;
+    float x = r * std::cos(phi);
+    float y = r * std::sin(phi);
+    float z = safeSqrt(1.0f - u0);
+
+    Vector3D tangent = (std::abs(effectiveNormal.z) < 0.999f)
+        ? normalize(cross(Vector3D(0, 1, 0), effectiveNormal))
+        : normalize(cross(Vector3D(1, 0, 0), effectiveNormal));
+    Vector3D bitangent = cross(effectiveNormal, tangent);
+
+    Vector3D dirLocal = normalize(
+        tangent * x + bitangent * y + effectiveNormal * z);
+
+    result->dirLocal = dirLocal;
+    result->f = albedo * VLR_M_INV_PI;
+    // PDF: 0.5 * cos/π（反射和透射各 50% 选择概率）
+    result->pdf = 0.5f * std::abs(dot(dirLocal, effectiveNormal)) * VLR_M_INV_PI;
+    result->sampledBSDFType = BSDFType_LambertianScattering;
+    result->isDelta = false;
+}
+
+/// LambertianScattering BSDF 的 PDF: 0.5 * |cos(θ)| / π
+/// 反射和透射各 50% 概率，给定方向只属于其一
+CUDA_DEVICE_FUNCTION CUDA_INLINE float getLambertianScatteringBSDFPDF(
+    const Vector3D& dirInLocal,
+    const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+
+    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    if (cosOut == 0.0f)
+        return 0.0f;
+    return 0.5f * std::abs(cosOut) * VLR_M_INV_PI;
+}
+
+
+// ============================================================================
 // 3. GGX 微表面 BSDF
 // ============================================================================
 
@@ -129,6 +203,92 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float GGX_G1(float NdotV, float alpha2) {
     float tan2 = (1.0f - NdotVSafe * NdotVSafe) / (NdotVSafe * NdotVSafe);
     tan2 = ::vlr::vlr_min(tan2, 1e10f);  // 防止 tan2 过大
     return 2.0f / (1.0f + safeSqrt(1.0f + alpha2 * tan2));
+}
+
+// ============================================================================
+// 2.6 各向异性 GGX（Anisotropic GGX）
+// ============================================================================
+// 参考：Heitz 2014, Burley 2015, Heitz 2017 "Sampling the GGX Distribution of Visible Normals"
+// 切线空间：x=tangent, y=bitangent, z=normal；dir 已在局部坐标，HdotX=H.x, HdotY=H.y
+
+/// 将 roughness + anisotropy 转换为 alphaX, alphaY（Disney/Burley 参数化）
+/// anisotropy: 0=各向同性, 0.9=强各向异性
+CUDA_DEVICE_FUNCTION CUDA_INLINE void roughnessAnisotropyToAlpha(
+    float roughness, float anisotropy,
+    float* alphaX, float* alphaY) {
+    float r = ::vlr::vlr_max(roughness, 0.001f);
+    float r2 = r * r;
+    float a = ::vlr::vlr_max(anisotropy, 0.0f);
+    float aspect = safeSqrt(1.0f - 0.9f * a);  // Disney: aspect in [0.316, 1]
+    *alphaX = r2 / aspect;
+    *alphaY = r2 * aspect;
+    *alphaX = ::vlr::vlr_max(*alphaX, 0.0001f);
+    *alphaY = ::vlr::vlr_max(*alphaY, 0.0001f);
+}
+
+/// 各向异性 GGX 法线分布函数 D(h)
+/// D(h) = 1 / (π * αx * αy * [(h·x/αx)² + (h·y/αy)² + (h·z)²]²)
+/// 局部坐标下：HdotX=H.x, HdotY=H.y, NdotH=H.z
+CUDA_DEVICE_FUNCTION CUDA_INLINE float GGX_D_Aniso(
+    float NdotH, float HdotX, float HdotY,
+    float alphaX, float alphaY) {
+    if (NdotH <= 0.0f)
+        return 0.0f;
+    float ax2 = alphaX * alphaX;
+    float ay2 = alphaY * alphaY;
+    float denom = (HdotX * HdotX / ax2 + HdotY * HdotY / ay2 + NdotH * NdotH);
+    denom = denom * denom * VLR_M_PI * alphaX * alphaY;
+    denom = ::vlr::vlr_max(denom, 1e-10f);
+    return 1.0f / denom;
+}
+
+/// 各向异性 Smith G1 几何项
+/// G1(v) = 2 / (1 + sqrt(1 + α²tan²θ))，各向异性：α² = (VdotX²αy² + VdotY²αx² + VdotZ²αx²αy²) / (VdotZ²)
+/// 简化：Λ(v) = (-1 + sqrt(1 + (VdotX²/αx² + VdotY²/αy²) / VdotZ²)) / 2
+CUDA_DEVICE_FUNCTION CUDA_INLINE float GGX_G1_Aniso(
+    float NdotV, float VdotX, float VdotY,
+    float alphaX, float alphaY) {
+    if (NdotV <= 0.0f)
+        return 0.0f;
+    float NdotVSafe = ::vlr::vlr_max(NdotV, 1e-6f);
+    float ax2 = alphaX * alphaX;
+    float ay2 = alphaY * alphaY;
+    float tan2 = (VdotX * VdotX / ax2 + VdotY * VdotY / ay2) / (NdotVSafe * NdotVSafe);
+    tan2 = ::vlr::vlr_min(tan2, 1e10f);
+    return 2.0f / (1.0f + safeSqrt(1.0f + tan2));
+}
+
+/// 各向异性 GGX VNDF 采样（Heitz 2017）
+/// Vh = normalize(αx*V.x, αy*V.y, V.z)，椭圆变换后采样
+CUDA_DEVICE_FUNCTION CUDA_INLINE Vector3D sampleGGXVNDF_Aniso(
+    const Vector3D& V,
+    float alphaX, float alphaY,
+    float u1, float u2) {
+    Vector3D Vh = normalize(Vector3D(
+        alphaX * V.x,
+        alphaY * V.y,
+        ::vlr::vlr_max(V.z, 1e-6f)));
+
+    float lensq = Vh.y * Vh.y + Vh.z * Vh.z;
+    Vector3D T1 = (lensq > 1e-10f)
+        ? normalize(Vector3D(0, -Vh.z, Vh.y))
+        : Vector3D(0, 0, 1);
+    Vector3D T2 = cross(Vh, T1);
+
+    float r = safeSqrt(u1);
+    float phi = u2 * VLR_M_2PI;
+    float t1 = r * std::cos(phi);
+    float t2 = r * std::sin(phi);
+    float s = 0.5f * (1.0f + Vh.z);
+    t2 = (1.0f - s) * safeSqrt(::vlr::vlr_max(0.0f, 1.0f - t1 * t1)) + s * t2;
+
+    Vector3D Nh = t1 * T1 + t2 * T2 + safeSqrt(::vlr::vlr_max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
+
+    Vector3D H = normalize(Vector3D(
+        alphaX * Nh.x,
+        alphaY * Nh.y,
+        ::vlr::vlr_max(0.0f, Nh.z)));
+    return H;
 }
 
 // ============================================================================
@@ -408,8 +568,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getGGXBSDFPDF(
 // 3.1 导体微表面反射 BSDF（MicrofacetReflection）
 // ============================================================================
 
-/// 评估导体微表面反射 BSDF（GGX + FresnelConductor）
-/// 与原始 VLR MicrofacetBRDF 一致：f = coeffR * F * D * G / (4 * NdotL * NdotV)
+/// 评估导体微表面反射 BSDF（GGX + FresnelConductor）- 各向同性
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSDF(
     const SampledSpectrum& coeffR,
     const SampledSpectrum& eta,
@@ -489,7 +648,63 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
     return result;
 }
 
-/// 采样导体微表面反射 BSDF（GGX VNDF + FresnelConductor）
+/// 评估导体微表面反射 BSDF（各向异性 GGX + FresnelConductor）
+/// dirInLocal/dirOutLocal 已在切线空间，x=tangent, y=bitangent, z=normal
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSDF_Aniso(
+    const SampledSpectrum& coeffR,
+    const SampledSpectrum& eta,
+    const SampledSpectrum& kappa,
+    float alphaX, float alphaY,
+    const Vector3D& dirInLocal,
+    const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+
+    float NdotL = dot(dirInLocal, geomNormalLocal);
+    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    if (NdotL <= 0.0f || NdotV <= 0.0f)
+        return SampledSpectrum::Zero();
+
+    Vector3D halfSum = dirInLocal + dirOutLocal;
+    float halfLenSq = dot(halfSum, halfSum);
+    if (halfLenSq < 1e-12f)
+        return SampledSpectrum::Zero();
+    
+    Vector3D halfVec = normalize(halfSum);
+    float NdotH = dot(halfVec, geomNormalLocal);
+    if (NdotH <= 0.0f)
+        return SampledSpectrum::Zero();
+
+    float HdotX = halfVec.x;
+    float HdotY = halfVec.y;
+    float VdotH = dot(dirOutLocal, halfVec);
+    float LdotX = dirInLocal.x, LdotY = dirInLocal.y;
+    float VdotX = dirOutLocal.x, VdotY = dirOutLocal.y;
+
+    float D = GGX_D_Aniso(NdotH, HdotX, HdotY, alphaX, alphaY);
+    float G1_l = GGX_G1_Aniso(NdotL, LdotX, LdotY, alphaX, alphaY);
+    float G1_v = GGX_G1_Aniso(NdotV, VdotX, VdotY, alphaX, alphaY);
+    float G = G1_l * G1_v;
+
+    float denom = 4.0f * NdotL * NdotV;
+    if (denom < 1e-7f)
+        return SampledSpectrum::Zero();
+
+    SampledSpectrum F;
+    float cosTheta = std::abs(VdotH);
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        float fresnelValue = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+        F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);
+    }
+
+    SampledSpectrum result;
+    float spec = D * G / denom;
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        result.values[i] = coeffR.values[i] * F.values[i] * spec;
+    }
+    return result;
+}
+
+/// 采样导体微表面反射 BSDF（GGX VNDF + FresnelConductor）- 各向同性
 CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     const SampledSpectrum& coeffR,
     const SampledSpectrum& eta,
@@ -559,7 +774,78 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     }
 }
 
-/// MicrofacetReflection BSDF 的 PDF
+/// 采样导体微表面反射 BSDF（各向异性 GGX VNDF + FresnelConductor）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
+    const SampledSpectrum& coeffR,
+    const SampledSpectrum& eta,
+    const SampledSpectrum& kappa,
+    float alphaX, float alphaY,
+    const Vector3D& dirInLocal,
+    const Normal3D& geomNormalLocal,
+    float u0, float u1,
+    BSDFSampleResult* result) {
+
+    float NdotL = dot(dirInLocal, geomNormalLocal);
+    if (NdotL <= 0.0f) {
+        result->pdf = 0.0f;
+        result->f = SampledSpectrum::Zero();
+        return;
+    }
+
+    Vector3D H = sampleGGXVNDF_Aniso(dirInLocal, alphaX, alphaY, u0, u1);
+
+    float VdotH = dot(dirInLocal, H);
+    if (VdotH <= 0.0f) {
+        result->pdf = 0.0f;
+        result->f = SampledSpectrum::Zero();
+        return;
+    }
+
+    Vector3D dirOutLocal = 2.0f * VdotH * H - dirInLocal;
+    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    if (NdotV <= 0.0f) {
+        result->pdf = 0.0f;
+        result->f = SampledSpectrum::Zero();
+        return;
+    }
+
+    float NdotH = dot(H, geomNormalLocal);
+    float HdotX = H.x, HdotY = H.y;
+    float LdotX = dirInLocal.x, LdotY = dirInLocal.y;
+    float VdotX = dirOutLocal.x, VdotY = dirOutLocal.y;
+
+    float D = GGX_D_Aniso(NdotH, HdotX, HdotY, alphaX, alphaY);
+    float G1_l = GGX_G1_Aniso(NdotL, LdotX, LdotY, alphaX, alphaY);
+    float G1_v = GGX_G1_Aniso(NdotV, VdotX, VdotY, alphaX, alphaY);
+    float G = G1_l * G1_v;
+
+    float VdotH_clamped = ::vlr::vlr_max(VdotH, 1e-6f);
+    float pdf = D * G1_l * NdotV / (4.0f * VdotH_clamped);
+
+    result->dirLocal = dirOutLocal;
+    result->pdf = pdf;
+    result->isDelta = false;
+    result->sampledBSDFType = BSDFType_MicrofacetReflection;
+
+    SampledSpectrum F;
+    float cosTheta = std::abs(VdotH);
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        float fresnelValue = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
+        F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);
+    }
+
+    float denom = 4.0f * NdotL * NdotV;
+    if (denom > 1e-7f) {
+        float spec = D * G / denom;
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            result->f.values[i] = coeffR.values[i] * F.values[i] * spec;
+        }
+    } else {
+        result->f = SampledSpectrum::Zero();
+    }
+}
+
+/// MicrofacetReflection BSDF 的 PDF（各向同性）
 CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF(
     float roughness,
     const Vector3D& dirInLocal,
@@ -588,6 +874,36 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF(
 
     float VdotHSafe = ::vlr::vlr_max(VdotH, 1e-6f);
     return D * G1_v * NdotV / (4.0f * VdotHSafe);
+}
+
+/// MicrofacetReflection BSDF 的 PDF（各向异性）
+CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF_Aniso(
+    float alphaX, float alphaY,
+    const Vector3D& dirInLocal,
+    const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+
+    float NdotL = dot(dirInLocal, geomNormalLocal);
+    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    if (NdotL <= 0.0f || NdotV <= 0.0f)
+        return 0.0f;
+
+    Vector3D halfSum = dirInLocal + dirOutLocal;
+    float halfLenSq = dot(halfSum, halfSum);
+    if (halfLenSq < 1e-12f)
+        return 0.0f;
+    
+    Vector3D halfVec = normalize(halfSum);
+    float NdotH = dot(halfVec, geomNormalLocal);
+    float VdotH = dot(dirOutLocal, halfVec);
+    float HdotX = halfVec.x, HdotY = halfVec.y;
+    float LdotX = dirInLocal.x, LdotY = dirInLocal.y;
+
+    float D = GGX_D_Aniso(NdotH, HdotX, HdotY, alphaX, alphaY);
+    float G1_l = GGX_G1_Aniso(NdotL, LdotX, LdotY, alphaX, alphaY);
+
+    float VdotHSafe = ::vlr::vlr_max(VdotH, 1e-6f);
+    return D * G1_l * NdotV / (4.0f * VdotHSafe);
 }
 
 
@@ -1371,6 +1687,254 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateFrostbiteBRDF(
 
 
 // ============================================================================
+// 4.9.1 Disney Principled BRDF (Burley 2012)
+// ============================================================================
+// 参考: Physically Based Shading at Disney, SIGGRAPH 2012 Course Notes
+// 分量: Disney Diffuse, Subsurface(简化), Specular(GGX), Sheen, Clearcoat(GTR1)
+// 各向异性: 暂用各向同性 GGX（anisotropic 参数预留）
+// ============================================================================
+
+/// Disney Diffuse: fd = baseColor/π * (1+(FD90-1)(1-cosθl)^5) * (1+(FD90-1)(1-cosθv)^5)
+/// FD90 = 0.5 + 2*roughness*cos²θd
+CUDA_DEVICE_FUNCTION CUDA_INLINE float DisneyDiffuse(
+    float NdotL, float NdotV, float LdotH, float roughness) {
+    float FD90 = 0.5f + 2.0f * roughness * LdotH * LdotH;
+    float FL = 1.0f + (FD90 - 1.0f) * powf(1.0f - NdotL, 5.0f);
+    float FV = 1.0f + (FD90 - 1.0f) * powf(1.0f - NdotV, 5.0f);
+    return FL * FV * VLR_M_INV_PI;
+}
+
+/// Disney Subsurface: Hanrahan-Krueger 近似，与 diffuse 形状混合
+CUDA_DEVICE_FUNCTION CUDA_INLINE float DisneySubsurface(
+    float NdotL, float NdotV, float LdotH, float roughness) {
+    float FD90 = 0.5f + 2.0f * roughness * LdotH * LdotH;
+    float FL = 1.0f + (FD90 - 1.0f) * powf(1.0f - NdotL, 5.0f);
+    float FV = 1.0f + (FD90 - 1.0f) * powf(1.0f - NdotV, 5.0f);
+    float Fss90 = roughness * LdotH * LdotH;
+    float Fss = 1.0f + (Fss90 - 1.0f) * (powf(1.0f - NdotL, 5.0f) + powf(1.0f - NdotV, 5.0f));
+    float ss = 1.25f * (FL * FV * (1.0f / (NdotL + NdotV) - 0.5f) + 0.5f);
+    return ss * VLR_M_INV_PI;
+}
+
+/// Disney Specular F0: specular 参数映射到 [0, 0.08]，specularTint 插值
+/// 金属时 F0 = baseColor
+CUDA_DEVICE_FUNCTION CUDA_INLINE void DisneySpecularF0(
+    const SampledSpectrum& baseColor, float metallic, float specular, float specularTint,
+    SampledSpectrum* F0) {
+    constexpr float dielectricF0 = 0.04f;
+    float specF0 = 0.08f * specular;  // [0, 0.08]
+    float lum = baseColor.values[0] * 0.2126f + baseColor.values[1] * 0.7152f + baseColor.values[2] * 0.0722f;
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        float tint = (lum > 1e-5f) ? baseColor.values[i] / lum : 1.0f;
+        float F0dielectric = specF0 * (1.0f - specularTint + specularTint * tint);
+        F0->values[i] = baseColor.values[i] * metallic + F0dielectric * (1.0f - metallic);
+    }
+    F0->values[3] = (F0->values[0] + F0->values[1] + F0->values[2]) / 3.0f;
+}
+
+/// Disney Sheen: sheen * (1 - cosθd)^5，可选 baseColor 着色
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum DisneySheen(
+    const SampledSpectrum& baseColor, float sheen, float sheenTint, float LdotH) {
+    if (sheen <= 0.0f) return SampledSpectrum::Zero();
+    float lum = baseColor.values[0] * 0.2126f + baseColor.values[1] * 0.7152f + baseColor.values[2] * 0.0722f;
+    SampledSpectrum tint = SampledSpectrum::One();
+    if (lum > 1e-5f) {
+        for (int i = 0; i < 3; ++i) tint.values[i] = baseColor.values[i] / lum;
+    }
+    float sheenF = sheen * powf(1.0f - LdotH, 5.0f);
+    SampledSpectrum result;
+    for (int i = 0; i < NumSpectralSamples; ++i)
+        result.values[i] = sheenF * (1.0f - sheenTint + sheenTint * tint.values[i]);
+    return result;
+}
+
+/// GTR1 (Clearcoat): D = (α²-1)/(π*ln(α²)) * 1/(1+(α²-1)cos²θh)
+CUDA_DEVICE_FUNCTION CUDA_INLINE float GTR1_D(float NdotH, float alpha) {
+    if (NdotH <= 0.0f || alpha >= 1.0f) return 0.0f;
+    float alpha2 = alpha * alpha;
+    float denom = 1.0f + (alpha2 - 1.0f) * NdotH * NdotH;
+    float logAlpha2 = std::log(alpha2);
+    if (std::abs(logAlpha2) < 1e-10f) return 0.0f;
+    return (alpha2 - 1.0f) / (VLR_M_PI * logAlpha2 * denom);
+}
+
+/// Disney Clearcoat: 独立 GTR1 镜面层，IOR=1.5，scale [0, 0.25]
+CUDA_DEVICE_FUNCTION CUDA_INLINE float DisneyClearcoat(
+    float NdotL, float NdotV, float NdotH, float VdotH,
+    float clearcoat, float clearcoatGloss) {
+    if (clearcoat <= 0.0f) return 0.0f;
+    float alpha = 0.1f + 0.9f * (1.0f - clearcoatGloss);  // gloss: 0=satin, 1=gloss
+    float D = GTR1_D(NdotH, alpha);
+    float F = SchlickFresnel(VdotH, 0.04f);  // 清漆 F0≈0.04
+    float alphaG = 0.25f;
+    float G = GGX_G1(NdotL, alphaG * alphaG) * GGX_G1(NdotV, alphaG * alphaG);
+    float denom = 4.0f * NdotL * NdotV;
+    if (denom < 1e-7f) return 0.0f;
+    return 0.25f * clearcoat * D * F * G / denom;
+}
+
+/// 评估 Disney BRDF
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDisneyBRDF(
+    const SampledSpectrum& baseColor,
+    float metallic, float subsurface, float specular, float roughness,
+    float specularTint, float /*anisotropic*/, float sheen, float sheenTint,
+    float clearcoat, float clearcoatGloss,
+    const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+
+    float NdotL = dot(dirInLocal, geomNormalLocal);
+    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    if (NdotV <= 0.0f) return SampledSpectrum::Zero();
+    if (NdotL <= 0.0f) NdotL = -NdotL;  // 允许光线从任意方向入射
+
+    Vector3D halfSum = dirInLocal + dirOutLocal;
+    float halfLenSq = dot(halfSum, halfSum);
+    if (halfLenSq < 1e-12f) return SampledSpectrum::Zero();
+    Vector3D halfVec = normalize(halfSum);
+    float NdotH = dot(halfVec, geomNormalLocal);
+    float LdotH = dot(dirInLocal, halfVec);
+    float VdotH = dot(dirOutLocal, halfVec);
+
+    SampledSpectrum result = SampledSpectrum::Zero();
+
+    // Diffuse + Subsurface (金属无漫反射)
+    if (metallic < 1.0f) {
+        float fd = DisneyDiffuse(NdotL, NdotV, LdotH, roughness);
+        float fss = DisneySubsurface(NdotL, NdotV, LdotH, roughness);
+        float diffBlend = (1.0f - subsurface) * fd + subsurface * fss;
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            result.values[i] += baseColor.values[i] * (1.0f - metallic) * diffBlend;
+    }
+
+    // Specular (GGX)
+    SampledSpectrum F0;
+    DisneySpecularF0(baseColor, metallic, specular, specularTint, &F0);
+    float alpha = roughnessToAlpha(roughness);
+    float alpha2 = alpha * alpha;
+    float D = GGX_D(NdotH, alpha2);
+    float G1_l = GGX_G1(NdotL, alpha2);
+    float G1_v = GGX_G1(NdotV, alpha2);
+    float denom = 4.0f * NdotL * NdotV;
+    if (denom > 1e-7f) {
+        SampledSpectrum F;
+        SchlickFresnelSpectrum(VdotH, F0, &F);
+        float specVal = D * G1_l * G1_v / denom;
+        for (int i = 0; i < NumSpectralSamples; ++i)
+            result.values[i] += F.values[i] * specVal;
+    }
+
+    // Sheen
+    result = result + DisneySheen(baseColor, sheen, sheenTint, LdotH);
+
+    // Clearcoat
+    if (clearcoat > 0.0f) {
+        float cc = DisneyClearcoat(NdotL, NdotV, NdotH, VdotH, clearcoat, clearcoatGloss);
+        result = result + SampledSpectrum(cc);  // 清漆无色
+    }
+
+    return result;
+}
+
+/// 采样 Disney BRDF: 按 diffuse/specular/clearcoat 权重选择分量
+CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDisneyBRDF(
+    const SampledSpectrum& baseColor,
+    float metallic, float subsurface, float specular, float roughness,
+    float specularTint, float anisotropic, float sheen, float sheenTint,
+    float clearcoat, float clearcoatGloss,
+    const Vector3D& dirInLocal, const Normal3D& geomNormalLocal,
+    float u0, float u1, float u2,
+    BSDFSampleResult* result) {
+
+    float NdotL = dot(dirInLocal, geomNormalLocal);
+    if (NdotL <= 0.0f) {
+        result->pdf = 0.0f;
+        result->f = SampledSpectrum::Zero();
+        return;
+    }
+
+    // 估算各分量权重用于 MIS 采样
+    float diffuseWeight = (1.0f - metallic) * baseColor.values[3] * VLR_M_INV_PI;
+    SampledSpectrum F0;
+    DisneySpecularF0(baseColor, metallic, specular, specularTint, &F0);
+    float specWeight = F0.values[3] * 0.5f;  // 近似
+    float clearcoatWeight = clearcoat * 0.25f;
+    float totalWeight = diffuseWeight + specWeight + clearcoatWeight;
+    if (totalWeight < 1e-6f) totalWeight = 1.0f;
+
+    float pd = diffuseWeight / totalWeight;
+    float ps = specWeight / totalWeight;
+    float pc = clearcoatWeight / totalWeight;
+
+    if (u2 < pd) {
+        // 采样 diffuse
+        sampleLambertBSDF(baseColor, dirInLocal, geomNormalLocal, u0, u1, result);
+        result->sampledBSDFType = BSDFType_DisneyBRDF;
+        result->pdf *= pd;
+        // 重新计算 f（Disney diffuse 而非 Lambert）
+        Vector3D dirOut = result->dirLocal;
+        float NdotV = dot(dirOut, geomNormalLocal);
+        Vector3D halfSum = dirInLocal + dirOut;
+        float halfLenSq = dot(halfSum, halfSum);
+        if (halfLenSq > 1e-12f) {
+            Vector3D halfVec = normalize(halfSum);
+            float LdotH = dot(dirInLocal, halfVec);
+            float fd = DisneyDiffuse(NdotL, NdotV, LdotH, roughness);
+            float fss = DisneySubsurface(NdotL, NdotV, LdotH, roughness);
+            float diffBlend = (1.0f - subsurface) * fd + subsurface * fss;
+            for (int i = 0; i < NumSpectralSamples; ++i)
+                result->f.values[i] = baseColor.values[i] * (1.0f - metallic) * diffBlend;
+        }
+    } else if (u2 < pd + ps) {
+        // 采样 specular (GGX)
+        sampleGGXBSDF(F0, roughness, dirInLocal, geomNormalLocal, u0, u1, result);
+        result->sampledBSDFType = BSDFType_DisneyBRDF;
+        result->pdf *= ps;
+    } else {
+        // 采样 clearcoat (GTR1 近似为 GGX，roughness = sqrt(alpha))
+        float alpha = 0.1f + 0.9f * (1.0f - clearcoatGloss);
+        float ccRoughness = safeSqrt(alpha);
+        SampledSpectrum ccReflectance;
+        for (int i = 0; i < NumSpectralSamples; ++i) ccReflectance.values[i] = 0.04f;
+        sampleGGXBSDF(ccReflectance, ccRoughness, dirInLocal, geomNormalLocal, u0, u1, result);
+        result->sampledBSDFType = BSDFType_DisneyBRDF;
+        result->pdf *= pc;
+        result->f = result->f * (0.25f * clearcoat);
+    }
+}
+
+/// Disney BRDF PDF（混合各分量 PDF）
+CUDA_DEVICE_FUNCTION CUDA_INLINE float getDisneyBRDFPDF(
+    const SampledSpectrum& baseColor,
+    float metallic, float subsurface, float specular, float specularTint,
+    float roughness, float /*anisotropic*/, float sheen, float clearcoat, float clearcoatGloss,
+    const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+
+    float diffuseWeight = (1.0f - metallic) * baseColor.values[3] * VLR_M_INV_PI;
+    SampledSpectrum F0;
+    DisneySpecularF0(baseColor, metallic, specular, specularTint, &F0);
+    float specWeight = F0.values[3] * 0.5f;
+    float clearcoatWeight = clearcoat * 0.25f;
+    float totalWeight = diffuseWeight + specWeight + clearcoatWeight;
+    if (totalWeight < 1e-6f) return 0.0f;
+
+    float pd = diffuseWeight / totalWeight;
+    float ps = specWeight / totalWeight;
+    float pc = clearcoatWeight / totalWeight;
+
+    float pdfLambert = getLambertBSDFPDF(dirOutLocal, geomNormalLocal);
+    float pdfGGX = getGGXBSDFPDF(F0, roughness, dirInLocal, dirOutLocal, geomNormalLocal);
+    float ccAlpha = 0.1f + 0.9f * (1.0f - clearcoatGloss);
+    float ccRoughness = safeSqrt(ccAlpha);
+    SampledSpectrum ccRefl;
+    for (int i = 0; i < NumSpectralSamples; ++i) ccRefl.values[i] = 0.04f;
+    float pdfClearcoat = getGGXBSDFPDF(ccRefl, ccRoughness, dirInLocal, dirOutLocal, geomNormalLocal);
+
+    return pd * pdfLambert + ps * pdfGGX + pc * pdfClearcoat;
+}
+
+
+// ============================================================================
 // 4.10 混合 BSDF（多层材质）
 // ============================================================================
 
@@ -1388,6 +1952,148 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMixedBSDF(
     for (int i = 0; i < NumSpectralSamples; ++i)
         result.values[i] = (1.0f - w) * f0.values[i] + w * f1.values[i];
     return result;
+}
+
+// ============================================================================
+// 4.10 多表面材质 MultiSurface（2-4 层）
+// ============================================================================
+
+/// 评估单个子材质 BSDF（支持 Lambert, GGX, Specular, UE4BRDF, FrostbiteBRDF, MicrofacetReflection）
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSubBSDF(
+    BSDFType subType,
+    const SampledSpectrum& albedo,
+    float roughness,
+    const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+    switch (subType) {
+    case BSDFType_Lambert:
+        return evaluateLambertBSDF(albedo, dirInLocal, dirOutLocal, geomNormalLocal);
+    case BSDFType_GGX:
+    case BSDFType_UE4BRDF:
+    case BSDFType_FrostbiteBRDF:
+    case BSDFType_MicrofacetReflection:
+        return evaluateGGXBSDF(albedo, roughness, dirInLocal, dirOutLocal, geomNormalLocal);
+    case BSDFType_Specular: {
+        SampledSpectrum eta, kappa;
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            eta.values[i] = 1.0f;
+            kappa.values[i] = 0.0f;
+        }
+        return evaluateSpecularBSDF(albedo, eta, kappa, dirInLocal, dirOutLocal, geomNormalLocal);
+    }
+    default:
+        return evaluateLambertBSDF(albedo, dirInLocal, dirOutLocal, geomNormalLocal);
+    }
+}
+
+/// 获取单个子材质 BSDF 的 PDF
+CUDA_DEVICE_FUNCTION CUDA_INLINE float getSubBSDFPDF(
+    BSDFType subType,
+    const SampledSpectrum& albedo,
+    float roughness,
+    const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+    switch (subType) {
+    case BSDFType_Lambert:
+        return getLambertBSDFPDF(dirOutLocal, geomNormalLocal);
+    case BSDFType_GGX:
+    case BSDFType_UE4BRDF:
+    case BSDFType_FrostbiteBRDF:
+    case BSDFType_MicrofacetReflection:
+        return getGGXBSDFPDF(albedo, roughness, dirInLocal, dirOutLocal, geomNormalLocal);
+    case BSDFType_Specular:
+        return getSpecularBSDFPDF(dirInLocal, dirOutLocal, geomNormalLocal);
+    default:
+        return getLambertBSDFPDF(dirOutLocal, geomNormalLocal);
+    }
+}
+
+/// 评估 MultiSurface BSDF: f_total = Σ(weight_i * f_i)
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMultiSurfaceBSDF(
+    int numLayers,
+    const BSDFType subTypes[4],
+    const SampledSpectrum subAlbedos[4],
+    const float subRoughness[4],
+    const float weights[4],
+    const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+    SampledSpectrum result = SampledSpectrum::Zero();
+    for (int i = 0; i < numLayers; ++i) {
+        SampledSpectrum fi = evaluateSubBSDF(subTypes[i], subAlbedos[i], subRoughness[i],
+            dirInLocal, dirOutLocal, geomNormalLocal);
+        for (int c = 0; c < NumSpectralSamples; ++c)
+            result.values[c] += weights[i] * fi.values[c];
+    }
+    return result;
+}
+
+/// 采样 MultiSurface BSDF：按权重离散选择一层，PDF = Σ(weight_i * pdf_i)
+CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMultiSurfaceBSDF(
+    int numLayers,
+    const BSDFType subTypes[4],
+    const SampledSpectrum subAlbedos[4],
+    const float subRoughness[4],
+    const float weights[4],
+    const Vector3D& dirInLocal,
+    const Normal3D& geomNormalLocal,
+    float u0, float u1, float u2,
+    BSDFSampleResult* result) {
+    float cum = 0.0f;
+    int sel = numLayers - 1;
+    for (int i = 0; i < numLayers; ++i) {
+        cum += weights[i];
+        if (u2 < cum) { sel = i; break; }
+        sel = i;
+    }
+    switch (subTypes[sel]) {
+    case BSDFType_Lambert:
+        sampleLambertBSDF(subAlbedos[sel], dirInLocal, geomNormalLocal, u0, u1, result);
+        break;
+    case BSDFType_GGX:
+    case BSDFType_UE4BRDF:
+    case BSDFType_FrostbiteBRDF:
+    case BSDFType_MicrofacetReflection:
+        sampleGGXBSDF(subAlbedos[sel], subRoughness[sel], dirInLocal, geomNormalLocal, u0, u1, result);
+        break;
+    case BSDFType_Specular: {
+        SampledSpectrum eta, kappa;
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            eta.values[i] = 1.0f;
+            kappa.values[i] = 0.0f;
+        }
+        sampleSpecularBSDF(subAlbedos[sel], eta, kappa, dirInLocal, geomNormalLocal, u0, u1, result);
+        break;
+    }
+    default:
+        sampleLambertBSDF(subAlbedos[sel], dirInLocal, geomNormalLocal, u0, u1, result);
+        break;
+    }
+    result->sampledBSDFType = BSDFType_MultiSurface;
+    float pdfMix = 0.0f;
+    for (int i = 0; i < numLayers; ++i) {
+        float pdfi = getSubBSDFPDF(subTypes[i], subAlbedos[i], subRoughness[i],
+            dirInLocal, result->dirLocal, geomNormalLocal);
+        pdfMix += weights[i] * pdfi;
+    }
+    result->pdf = pdfMix;
+}
+
+/// MultiSurface BSDF 的 PDF
+CUDA_DEVICE_FUNCTION CUDA_INLINE float getMultiSurfaceBSDFPDF(
+    int numLayers,
+    const BSDFType subTypes[4],
+    const SampledSpectrum subAlbedos[4],
+    const float subRoughness[4],
+    const float weights[4],
+    const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
+    const Normal3D& geomNormalLocal) {
+    float pdf = 0.0f;
+    for (int i = 0; i < numLayers; ++i) {
+        float pdfi = getSubBSDFPDF(subTypes[i], subAlbedos[i], subRoughness[i],
+            dirInLocal, dirOutLocal, geomNormalLocal);
+        pdf += weights[i] * pdfi;
+    }
+    return pdf;
 }
 
 
@@ -1421,6 +2127,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
         SampledSpectrum albedo;
         getLambertAlbedoCheckerboard(matDesc, ctx.surfPt, &albedo);
         return evaluateLambertBSDF(albedo, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+    }
+    case BSDFType_LambertianScattering: {
+        SampledSpectrum albedo;
+        getLambertAlbedo(matDesc, &albedo);
+        return evaluateLambertianScatteringBSDF(albedo, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
@@ -1475,11 +2186,30 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
         getUE4Params(matDesc, &baseColor, &metallic, &roughness);
         return evaluateUE4BRDF(baseColor, metallic, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
+    case BSDFType_DisneyBRDF: {
+        SampledSpectrum baseColor;
+        float metallic, subsurface, specular, roughness, specularTint;
+        float anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss;
+        getDisneyParams(matDesc, &baseColor, &metallic, &subsurface, &specular, &roughness,
+            &specularTint, &anisotropic, &sheen, &sheenTint, &clearcoat, &clearcoatGloss);
+        return evaluateDisneyBRDF(baseColor, metallic, subsurface, specular, roughness,
+            specularTint, anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss,
+            dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+    }
     case BSDFType_MixedBSDF: {
         SampledSpectrum alb0, alb1;
         float weight, roughness;
         getMixedParams(matDesc, &alb0, &alb1, &weight, &roughness);
         return evaluateMixedBSDF(alb0, alb1, weight, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+    }
+    case BSDFType_MultiSurface: {
+        int numLayers;
+        BSDFType subTypes[4];
+        SampledSpectrum subAlbedos[4];
+        float subRoughness[4], weights[4];
+        getMultiSurfaceParams(matDesc, &numLayers, subTypes, subAlbedos, subRoughness, weights);
+        return evaluateMultiSurfaceBSDF(numLayers, subTypes, subAlbedos, subRoughness, weights,
+            dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     default:
         return SampledSpectrum::Zero();
@@ -1528,6 +2258,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         result->sampledBSDFType = BSDFType_LambertCheckerboard;
         break;
     }
+    case BSDFType_LambertianScattering: {
+        SampledSpectrum albedo;
+        getLambertAlbedo(matDesc, &albedo);
+        sampleLambertianScatteringBSDF(albedo, dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
+        break;
+    }
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
         float roughness;
@@ -1543,17 +2279,23 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
 #endif
         SampledSpectrum coeffR, eta, kappa;
         getLambertAlbedo(matDesc, &coeffR);
-        float roughness;
-        getMicrofacetReflectionParams(matDesc, &eta, &kappa, &roughness);
+        float roughness, anisotropy;
+        getMicrofacetReflectionParamsAniso(matDesc, &eta, &kappa, &roughness, &anisotropy);
 #if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_MATERIAL)
         if (threadIdx.x == 0 && blockIdx.x == 0) {
-            printf("  coeffR=(%.3f,%.3f,%.3f), eta=(%.3f,%.3f,%.3f), kappa=(%.3f,%.3f,%.3f), roughness=%.3f\n",
+            printf("  coeffR=(%.3f,%.3f,%.3f), eta=(%.3f,%.3f,%.3f), kappa=(%.3f,%.3f,%.3f), roughness=%.3f, anisotropy=%.3f\n",
                 coeffR.values[0], coeffR.values[1], coeffR.values[2],
                 eta.values[0], eta.values[1], eta.values[2],
-                kappa.values[0], kappa.values[1], kappa.values[2], roughness);
+                kappa.values[0], kappa.values[1], kappa.values[2], roughness, anisotropy);
         }
 #endif
-        sampleMicrofacetReflectionBSDF(coeffR, eta, kappa, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
+        if (anisotropy > 0.001f) {
+            float alphaX, alphaY;
+            roughnessAnisotropyToAlpha(roughness, anisotropy, &alphaX, &alphaY);
+            sampleMicrofacetReflectionBSDF_Aniso(coeffR, eta, kappa, alphaX, alphaY, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
+        } else {
+            sampleMicrofacetReflectionBSDF(coeffR, eta, kappa, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, result);
+        }
         break;
     }
     case BSDFType_MicrofacetScattering: {
@@ -1615,6 +2357,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         result->sampledBSDFType = type;
         break;
     }
+    case BSDFType_DisneyBRDF: {
+        SampledSpectrum baseColor;
+        float metallic, subsurface, specular, roughness, specularTint;
+        float anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss;
+        getDisneyParams(matDesc, &baseColor, &metallic, &subsurface, &specular, &roughness,
+            &specularTint, &anisotropic, &sheen, &sheenTint, &clearcoat, &clearcoatGloss);
+        sampleDisneyBRDF(baseColor, metallic, subsurface, specular, roughness,
+            specularTint, anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss,
+            dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
+        break;
+    }
     case BSDFType_MixedBSDF: {
         SampledSpectrum alb0, alb1;
         float weight, roughness;
@@ -1627,6 +2380,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
             result->pdf *= (1.0f - weight);  // 选择概率
         }
         result->sampledBSDFType = BSDFType_MixedBSDF;
+        break;
+    }
+    case BSDFType_MultiSurface: {
+        int numLayers;
+        BSDFType subTypes[4];
+        SampledSpectrum subAlbedos[4];
+        float subRoughness[4], weights[4];
+        getMultiSurfaceParams(matDesc, &numLayers, subTypes, subAlbedos, subRoughness, weights);
+        sampleMultiSurfaceBSDF(numLayers, subTypes, subAlbedos, subRoughness, weights,
+            dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
         break;
     }
     default: {
@@ -1650,6 +2413,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
     switch (type) {
     case BSDFType_Lambert:
         return getLambertBSDFPDF(dirOutLocal, ctx.geomNormalLocal);
+    case BSDFType_LambertCheckerboard:
+        return getLambertBSDFPDF(dirOutLocal, ctx.geomNormalLocal);
+    case BSDFType_LambertianScattering:
+        return getLambertianScatteringBSDFPDF(dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     case BSDFType_GGX: {
         SampledSpectrum reflectance;
         float roughness;
@@ -1657,10 +2424,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
         return getGGXBSDFPDF(reflectance, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_MicrofacetReflection: {
-        float roughness;
+        float roughness, anisotropy;
         SampledSpectrum eta, kappa;
-        getMicrofacetReflectionParams(matDesc, &eta, &kappa, &roughness);
-        return getMicrofacetReflectionBSDFPDF(roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+        getMicrofacetReflectionParamsAniso(matDesc, &eta, &kappa, &roughness, &anisotropy);
+        if (anisotropy > 0.001f) {
+            float alphaX, alphaY;
+            roughnessAnisotropyToAlpha(roughness, anisotropy, &alphaX, &alphaY);
+            return getMicrofacetReflectionBSDFPDF_Aniso(alphaX, alphaY, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+        } else {
+            return getMicrofacetReflectionBSDFPDF(roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+        }
     }
     case BSDFType_MicrofacetScattering: {
         float ior, roughness;
@@ -1688,6 +2461,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
         getGGXParams(matDesc, &refl, &roughness);
         return getGGXBSDFPDF(refl, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
+    case BSDFType_DisneyBRDF: {
+        SampledSpectrum baseColor;
+        float metallic, subsurface, specular, roughness, specularTint;
+        float anisotropic, sheen, sheenTint, clearcoat, clearcoatGloss;
+        getDisneyParams(matDesc, &baseColor, &metallic, &subsurface, &specular, &roughness,
+            &specularTint, &anisotropic, &sheen, &sheenTint, &clearcoat, &clearcoatGloss);
+        return getDisneyBRDFPDF(baseColor, metallic, subsurface, specular, specularTint,
+            roughness, anisotropic, sheen, clearcoat, clearcoatGloss, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+    }
     case BSDFType_MixedBSDF: {
         float weight, roughness;
         SampledSpectrum a0, a1;
@@ -1697,6 +2479,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getBSDFPDF(
         float pdfGGX = getGGXBSDFPDF(refl, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
         float pdfLambert = getLambertBSDFPDF(dirOutLocal, ctx.geomNormalLocal);
         return (1.0f - weight) * pdfLambert + weight * pdfGGX;
+    }
+    case BSDFType_MultiSurface: {
+        int numLayers;
+        BSDFType subTypes[4];
+        SampledSpectrum subAlbedos[4];
+        float subRoughness[4], weights[4];
+        getMultiSurfaceParams(matDesc, &numLayers, subTypes, subAlbedos, subRoughness, weights);
+        return getMultiSurfaceBSDFPDF(numLayers, subTypes, subAlbedos, subRoughness, weights,
+            dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     default:
         return 0.0f;

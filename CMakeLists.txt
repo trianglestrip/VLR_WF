@@ -105,5 +105,45 @@ target_include_directories(cornell_box_improved_test PRIVATE
 )
 target_link_libraries(cornell_box_improved_test PRIVATE VLR CUDA::cudart)
 
+# Material System 测试场景（验证各种 BSDF）
+add_executable(material_test test/material_test.cpp)
+target_include_directories(material_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(material_test PRIVATE VLR CUDA::cudart)
+
+# Disney Principled BRDF 测试（多球体展示不同参数组合）
+add_executable(disney_brdf_test test/disney_brdf_test.cpp)
+target_include_directories(disney_brdf_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(disney_brdf_test PRIVATE VLR CUDA::cudart)
+
+# LambertianScattering 次表面散射 BSDF 测试
+add_executable(lambertian_scattering_test test/lambertian_scattering_test.cpp)
+target_include_directories(lambertian_scattering_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(lambertian_scattering_test PRIVATE VLR CUDA::cudart)
+
+# Anisotropic MicrofacetReflection 测试（各向异性金属材质）
+add_executable(anisotropic_test test/anisotropic_test.cpp)
+target_include_directories(anisotropic_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(anisotropic_test PRIVATE VLR CUDA::cudart)
+
+# MultiSurface Material 测试（2-4 层混合材质）
+add_executable(multi_surface_test test/multi_surface_test.cpp)
+target_include_directories(multi_surface_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(multi_surface_test PRIVATE VLR CUDA::cudart)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

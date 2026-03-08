@@ -47,11 +47,14 @@ enum BSDFType : uint32_t {
     BSDFType_MicrofacetScattering,     ///< GGX 微表面散射（电介质，反射+折射）
     BSDFType_Specular,                 ///< 完美镜面反射
     BSDFType_SpecularTransmission,      ///< 完美镜面透射（支持色散）
+    BSDFType_LambertianScattering,       ///< 次表面散射（双向 Lambert，允许透射）
     BSDFType_GGXTransmission,           ///< 粗糙透射（GGX 微表面透射）
     BSDFType_FresnelBlend,             ///< Fresnel 混合 Lambertian
     BSDFType_UE4BRDF,                  ///< UE4 风格 BRDF（金属工作流）
     BSDFType_FrostbiteBRDF,            ///< Frostbite 风格 BRDF
-    BSDFType_MixedBSDF,                ///< 混合 BSDF（多层材质）
+    BSDFType_DisneyBRDF,               ///< Disney Principled BRDF (Burley 2012)
+    BSDFType_MixedBSDF,                ///< 混合 BSDF（2 层简化版，向后兼容）
+    BSDFType_MultiSurface,             ///< 多表面材质（2-4 层完整版）
     NumBSDFTypes
 };
 
@@ -80,6 +83,7 @@ namespace MaterialDataLayout {
     constexpr int KappaR = 13;              ///< data[13]: 导体消光系数 k R
     constexpr int KappaG = 14;              ///< data[14]: 导体消光系数 k G
     constexpr int KappaB = 15;              ///< data[15]: 导体消光系数 k B
+    constexpr int Anisotropy = 5;           ///< data[5]: 各向异性强度 (MicrofacetReflection, 0=各向同性, 0.9=强各向异性)
     // 棋盘格纹理（LambertCheckerboard）
     constexpr int CheckerboardColor1R = 10; ///< data[10]: 棋盘格第二种颜色 R（复用 EtaR 槽位）
     constexpr int CheckerboardColor1G = 11; ///< data[11]: 棋盘格第二种颜色 G
@@ -89,6 +93,42 @@ namespace MaterialDataLayout {
     // FresnelBlend: Roughness=镜面粗糙度, Albedo=漫反射
     // GGXTransmission: IOR + Roughness
     // MixedBSDF: Metallic=混合权重
+    // MultiSurface: 4 层子材质（slots 16-43）
+    constexpr int MultiSurface_NumLayers = 16;   ///< data[16]: 层数 (2-4)
+    constexpr int SubMaterial0_BSDFType = 17;    ///< data[17]: 子材质 0 类型
+    constexpr int SubMaterial0_AlbedoR = 18;     ///< data[18-20]: 子材质 0 反照率 RGB
+    constexpr int SubMaterial0_AlbedoG = 19;
+    constexpr int SubMaterial0_AlbedoB = 20;
+    constexpr int SubMaterial0_Roughness = 21;   ///< data[21]: 子材质 0 粗糙度
+    constexpr int SubMaterial1_BSDFType = 22;   ///< data[22]: 子材质 1 类型
+    constexpr int SubMaterial1_AlbedoR = 23;
+    constexpr int SubMaterial1_AlbedoG = 24;
+    constexpr int SubMaterial1_AlbedoB = 25;
+    constexpr int SubMaterial1_Roughness = 26;
+    constexpr int SubMaterial2_BSDFType = 27;
+    constexpr int SubMaterial2_AlbedoR = 28;
+    constexpr int SubMaterial2_AlbedoG = 29;
+    constexpr int SubMaterial2_AlbedoB = 30;
+    constexpr int SubMaterial2_Roughness = 31;
+    constexpr int SubMaterial3_BSDFType = 32;
+    constexpr int SubMaterial3_AlbedoR = 33;
+    constexpr int SubMaterial3_AlbedoG = 34;
+    constexpr int SubMaterial3_AlbedoB = 35;
+    constexpr int SubMaterial3_Roughness = 36;
+    constexpr int MultiSurface_Weight0 = 37;     ///< data[37-40]: 混合权重
+    constexpr int MultiSurface_Weight1 = 38;
+    constexpr int MultiSurface_Weight2 = 39;
+    constexpr int MultiSurface_Weight3 = 40;
+    // Disney BRDF（使用 slots 41-50，避免与 MultiSurface 重叠）
+    constexpr int Disney_Metallic = 41;
+    constexpr int Disney_Subsurface = 42;
+    constexpr int Disney_Specular = 43;
+    constexpr int Disney_SpecularTint = 44;
+    constexpr int Disney_Anisotropic = 45;
+    constexpr int Disney_Sheen = 46;
+    constexpr int Disney_SheenTint = 47;
+    constexpr int Disney_Clearcoat = 48;
+    constexpr int Disney_ClearcoatGloss = 49;
 }
 
 
@@ -290,6 +330,20 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetReflectionParams(
     *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;
 }
 
+/// 从材质描述符获取导体微表面反射参数（含各向异性）
+/// anisotropy: 0=各向同性, 0.9=强各向异性 (Disney/Burley: alphaX/alphaY 从 roughness+anisotropy 推导)
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetReflectionParamsAniso(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* eta,
+    SampledSpectrum* kappa,
+    float* roughness,
+    float* anisotropy) {
+    getMicrofacetReflectionParams(matDesc, eta, kappa, roughness);
+    const float* d = getMaterialDataAsFloats(matDesc);
+    *anisotropy = d[MaterialDataLayout::Anisotropy];
+    *anisotropy = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(0.999f, *anisotropy));
+}
+
 /// 从材质描述符获取微表面散射参数（IOR + roughness）
 /// 用于 MicrofacetScattering（电介质，反射+折射）
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetScatteringParams(
@@ -369,6 +423,80 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getUE4Params(
     baseColor->values[3] = (r + g + b) / 3.0f;
     *metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Metallic]));
     *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
+}
+
+/// 从材质描述符获取 Disney Principled BRDF 参数
+/// baseColor=AlbedoR/G/B, roughness=Roughness, 其余在 Disney_* 槽位
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getDisneyParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    SampledSpectrum* baseColor,
+    float* metallic, float* subsurface, float* specular, float* roughness,
+    float* specularTint, float* anisotropic, float* sheen, float* sheenTint,
+    float* clearcoat, float* clearcoatGloss) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    float r = d[MaterialDataLayout::AlbedoR];
+    float g = d[MaterialDataLayout::AlbedoG];
+    float b = d[MaterialDataLayout::AlbedoB];
+    baseColor->values[0] = r;
+    baseColor->values[1] = g;
+    baseColor->values[2] = b;
+    baseColor->values[3] = (r + g + b) / 3.0f;
+    *roughness = ::vlr::vlr_max(0.001f, d[MaterialDataLayout::Roughness]);
+    *metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_Metallic]));
+    *subsurface = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_Subsurface]));
+    *specular = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_Specular]));
+    *specularTint = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_SpecularTint]));
+    *anisotropic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(0.999f, d[MaterialDataLayout::Disney_Anisotropic]));
+    *sheen = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_Sheen]));
+    *sheenTint = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_SheenTint]));
+    *clearcoat = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_Clearcoat]));
+    *clearcoatGloss = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, d[MaterialDataLayout::Disney_ClearcoatGloss]));
+}
+
+/// 从材质描述符获取 MultiSurface 参数（2-4 层）
+CUDA_DEVICE_FUNCTION CUDA_INLINE void getMultiSurfaceParams(
+    const SurfaceMaterialDescriptor& matDesc,
+    int* numLayers,
+    BSDFType subTypes[4],
+    SampledSpectrum subAlbedos[4],
+    float subRoughness[4],
+    float weights[4]) {
+    const float* d = getMaterialDataAsFloats(matDesc);
+    int n = static_cast<int>(d[MaterialDataLayout::MultiSurface_NumLayers]);
+    *numLayers = (n >= 2 && n <= 4) ? n : 2;
+
+    auto loadSub = [&](int i, int baseType, int baseR, int baseG, int baseB, int baseRough) {
+        subTypes[i] = static_cast<BSDFType>(static_cast<uint32_t>(d[baseType]) % NumBSDFTypes);
+        subAlbedos[i].values[0] = d[baseR];
+        subAlbedos[i].values[1] = d[baseG];
+        subAlbedos[i].values[2] = d[baseB];
+        subAlbedos[i].values[3] = (d[baseR] + d[baseG] + d[baseB]) / 3.0f;
+        subRoughness[i] = ::vlr::vlr_max(0.001f, d[baseRough]);
+    };
+    loadSub(0, MaterialDataLayout::SubMaterial0_BSDFType,
+            MaterialDataLayout::SubMaterial0_AlbedoR, MaterialDataLayout::SubMaterial0_AlbedoG,
+            MaterialDataLayout::SubMaterial0_AlbedoB, MaterialDataLayout::SubMaterial0_Roughness);
+    loadSub(1, MaterialDataLayout::SubMaterial1_BSDFType,
+            MaterialDataLayout::SubMaterial1_AlbedoR, MaterialDataLayout::SubMaterial1_AlbedoG,
+            MaterialDataLayout::SubMaterial1_AlbedoB, MaterialDataLayout::SubMaterial1_Roughness);
+    loadSub(2, MaterialDataLayout::SubMaterial2_BSDFType,
+            MaterialDataLayout::SubMaterial2_AlbedoR, MaterialDataLayout::SubMaterial2_AlbedoG,
+            MaterialDataLayout::SubMaterial2_AlbedoB, MaterialDataLayout::SubMaterial2_Roughness);
+    loadSub(3, MaterialDataLayout::SubMaterial3_BSDFType,
+            MaterialDataLayout::SubMaterial3_AlbedoR, MaterialDataLayout::SubMaterial3_AlbedoG,
+            MaterialDataLayout::SubMaterial3_AlbedoB, MaterialDataLayout::SubMaterial3_Roughness);
+
+    float w[4] = {
+        ::vlr::vlr_max(0.0f, d[MaterialDataLayout::MultiSurface_Weight0]),
+        ::vlr::vlr_max(0.0f, d[MaterialDataLayout::MultiSurface_Weight1]),
+        ::vlr::vlr_max(0.0f, d[MaterialDataLayout::MultiSurface_Weight2]),
+        ::vlr::vlr_max(0.0f, d[MaterialDataLayout::MultiSurface_Weight3])
+    };
+    float sum = 0.0f;
+    for (int i = 0; i < *numLayers; ++i) sum += w[i];
+    if (sum < 1e-6f) sum = 1.0f;
+    for (int i = 0; i < 4; ++i)
+        weights[i] = (i < *numLayers) ? (w[i] / sum) : 0.0f;
 }
 
 /// 从材质描述符获取 Mixed BSDF 混合权重
@@ -495,10 +623,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     case BSDFType_LambertCheckerboard:
     case BSDFType_FresnelBlend:
         return MaterialCategory_Diffuse;
+    case BSDFType_LambertianScattering:
+        return MaterialCategory_Transmissive;
     case BSDFType_GGX:
     case BSDFType_MicrofacetReflection:
     case BSDFType_UE4BRDF:
     case BSDFType_FrostbiteBRDF:
+    case BSDFType_DisneyBRDF:
         return MaterialCategory_Glossy;
     case BSDFType_Specular:
     case BSDFType_SpecularTransmission:
@@ -507,6 +638,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     case BSDFType_MicrofacetScattering:
         return MaterialCategory_Transmissive;
     case BSDFType_MixedBSDF:
+    case BSDFType_MultiSurface:
         return MaterialCategory_Mixed;
     default:
         return MaterialCategory_Diffuse;
@@ -519,9 +651,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool materialHasNonDelta(
     BSDFType type = getBSDFType(matDesc);
     return type == BSDFType_Lambert || type == BSDFType_LambertCheckerboard || type == BSDFType_GGX
         || type == BSDFType_MicrofacetReflection || type == BSDFType_MicrofacetScattering
-        || type == BSDFType_FresnelBlend || type == BSDFType_UE4BRDF
-        || type == BSDFType_FrostbiteBRDF || type == BSDFType_GGXTransmission
-        || type == BSDFType_MixedBSDF;
+        || type == BSDFType_LambertianScattering || type == BSDFType_FresnelBlend || type == BSDFType_UE4BRDF
+        || type == BSDFType_FrostbiteBRDF || type == BSDFType_DisneyBRDF || type == BSDFType_GGXTransmission
+        || type == BSDFType_MixedBSDF || type == BSDFType_MultiSurface;
 }
 
 /// 检查材质是否为 Delta（完美镜面）
@@ -542,15 +674,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType bsdfTypeToDirectionType(BSDFType 
     case BSDFType_MicrofacetReflection:
     case BSDFType_UE4BRDF:
     case BSDFType_FrostbiteBRDF:
+    case BSDFType_DisneyBRDF:
         return DirectionType::HighFreq() | DirectionType::Reflection();
     case BSDFType_Specular:
         return DirectionType::Delta0D() | DirectionType::Reflection();
     case BSDFType_SpecularTransmission:
         return DirectionType::Delta0D() | DirectionType::Transmission();
+    case BSDFType_LambertianScattering:
     case BSDFType_GGXTransmission:
     case BSDFType_MicrofacetScattering:
         return DirectionType::HighFreq() | DirectionType::Transmission();
     case BSDFType_MixedBSDF:
+    case BSDFType_MultiSurface:
         return DirectionType::HighFreq() | DirectionType::Reflection();
     default:
         return DirectionType();

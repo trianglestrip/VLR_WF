@@ -188,10 +188,28 @@ public:
         float kappaR, float kappaG, float kappaB,
         float roughness);
 
+    /// 创建各向异性导体微表面反射材质（MicrofacetReflection + Anisotropic GGX）
+    uint32_t createMaterialConductorAniso(
+        float etaR, float etaG, float etaB,
+        float kappaR, float kappaG, float kappaB,
+        float roughness,
+        float anisotropy);
+
     /// 创建微表面散射材质（电介质，反射+折射）
     uint32_t createMaterialMicrofacetScattering(
         float ior,
         float roughness);
+
+    /// 创建 LambertianScattering 次表面散射材质（双向 Lambert）
+    uint32_t createMaterialLambertianScattering(
+        float albedoR, float albedoG, float albedoB);
+
+    /// 创建 Disney Principled BRDF 材质（Burley 2012）
+    uint32_t createMaterialDisney(
+        const float baseColor[3],
+        float metallic, float subsurface, float specular, float roughness,
+        float specularTint, float anisotropic, float sheen, float sheenTint,
+        float clearcoat, float clearcoatGloss);
 
     /// 创建棋盘格材质（Lambert + 8x8 黑白棋盘格）
     /// @param color0 第一种颜色 RGB（如黑色）
@@ -203,6 +221,19 @@ public:
         float color1R, float color1G, float color1B,
         uint32_t gridSize = 8,
         float extent = 0.0f);
+
+    /// 创建多表面材质（2-4 层子材质混合）
+    /// @param numLayers 层数 (2-4)
+    /// @param subBSDFTypes 子材质类型数组
+    /// @param subAlbedos 每个子材质的颜色 [numLayers][3]
+    /// @param subRoughness 每个子材质的粗糙度
+    /// @param weights 混合权重
+    uint32_t createMaterialMultiSurface(
+        int numLayers,
+        const uint32_t* subBSDFTypes,
+        const float* const* subAlbedos,
+        const float* subRoughness,
+        const float* weights);
 
     /// 设置材质参数
     void setMaterial(uint32_t materialId,

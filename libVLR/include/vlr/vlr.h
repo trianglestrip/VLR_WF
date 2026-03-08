@@ -189,6 +189,21 @@ VLR_API VLRResult vlrCreateMaterialConductor(
     float roughness,
     VLRMaterial* outMaterial);
 
+/// 创建各向异性导体微表面反射材质（MicrofacetReflection + Anisotropic GGX）
+/// @param scene 所属场景
+/// @param eta 折射率实部 RGB
+/// @param kappa 折射率虚部 RGB
+/// @param roughness 粗糙度 [0..1]
+/// @param anisotropy 各向异性强度 [0..0.9]（0=各向同性，0.9=强各向异性，拉丝金属效果）
+/// @param outMaterial 输出材质句柄
+VLR_API VLRResult vlrCreateMaterialConductorAniso(
+    VLRScene scene,
+    const float eta[3],
+    const float kappa[3],
+    float roughness,
+    float anisotropy,
+    VLRMaterial* outMaterial);
+
 /// 创建微表面散射材质（电介质，反射+折射）
 /// @param scene 所属场景
 /// @param ior 折射率（如玻璃 1.5）
@@ -199,6 +214,46 @@ VLR_API VLRResult vlrCreateMaterialMicrofacetScattering(
     VLRScene scene,
     float ior,
     float roughness,
+    VLRMaterial* outMaterial);
+
+/// 创建 LambertianScattering 次表面散射材质（双向 Lambert）
+/// 允许光从表面一侧进入、另一侧出射，模拟薄片/皮肤等半透明效果
+/// @param scene 所属场景
+/// @param albedo 反照率 RGB [0..1]（3 个 float）
+/// @param outMaterial 输出材质句柄
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrCreateMaterialLambertianScattering(
+    VLRScene scene,
+    const float albedo[3],
+    VLRMaterial* outMaterial);
+
+/// 创建 Disney Principled BRDF 材质（Burley 2012）
+/// @param scene 所属场景
+/// @param baseColor 基础颜色 RGB [0..1]
+/// @param metallic 金属度 [0..1]
+/// @param subsurface 次表面散射强度 [0..1]
+/// @param specular 镜面反射强度 [0..1]
+/// @param roughness 粗糙度 [0..1]
+/// @param specularTint 镜面色调 [0..1]
+/// @param anisotropic 各向异性 [0..1]
+/// @param sheen 织物光泽 [0..1]
+/// @param sheenTint 光泽色调 [0..1]
+/// @param clearcoat 清漆层 [0..1]
+/// @param clearcoatGloss 清漆光泽度 [0..1]
+/// @param outMaterial 输出材质句柄
+VLR_API VLRResult vlrCreateMaterialDisney(
+    VLRScene scene,
+    const float baseColor[3],
+    float metallic,
+    float subsurface,
+    float specular,
+    float roughness,
+    float specularTint,
+    float anisotropic,
+    float sheen,
+    float sheenTint,
+    float clearcoat,
+    float clearcoatGloss,
     VLRMaterial* outMaterial);
 
 /// 创建棋盘格材质（用于地板等）
@@ -213,6 +268,23 @@ VLR_API VLRResult vlrCreateMaterialCheckerboard(
     const float color1[3],
     uint32_t gridSize,
     float extent,
+    VLRMaterial* outMaterial);
+
+/// 创建多表面材质（2-4 层子材质混合）
+/// @param scene 所属场景
+/// @param numLayers 层数 (2-4)
+/// @param subBSDFTypes 子材质类型数组 [numLayers]，BSDFType: 0=Lambert, 2=GGX, 5=Specular 等
+/// @param subAlbedos 每个子材质的颜色 [numLayers][3]，subAlbedos[i] 指向 RGB
+/// @param subRoughness 每个子材质的粗糙度 [numLayers]
+/// @param weights 混合权重 [numLayers]，运行时归一化
+/// @param outMaterial 输出材质句柄
+VLR_API VLRResult vlrCreateMaterialMultiSurface(
+    VLRScene scene,
+    int numLayers,
+    const uint32_t* subBSDFTypes,
+    const float* const* subAlbedos,
+    const float* subRoughness,
+    const float* weights,
     VLRMaterial* outMaterial);
 
 /// 创建实例（将网格放入场景）
