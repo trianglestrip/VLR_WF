@@ -253,9 +253,9 @@ int main(int argc, char** argv) {
     // Defaults (priority: INI file > command line > these values)
     uint32_t width = 512;
     uint32_t height = 512;
-    uint32_t numSamples = 1024;
+    uint32_t numSamples = 128;  // 默认采样数
     uint32_t maxDepth = 8;
-    float exposure = 0.5f;  // 降低曝光，参考图较暗
+    float exposure = 2.0f;  // 大幅增加曝光度测试
     std::string outputFile = "cornell_box_improved.png";
     std::string outputFormat = "png";
 
@@ -359,12 +359,13 @@ int main(int argc, char** argv) {
     VLRMaterial matBlue = nullptr;
     VLRMaterial matFloor = nullptr;
     VLRMaterial matLight = nullptr;
-    float lightEmission[] = { 30.0f, 30.0f, 30.0f };
+    float lightEmission[] = { 150.0f, 150.0f, 150.0f };  // 大幅增加光照强度测试
     VLRMaterial matGlass = nullptr;
     float glassColor[] = { 0.999f, 0.999f, 0.999f };
     VLRMaterial matGold = nullptr;
     float etaGold[] = { 0.143f, 0.374f, 1.442f };
     float kappaGold[] = { 3.984f, 2.386f, 1.603f };
+    float envColor[] = { 0.1f, 0.1f, 0.1f };  // 降低环境光强度
     
     // Geometry
     VLRTriangleMesh meshFloor = nullptr;
@@ -449,12 +450,15 @@ int main(int argc, char** argv) {
     res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, lightEmission, &matLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light material\n"); goto cleanup; }
 
-    // Glass sphere: SpecularTransmission, IOR 1.5 (standard glass)
-    res = vlrCreateMaterialEx(scene, 6 /* SpecularTransmission */, glassColor, 0.0f, 0.0f, 1.5f, nullptr, &matGlass);
+    // Glass sphere: 使用MicrofacetScattering(type 4)支持反射+折射
+    // 参考libVLR_reference使用SpecularScattering,对应我们的MicrofacetScattering
+    // IOR 2.4 (钻石), roughness 0.001 (接近完美镜面,减少散射)
+    // 参考libVLR_reference scene.cpp line 732-735
+    res = vlrCreateMaterialMicrofacetScattering(scene, 2.4f, 0.001f, &matGlass);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Glass material\n"); goto cleanup; }
 
-    // Gold metal box: MicrofacetReflection, roughness 0.15
-    res = vlrCreateMaterialConductor(scene, etaGold, kappaGold, 0.15f, &matGold);
+    // Gold metal box: MicrofacetReflection, roughness 0.2 (更光滑)
+    res = vlrCreateMaterialConductor(scene, etaGold, kappaGold, 0.2f, &matGold);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Gold material\n"); goto cleanup; }
 
     // ========================================================================
@@ -486,11 +490,11 @@ int main(int argc, char** argv) {
     createRotatedBox(boxVerts, boxInds, 0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);  // metal box on right
 
     res = vlrCreateTriangleMesh(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
-                               sphereInds.data(), (uint32_t)(sphereInds.size() / 3), matGlass, &meshSphere);
+                               sphereInds.data(), (uint32_t)(sphereInds.size() / 3), matGlass, &meshSphere);  // 球用玻璃
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Sphere mesh\n"); goto cleanup; }
 
     res = vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),
-                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox);
+                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox);  // 盒子用金属
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box mesh\n"); goto cleanup; }
 
     // ========================================================================
@@ -523,6 +527,10 @@ int main(int argc, char** argv) {
 
     res = vlrAddAreaLight(scene, instLight);
     if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add area light\n"); goto cleanup; }
+
+    // 不添加环境光,参考libVLR_reference也没有环境光
+    // res = vlrSetEnvironmentLight(scene, envColor);
+    // if (res != VLRResult_Success) { fprintf(stderr, "[Error] Set environment light\n"); goto cleanup; }
 
     // 点光源测试（参考 VLR scene.cpp 的 PointEmitter 配置）
     // 位置：(0.0f, 2.9f, 0.0f) - 顶部中心

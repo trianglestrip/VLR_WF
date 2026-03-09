@@ -161,5 +161,29 @@ target_include_directories(light_system_test PRIVATE
 )
 target_link_libraries(light_system_test PRIVATE VLR CUDA::cudart)
 
+# VLR_WF vs VLR 对比测试
+add_executable(vlr_wf_vs_vlr_test test/vlr_wf_vs_vlr_test.cpp)
+target_include_directories(vlr_wf_vs_vlr_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(vlr_wf_vs_vlr_test PRIVATE VLR CUDA::cudart)
+
+# 简单区域光测试(修复版)
+add_executable(simple_area_light_test_fixed test/simple_area_light_test_fixed.cpp)
+target_include_directories(simple_area_light_test_fixed PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(simple_area_light_test_fixed PRIVATE VLR CUDA::cudart)
+
+# 玻璃和金属材质测试
+add_executable(glass_metal_test test/glass_metal_test.cpp)
+target_include_directories(glass_metal_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(glass_metal_test PRIVATE VLR CUDA::cudart)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

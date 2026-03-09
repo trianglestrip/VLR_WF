@@ -1,12 +1,21 @@
 // ============================================================================
-// VLR Context 实现
+// VLR Context ??
 // 
-// 本文件实现了 VLR 渲染的 Context 类。
+// ?????? VLR ????Context ???
 // 
-// 作者: VLR 开发团队
-// 创建: 2026-03-07
-// 环境: CUDA 13.1, OptiX 8.0.0, VS2022
+// ??? VLR ?????
+// ??: 2026-03-07
+// ??: CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
+
+// ????????????????
+// #define VLR_ENABLE_CPU_DEBUG 1
+
+#ifdef VLR_ENABLE_CPU_DEBUG
+    #define VLR_DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#else
+    #define VLR_DEBUG_PRINTF(...) ((void)0)
+#endif
 
 #include "context.h"
 #include "scene.h"
@@ -19,7 +28,7 @@
 #undef max
 #undef min
 #endif
-#include <optix_function_table_definition.h>  // OptiX: 提供 g_optixFunctionTable 定义
+#include <optix_function_table_definition.h>  // OptiX: ?? g_optixFunctionTable ??
 #include <optix_stack_size.h>                 // OptiX: optixUtilAccumulateStackSizes, optixUtilComputeStackSizes
 #include <cstring>
 #include <stdexcept>
@@ -33,18 +42,18 @@
 namespace vlr {
 
 // ============================================================================
-// PTX 文件加载辅助
+// PTX ??????
 // ============================================================================
 
 namespace {
 
-/// 从 libVLR/GPU_kernels/ 或 build/Release 目录加载 PTX 文件内容
-/// 尝试多个路径以支持不同构建/运行目录布局（含 build/Release 运行时）
+/// ??libVLR/GPU_kernels/ ??build/Release ???? PTX ????
+/// ?????????????????????? build/Release ????
 std::vector<char> loadPTXFile(const char* filename) {
-    // 候选路径：项目根、libVLR、build/Release、build/Debug 等
+    // ?????????libVLR?build/Release?build/Debug ??
     const char* searchPaths[] = {
-        "bin/GPU_kernels/",                // 统一输出目录
-        "GPU_kernels/",                    // build/Release 或 build/Debug 运行时
+        "bin/GPU_kernels/",                // ??????
+        "GPU_kernels/",                    // build/Release ??build/Debug ????
         "libVLR/GPU_kernels/",
         "../GPU_kernels/",
         "../../GPU_kernels/",
@@ -78,15 +87,15 @@ std::vector<char> loadPTXFile(const char* filename) {
         ". Ensure the file is in GPU_kernels/ or libVLR/GPU_kernels/; when running from build/Release, PTX should be in build/Release/GPU_kernels/.");
 }
 
-}  // 匿名命名空间
+}  // ??????
 
 // ============================================================================
-// 构造函数与析构函数
+// ?????????
 // ============================================================================
 
-// OptiX 日志回调函数
+// OptiX ??????
 static void optixLogCallback(unsigned int level, const char* tag, const char* message, void* cbdata) {
-    printf("[OptiX][%s] %s\n", tag, message);
+    VLR_DEBUG_PRINTF("[OptiX][%s] %s\n", tag, message);
 }
 
 Context::Context(cudaStream_t cudaStream, bool enableLogging)
@@ -94,26 +103,26 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
     , m_cudaContext(nullptr)
     , m_sceneSource(nullptr)
 {
-    // 初始化 CUDA 上下文
+    // ????CUDA ????
     m_cudaContext = new cudau::Context();
     
-    // 初始化降噪器配置
+    // ????????
     m_denoiserConfig.enabled = false;
     m_denoiserConfig.useAlbedo = true;
     m_denoiserConfig.useNormal = true;
     m_denoiserConfig.hdrIntensity = 1.0f;
     
-    // 初始化调试状态
+    // ????????
     m_debugMode = VLRDebugMode_Normal;
     m_probePixelX = -1;
     m_probePixelY = -1;
     
-    // 初始化 OptiX 上下文
+    // ????OptiX ????
     m_optix.stream = cudaStream;
     m_optix.enableLogging = enableLogging;
     m_optix.context = nullptr;
     
-    // 直接初始化 OptiX，不使用局部 optixu::Context 对象
+    // ??????OptiX???????optixu::Context ??
     OptixResult optixRes = optixInit();
     if (optixRes != OPTIX_SUCCESS) {
         fprintf(stderr, "ERROR: optixInit failed: %d\n", optixRes);
@@ -141,21 +150,21 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
         throw std::runtime_error("Failed to create OptiX device context");
     }
     
-    // 初始化 Wavefront 管线
+    // ????Wavefront ??
     initializeWavefrontPipeline();
 }
 
 Context::~Context() {
-    // 清理 Wavefront 资源
+    // ?? Wavefront ??
     cleanupWavefrontResources();
     
-    // 清理 OptiX 上下文
+    // ?? OptiX ????
     if (m_optix.context) {
         optixDeviceContextDestroy(m_optix.context);
         m_optix.context = nullptr;
     }
     
-    // 清理 CUDA 上下文
+    // ?? CUDA ????
     if (m_cudaContext) {
         delete m_cudaContext;
         m_cudaContext = nullptr;
@@ -164,7 +173,7 @@ Context::~Context() {
 
 
 // ============================================================================
-// Wavefront 管线初始化
+// Wavefront ??????
 // ============================================================================
 
 void Context::initializeWavefrontPipeline() {
@@ -175,7 +184,7 @@ void Context::initializeWavefrontPipeline() {
     }
 
     // ------------------------------------------------------------------------
-    // 1. 加载 PTX 文件
+    // 1. ?? PTX ??
     // ------------------------------------------------------------------------
     std::vector<char> ptxCode;
     try {
@@ -186,18 +195,18 @@ void Context::initializeWavefrontPipeline() {
     }
     
     // ------------------------------------------------------------------------
-    // 2. 创建管线编译选项
+    // 2. ????????
     // ------------------------------------------------------------------------
     OptixPipelineCompileOptions pipelineCompileOptions = {
         .usesMotionBlur = false,
         .traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING,
-        .numPayloadValues = 7,  // WFTracePayload: 28 字节 = 7 个双字
-        .numAttributeValues = 2,  // 标准三角形属性
+        .numPayloadValues = 7,  // WFTracePayload: 28 ?? = 7 ????
+        .numAttributeValues = 2,  // ????????
         .exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE,
-        .pipelineLaunchParamsVariableName = nullptr  // 不使用 launch params（通过 SBT 传递）
+        .pipelineLaunchParamsVariableName = nullptr  // ????launch params??? SBT ???
     };
     
-    // 创建模块编译选项
+    // ????????
     OptixModuleCompileOptions moduleCompileOptions = {
         .maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT,
         .optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT,
@@ -205,7 +214,7 @@ void Context::initializeWavefrontPipeline() {
     };
     
     // ------------------------------------------------------------------------
-    // 3. 创建 OptiX 模块
+    // 3. ?? OptiX ??
     // ------------------------------------------------------------------------
     char moduleLog[2048];
     size_t moduleLogSize = sizeof(moduleLog);
@@ -215,7 +224,7 @@ void Context::initializeWavefrontPipeline() {
         &moduleCompileOptions,
         &pipelineCompileOptions,
         ptxCode.data(),
-        ptxCode.size() - 1,  // 不含结尾 '\0'
+        ptxCode.size() - 1,  // ???? '\0'
         moduleLog,
         &moduleLogSize,
         &wf.module
@@ -229,10 +238,10 @@ void Context::initializeWavefrontPipeline() {
         throw std::runtime_error(
             std::string("OptiX module creation failed: ") + optixGetErrorName(moduleRes) + " (" + std::to_string(moduleRes) + ")");
     }
-    printf("[VLR] OptiX module created successfully\n");
+    VLR_DEBUG_PRINTF("[VLR] OptiX module created successfully\n");
     
     // ------------------------------------------------------------------------
-    // 4. 创建程序组（RayGen、Miss、HitGroup、ShadowMiss、ShadowHitGroup）
+    // 4. ??????RayGen?Miss?HitGroup?ShadowMiss?ShadowHitGroup??
     // ------------------------------------------------------------------------
     try {
         createWavefrontPrograms();
@@ -246,7 +255,7 @@ void Context::initializeWavefrontPipeline() {
     }
     
     // ------------------------------------------------------------------------
-    // 5. 创建着色器绑定表 (SBT)
+    // 5. ?????????(SBT)
     // ------------------------------------------------------------------------
     try {
         createWavefrontSBT();
@@ -257,7 +266,7 @@ void Context::initializeWavefrontPipeline() {
     }
     
     // ------------------------------------------------------------------------
-    // 6. 创建 Pipeline
+    // 6. ?? Pipeline
     // ------------------------------------------------------------------------
     OptixProgramGroup programGroups[] = {
         wf.raygenProgram,
@@ -269,8 +278,8 @@ void Context::initializeWavefrontPipeline() {
     const uint32_t numProgramGroups = sizeof(programGroups) / sizeof(programGroups[0]);
     
     OptixPipelineLinkOptions pipelineLinkOptions = {};
-    pipelineLinkOptions.maxTraceDepth = 2;  // 主光线 + 阴影光线
-    // OptiX 8: OptixPipelineLinkOptions 仅包含 maxTraceDepth，无 debugLevel
+    pipelineLinkOptions.maxTraceDepth = 2;  // ????+ ????
+    // OptiX 8: OptixPipelineLinkOptions ????maxTraceDepth?? debugLevel
     
     char pipelineLog[2048];
     size_t pipelineLogSize = sizeof(pipelineLog);
@@ -293,10 +302,10 @@ void Context::initializeWavefrontPipeline() {
         throw std::runtime_error(
             std::string("OptiX pipeline creation failed: ") + optixGetErrorName(pipelineRes) + " (" + std::to_string(pipelineRes) + ")");
     }
-    printf("[VLR] OptiX pipeline created successfully\n");
+    VLR_DEBUG_PRINTF("[VLR] OptiX pipeline created successfully\n");
     
-    // 设置栈大小（使用 OptiX 工具计算）
-    const uint32_t maxTraceDepth = 2;  // 主光线 + 阴影光线
+    // ???????? OptiX ??????
+    const uint32_t maxTraceDepth = 2;  // ????+ ????
     OptixStackSizes stackSizes = {};
     for (OptixProgramGroup pg : programGroups) {
         OptixResult accRes = optixUtilAccumulateStackSizes(pg, &stackSizes, wf.pipeline);
@@ -331,19 +340,19 @@ void Context::initializeWavefrontPipeline() {
                 optixGetErrorName(stackRes), stackRes);
     }
     
-    // 初始化 CUDA 事件
+    // ????CUDA ??
     CUDA_CHECK(cudaEventCreate(&wf.startEvent));
     CUDA_CHECK(cudaEventCreate(&wf.endEvent));
     wf.eventsCreated = true;
 
-    // 初始化 CUDA Graphs 状态
+    // ????CUDA Graphs ???
     wf.graphCaptured = false;
     wf.useGraphExecution = shared::PerformanceConfig::UseCudaGraphs;
     wf.renderGraph = nullptr;
     wf.renderGraphExec = nullptr;
 
     wf.isInitialized = true;
-    printf("[VLR] Pipeline initialization complete\n");
+    VLR_DEBUG_PRINTF("[VLR] Pipeline initialization complete\n");
 }
 
 
@@ -373,14 +382,14 @@ void Context::createWavefrontPrograms() {
                 "\nLog:\n" + std::string(logBuffer, logSize));
         }
         if (logSize > 1) {
-            printf("[OptiX] Program group log:\n%.*s\n", static_cast<int>(logSize), logBuffer);
+            VLR_DEBUG_PRINTF("[OptiX] Program group log:\n%.*s\n", static_cast<int>(logSize), logBuffer);
         }
         return pg;
     };
     
     // ========================================================================
     // 1. Ray Generation Program - traceRays
-    // 从活跃队列读取路径，发射光线进行求交
+    // ??????????????????
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
@@ -392,7 +401,7 @@ void Context::createWavefrontPrograms() {
     
     // ========================================================================
     // 2. Miss Program - miss
-    // 主光线未击中几何体时（命中环境光/天空）
+    // ????????????????/????
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
@@ -403,8 +412,8 @@ void Context::createWavefrontPrograms() {
     }
     
     // ========================================================================
-    // 3. Hit Group - Closest Hit（默认，无 Alpha 测试）
-    // closestHit 填充命中信息到 hitInfoBuffer
+    // 3. Hit Group - Closest Hit??????Alpha ????
+    // closestHit ????????hitInfoBuffer
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
@@ -414,13 +423,13 @@ void Context::createWavefrontPrograms() {
         desc.hitgroup.moduleAH = nullptr;
         desc.hitgroup.entryFunctionNameAH = nullptr;
         desc.hitgroup.moduleIS = nullptr;
-        desc.hitgroup.entryFunctionNameIS = nullptr;  // 使用内置三角形求交
+        desc.hitgroup.entryFunctionNameIS = nullptr;  // ??????????
         wf.hitGroupProgram = createProgramGroup(desc);
     }
     
     // ========================================================================
     // 4. Shadow Miss Program - shadowMiss
-    // 阴影光线未击中，光源可见
+    // ????????????
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
@@ -432,7 +441,7 @@ void Context::createWavefrontPrograms() {
     
     // ========================================================================
     // 5. Shadow Hit Group - shadowAnyHit
-    // 阴影光线击中几何体，光源被遮挡，立即终止
+    // ????????????????????
     // ========================================================================
     {
         OptixProgramGroupDesc desc = {};
@@ -446,7 +455,7 @@ void Context::createWavefrontPrograms() {
         wf.shadowHitGroupProgram = createProgramGroup(desc);
     }
     
-    printf("[VLR] Program groups created (RayGen, Miss, HitGroup, ShadowMiss, ShadowHitGroup)\n");
+    VLR_DEBUG_PRINTF("[VLR] Program groups created (RayGen, Miss, HitGroup, ShadowMiss, ShadowHitGroup)\n");
 }
 
 
@@ -454,54 +463,54 @@ void Context::createWavefrontSBT() {
     auto& wf = m_optix.wavefrontPathTracing;
     
     // ========================================================================
-    // 使用 optixu::createSBTRecord 创建 SBT 记录
-    // SBT 布局：RayGen(1) | Miss(2: Closest + Shadow) | HitGroup(2: Closest + Shadow)
-    // 每个记录包含 WavefrontSBTData（launch parameters 指针）
+    // ?? optixu::createSBTRecord ?? SBT ??
+    // SBT ???RayGen(1) | Miss(2: Closest + Shadow) | HitGroup(2: Closest + Shadow)
+    // ?????? WavefrontSBTData?launch parameters ????
     // ========================================================================
     
-    // SBT 数据：包含 launch parameters 指针（初始为 nullptr，稍后更新）
+    // SBT ??????launch parameters ?????? nullptr??????
     shared::WavefrontSBTData sbtData;
-    sbtData.params = nullptr;  // 稍后在 setupWavefrontLaunchParams 中更新
+    sbtData.params = nullptr;  // ????setupWavefrontLaunchParams ????
     
-    // 1. RayGen 记录（附加 WavefrontSBTData）
+    // 1. RayGen ??????WavefrontSBTData??
     wf.raygenRecord = optixu::createSBTRecord(wf.raygenProgram, sbtData);
     
-    // 2. Miss 记录 - 需要 2 条（RayType 0: miss, RayType 1: shadowMiss）
+    // 2. Miss ?? - ???2 ??RayType 0: miss, RayType 1: shadowMiss??
     wf.missRecord = optixu::createSBTRecord(wf.missProgram, sbtData);
     wf.shadowMissRecord = optixu::createSBTRecord(wf.shadowMissProgram, sbtData);
     
-    // 3. HitGroup 记录 - 需要 2 条（RayType 0: closest hit, RayType 1: shadow any hit）
-    // 同一几何体的不同光线类型使用相邻的 SBT 记录，stride = 2
+    // 3. HitGroup ?? - ???2 ??RayType 0: closest hit, RayType 1: shadow any hit??
+    // ??????????????????SBT ???stride = 2
     wf.hitgroupRecord = optixu::createSBTRecord(wf.hitGroupProgram, sbtData);
     wf.shadowHitgroupRecord = optixu::createSBTRecord(wf.shadowHitGroupProgram, sbtData);
     
     // ========================================================================
-    // 填充 OptixShaderBindingTable 结构
+    // ?? OptixShaderBindingTable ??
     // ========================================================================
     memset(&wf.sbt, 0, sizeof(wf.sbt));
     
-    // RayGen 区
+    // RayGen ??
     wf.sbt.raygenRecord = reinterpret_cast<CUdeviceptr>(wf.raygenRecord);
     
-    // Miss 区：2 条记录，stride = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(WavefrontSBTData)
-    // 将两条 miss 记录紧密排列
-    // 注意：SBT 记录 stride 必须是 16 字节对齐
+    // Miss ??2 ????stride = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(WavefrontSBTData)
+    // ????miss ??????
+    // ???SBT ?? stride ????16 ????
     size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
-    missRecordSize = (missRecordSize + 15) & ~15;  // 向上对齐到 16 字节
+    missRecordSize = (missRecordSize + 15) & ~15;  // ??????16 ??
     wf.sbt.missRecordBase = reinterpret_cast<CUdeviceptr>(wf.missRecord);
     wf.sbt.missRecordStrideInBytes = static_cast<uint32_t>(missRecordSize);
     wf.sbt.missRecordCount = 2;  // Closest + Shadow
     
-    // 注意：Miss 区需要连续内存存放 [miss, shadowMiss]
-    // 当前分别分配，需确保布局正确。OptiX 要求 missRecordBase 指向的缓冲区
-    // 包含 numRayTypes 条记录。我们分配一个连续的 miss 缓冲区。
+    // ???Miss ??????????[miss, shadowMiss]
+    // ???????????????OptiX ?? missRecordBase ??????
+    // ?? numRayTypes ????????????? miss ?????
     {
-        // 分配连续的 2 条 Miss 记录
+        // ??????2 ??Miss ??
         size_t totalMissSize = 2 * missRecordSize;
         void* missBuffer = nullptr;
         CUDA_CHECK(cudaMalloc(&missBuffer, totalMissSize));
         
-        // 使用主机内存打包header + data，然后复制到设备
+        // ????????header + data????????
         void* hostMissBuffer = malloc(totalMissSize);
         if (!hostMissBuffer) {
             cudaFree(missBuffer);
@@ -517,38 +526,38 @@ void Context::createWavefrontSBT() {
         memcpy(static_cast<char*>(hostMissBuffer) + missRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
                &sbtData, sizeof(sbtData));
         
-        // 复制到设备
+        // ??????
         CUDA_CHECK(cudaMemcpy(missBuffer, hostMissBuffer, totalMissSize, cudaMemcpyHostToDevice));
         free(hostMissBuffer);
         
-        // 释放单独分配的，使用连续缓冲区
+        // ????????????????
         cudaFree(wf.missRecord);
         cudaFree(wf.shadowMissRecord);
         wf.missRecord = missBuffer;
-        wf.shadowMissRecord = nullptr;  // 已合并到 missRecord
+        wf.shadowMissRecord = nullptr;  // ???? missRecord
         
         wf.sbt.missRecordBase = reinterpret_cast<CUdeviceptr>(wf.missRecord);
         wf.sbt.missRecordStrideInBytes = static_cast<uint32_t>(missRecordSize);
         wf.sbt.missRecordCount = 2;
     }
     
-    // HitGroup 区：每个 GAS 需要 RAY_TYPE_COUNT 条记录
-    // 布局：[GAS0_Closest, GAS0_Shadow, GAS1_Closest, GAS1_Shadow, ...]
-    // stride = RAY_TYPE_COUNT（用于多光线类型）
-    // 注意：SBT 记录 stride 必须是 16 字节对齐
+    // HitGroup ???? GAS ???RAY_TYPE_COUNT ????
+    // ???[GAS0_Closest, GAS0_Shadow, GAS1_Closest, GAS1_Shadow, ...]
+    // stride = RAY_TYPE_COUNT??????????
+    // ???SBT ?? stride ????16 ????
     const uint32_t RAY_TYPE_COUNT = 2;  // Closest Hit + Shadow
     size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
-    hitgroupRecordSize = (hitgroupRecordSize + 15) & ~15;  // 向上对齐到 16 字节
+    hitgroupRecordSize = (hitgroupRecordSize + 15) & ~15;  // ??????16 ??
     
-    // 临时：在 SBT 创建时，我们还不知道有多少个 GAS
-    // 所以先创建一个默认的 HitGroup 记录，稍后在 setupWavefrontLaunchParams 中重新创建
+    // ???? SBT ?????????????? GAS
+    // ?????????? HitGroup ?????? setupWavefrontLaunchParams ??????
     {
-        // 分配连续的 RAY_TYPE_COUNT 条 HitGroup 记录（默认为 1 个 GAS）
+        // ??????RAY_TYPE_COUNT ??HitGroup ?????? 1 ??GAS??
         size_t totalHitgroupSize = RAY_TYPE_COUNT * hitgroupRecordSize;
         void* hitgroupBuffer = nullptr;
         CUDA_CHECK(cudaMalloc(&hitgroupBuffer, totalHitgroupSize));
         
-        // 使用主机内存打包header + data
+        // ????????header + data
         void* hostHitgroupBuffer = malloc(totalHitgroupSize);
         if (!hostHitgroupBuffer) {
             cudaFree(hitgroupBuffer);
@@ -564,7 +573,7 @@ void Context::createWavefrontSBT() {
         memcpy(static_cast<char*>(hostHitgroupBuffer) + hitgroupRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
                &sbtData, sizeof(sbtData));
         
-        // 复制到设备
+        // ??????
         CUDA_CHECK(cudaMemcpy(hitgroupBuffer, hostHitgroupBuffer, totalHitgroupSize, cudaMemcpyHostToDevice));
         free(hostHitgroupBuffer);
         
@@ -575,15 +584,15 @@ void Context::createWavefrontSBT() {
         
         wf.sbt.hitgroupRecordBase = reinterpret_cast<CUdeviceptr>(wf.hitgroupRecord);
         wf.sbt.hitgroupRecordStrideInBytes = static_cast<uint32_t>(hitgroupRecordSize);
-        wf.sbt.hitgroupRecordCount = RAY_TYPE_COUNT;  // 默认 1 个 GAS × 2 个 Ray Types
+        wf.sbt.hitgroupRecordCount = RAY_TYPE_COUNT;  // ?? 1 ??GAS ? 2 ??Ray Types
     }
     
-    printf("[VLR] SBT created (RayGen, Miss x2, HitGroup x2)\n");
+    VLR_DEBUG_PRINTF("[VLR] SBT created (RayGen, Miss x2, HitGroup x2)\n");
 }
 
 
 // ============================================================================
-// 缓冲区分配
+// ??????
 // ============================================================================
 
 void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
@@ -591,7 +600,7 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     
     uint32_t numPixels = width * height;
     
-    // 分配路径状态缓冲区
+    // ?????????
     if (!wf.pathStateBuffer) {
         wf.pathStateBuffer = std::make_unique<cudau::Buffer<shared::WavefrontPathState>>();
     }
@@ -612,7 +621,7 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     }
     wf.pathTexturedParamsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
-    // 分配工作队列
+    // ??????
     if (!wf.activePathIndices) {
         wf.activePathIndices = std::make_unique<cudau::Buffer<uint32_t>>();
     }
@@ -629,7 +638,7 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     wf.queueCounters->initialize(m_cudaContext, cudau::BufferType::Device, 2);
     wf.queueCounters->clear(m_stream);
     
-    // 分配材质队列（若已启用）
+    // ????????????
     if (wf.useMaterialQueues) {
         for (int i = 0; i < shared::NumMaterialCategories; ++i) {
             if (!wf.materialQueueIndices[i]) {
@@ -645,7 +654,7 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
         wf.materialQueueCounters->clear(m_stream);
     }
     
-    // 分配输出缓冲区
+    // ????????
     if (!wf.accumBuffer) {
         wf.accumBuffer = std::make_unique<cudau::Buffer<shared::SpectrumStorage>>();
     }
@@ -657,19 +666,19 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     }
     wf.rngBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
-    // 初始化 RNG 缓冲区（为每个像素生成唯一的随机种子）
-    // 使用当前时间戳作为基础种子，确保每次运行都不同
+    // ????RNG ???????????????????
+    // ???????????????????????
     uint64_t baseSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     initializeRNGBuffer(wf.rngBuffer->getDevicePointer(), numPixels, baseSeed, m_stream);
     
-    // 创建性能测量事件
+    // ????????
     if (!wf.eventsCreated) {
         CUDA_CHECK(cudaEventCreate(&wf.startEvent));
         CUDA_CHECK(cudaEventCreate(&wf.endEvent));
         wf.eventsCreated = true;
     }
     
-    // 分配降噪缓冲区（可选）
+    // ???????????
     if (!wf.accumAlbedoBuffer) {
         wf.accumAlbedoBuffer = std::make_unique<cudau::Buffer<shared::DiscretizedSpectrum>>();
     }
@@ -680,34 +689,34 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     }
     wf.accumNormalBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numPixels);
     
-    // 分配性能统计缓冲区
+    // ??????????
     if (!wf.perfStatsBuffer) {
         wf.perfStatsBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
     }
     wf.perfStatsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 16);
     
-    // 分配 CUB 临时存储（用于排序和压缩）
+    // ?? CUB ??????????????
     if (wf.usePathSorting || wf.useStreamCompaction) {
-        // 查询所需临时存储大小
+        // ??????????
         size_t sortBytes = 0;
         size_t compactBytes = 0;
         
         if (wf.usePathSorting) {
             sortBytes = shared::sortPathsByMaterialTempStorageBytes(numPixels);
-            printf("[VLR] CUB sort temp storage: %.2f KB\n", sortBytes / 1024.0f);
+            VLR_DEBUG_PRINTF("[VLR] CUB sort temp storage: %.2f KB\n", sortBytes / 1024.0f);
         }
         
         if (wf.useStreamCompaction) {
             compactBytes = shared::compactPathsCUBTempStorageBytes(numPixels);
-            printf("[VLR] CUB compact temp storage: %.2f KB\n", compactBytes / 1024.0f);
+            VLR_DEBUG_PRINTF("[VLR] CUB compact temp storage: %.2f KB\n", compactBytes / 1024.0f);
         }
         
-        // 取最大值（两个操作不会同时使用临时存储）
-        // 优化：增加额外的缓冲区以避免频繁的 fallback
+        // ?????????????????????
+        // ??????????????????fallback
         wf.cubTempStorageBytes = static_cast<size_t>(
             std::max(sortBytes, compactBytes) * shared::PerformanceConfig::CubTempStorageMultiplier);
         
-        printf("[VLR] CUB temp storage allocated: %.2f KB (multiplier: %.1fx)\n", 
+        VLR_DEBUG_PRINTF("[VLR] CUB temp storage allocated: %.2f KB (multiplier: %.1fx)\n", 
                wf.cubTempStorageBytes / 1024.0f, 
                shared::PerformanceConfig::CubTempStorageMultiplier);
         
@@ -717,7 +726,7 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
             }
             wf.cubTempStorage->initialize(m_cudaContext, cudau::BufferType::Device, wf.cubTempStorageBytes);
             
-            // 分配排序/压缩辅助缓冲区
+            // ????/????????
             if (!wf.sortedPathIndices) {
                 wf.sortedPathIndices = std::make_unique<cudau::Buffer<uint32_t>>();
             }
@@ -733,16 +742,16 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
             }
             wf.numCompactedPaths->initialize(m_cudaContext, cudau::BufferType::Device, 1);
             
-            printf("[VLR] CUB buffers allocated (temp: %.2f KB)\n", wf.cubTempStorageBytes / 1024.0f);
+            VLR_DEBUG_PRINTF("[VLR] CUB buffers allocated (temp: %.2f KB)\n", wf.cubTempStorageBytes / 1024.0f);
         }
     }
     
-    // 更新配置
+    // ????
     wf.maxNumPaths = numPixels;
     wf.currentWidth = width;
     wf.currentHeight = height;
     
-    printf("[VLR] Buffers allocated: %ux%u (%u paths, ~%.2f MB)\n",
+    VLR_DEBUG_PRINTF("[VLR] Buffers allocated: %ux%u (%u paths, ~%.2f MB)\n",
            width, height, numPixels,
            (numPixels * (sizeof(shared::WavefrontPathState) + 
                         sizeof(shared::WavefrontHitInfo) +
@@ -754,10 +763,10 @@ void Context::resizeWavefrontBuffers(uint32_t width, uint32_t height) {
     auto& wf = m_optix.wavefrontPathTracing;
     
     if (wf.currentWidth == width && wf.currentHeight == height) {
-        return;  // 无需调整大小
+        return;  // ??????
     }
     
-    // 缓冲区大小改变，需要重新捕获 CUDA Graph
+    // ???????????????CUDA Graph
     if (wf.graphCaptured) {
         cudaGraphExecDestroy(wf.renderGraphExec);
         cudaGraphDestroy(wf.renderGraph);
@@ -772,7 +781,7 @@ void Context::resizeWavefrontBuffers(uint32_t width, uint32_t height) {
 void Context::resetWavefrontQueues() {
     auto& wf = m_optix.wavefrontPathTracing;
 
-    // 使用同步的 cudaMemset 确保立即清除
+    // ??????cudaMemset ??????
     if (wf.queueCounters) {
         CUDA_CHECK(cudaMemset(wf.queueCounters->getDevicePointer(), 0, 2 * sizeof(uint32_t)));
     }
@@ -781,7 +790,7 @@ void Context::resetWavefrontQueues() {
         wf.materialQueueCounters->clear(m_stream);
     }
     
-    // 清除路径状态缓冲区（重要：避免旧的终止状态影响新的渲染）
+    // ????????????????????????????
     if (wf.pathStateBuffer) {
         wf.pathStateBuffer->clear(m_stream);
         CUDA_CHECK(cudaStreamSynchronize(m_stream));
@@ -791,20 +800,20 @@ void Context::resetWavefrontQueues() {
 
 
 // ============================================================================
-// 启动参数设置
+// ??????
 // ============================================================================
 
 void Context::setupWavefrontLaunchParams() {
     auto& wf = m_optix.wavefrontPathTracing;
     auto& lp = wf.launchParams;
     
-    // 设置路径状态缓冲区
+    // ?????????
     lp.pathStateBuffer = wf.pathStateBuffer ? wf.pathStateBuffer->getDevicePointer() : nullptr;
     lp.hitInfoBuffer = wf.hitInfoBuffer ? wf.hitInfoBuffer->getDevicePointer() : nullptr;
     lp.surfacePointBuffer = wf.surfacePointBuffer ? wf.surfacePointBuffer->getDevicePointer() : nullptr;
     lp.pathTexturedParamsBuffer = wf.pathTexturedParamsBuffer ? wf.pathTexturedParamsBuffer->getDevicePointer() : nullptr;
     
-    // 设置工作队列
+    // ??????
     if (wf.activePathIndices && wf.queueCounters) {
         lp.activePathQueue.pathIndices = wf.activePathIndices->getDevicePointer();
         lp.activePathQueue.counter = wf.queueCounters->getDevicePointerAt(0);
@@ -812,9 +821,9 @@ void Context::setupWavefrontLaunchParams() {
         
         static bool firstSetup = true;
         if (firstSetup) {
-            printf("[VLR] setupWavefrontLaunchParams: counter ptr=%p (from wf.queueCounters->getDevicePointerAt(0))\n", 
+            VLR_DEBUG_PRINTF("[VLR] setupWavefrontLaunchParams: counter ptr=%p (from wf.queueCounters->getDevicePointerAt(0))\n", 
                    lp.activePathQueue.counter);
-            printf("[VLR] setupWavefrontLaunchParams: wf.queueCounters base ptr=%p\n",
+            VLR_DEBUG_PRINTF("[VLR] setupWavefrontLaunchParams: wf.queueCounters base ptr=%p\n",
                    wf.queueCounters->getDevicePointer());
             firstSetup = false;
         }
@@ -826,7 +835,7 @@ void Context::setupWavefrontLaunchParams() {
         lp.nextActivePathQueue.capacity = wf.maxNumPaths;
     }
     
-    // 设置材质队列
+    // ??????
     if (wf.useMaterialQueues && wf.materialQueueCounters) {
         for (int i = 0; i < shared::NumMaterialCategories; ++i) {
             if (wf.materialQueueIndices[i]) {
@@ -837,7 +846,7 @@ void Context::setupWavefrontLaunchParams() {
         }
     }
     
-    // 设置输出缓冲区
+    // ????????
     lp.rngBuffer = optixu::NativeBlockBuffer2D<shared::KernelRNG>();
     lp.rngBuffer.data = wf.rngBuffer ? wf.rngBuffer->getDevicePointer() : nullptr;
     lp.accumBuffer = optixu::BlockBuffer2D<shared::SpectrumStorage, 0>();
@@ -845,7 +854,7 @@ void Context::setupWavefrontLaunchParams() {
     lp.accumAlbedoBuffer = wf.accumAlbedoBuffer ? wf.accumAlbedoBuffer->getDevicePointer() : nullptr;
     lp.accumNormalBuffer = wf.accumNormalBuffer ? wf.accumNormalBuffer->getDevicePointer() : nullptr;
     
-    // 设置场景数据（来自 Scene 或默认空）
+    // ??????????Scene ??????
     if (m_sceneSource) {
         lp.geomInstBuffer = m_sceneSource->getGeomInstBuffer();
         lp.instBuffer = m_sceneSource->getInstBuffer();
@@ -865,10 +874,10 @@ void Context::setupWavefrontLaunchParams() {
         lp.progSampleLensPosition = -1;
         lp.progTestLensIntersection = -1;
         lp.progEvaluateIDF = -1;
-        // 设置光源实例索引数组（用于光源采样）
+        // ??????????????????
         lp.instIndices = m_sceneSource->getLightInstIndices();
 
-        // SceneBounds 需设备指针，上传到小缓冲区
+        // SceneBounds ?????????????
         if (!wf.sceneBoundsBuffer) {
             wf.sceneBoundsBuffer = std::make_unique<cudau::Buffer<shared::SceneBounds>>();
         }
@@ -892,34 +901,34 @@ void Context::setupWavefrontLaunchParams() {
         lp.vertexTexCoords = nullptr;
         lp.topGroup = 0;
         lp.sceneBounds = nullptr;
-        lp.cameraDescriptor = m_scene.camera;  // 使用默认 SceneData
+        lp.cameraDescriptor = m_scene.camera;  // ???? SceneData
         lp.progSampleLensPosition = -1;
         lp.progTestLensIntersection = -1;
         lp.progEvaluateIDF = -1;
     }
     
-    // 设置图像参数（与原始 VLR 一致：numAccumFrames 用于多采样正确平均）
+    // ?????????? VLR ???numAccumFrames ??????????
     lp.imageSize = make_uint2(wf.currentWidth, wf.currentHeight);
     lp.imageStrideInPixels = wf.currentWidth;
     lp.numAccumFrames = wf.numAccumFrames;
-    lp.limitNumAccumFrames = 0;  // 0 = 无限制
+    lp.limitNumAccumFrames = 0;  // 0 = ????
     
-    // 设置 Wavefront 配置
+    // ?? Wavefront ??
     lp.maxPathLength = wf.maxPathLength;
     lp.maxNumPaths = wf.maxNumPaths;
     lp.currentDepth = 0;
     
-    // 设置性能统计指针
+    // ????????
     lp.numActiveRays = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(0) : nullptr;
     lp.numShadowRays = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(1) : nullptr;
     lp.numTerminatedPaths = wf.perfStatsBuffer ? wf.perfStatsBuffer->getDevicePointerAt(2) : nullptr;
     
-    // 设置光源分布（支持基于功率的重要性采样）
+    // ????????????????????
     if (m_sceneSource) {
         const uint32_t numLights = m_sceneSource->getNumLightInsts();
         lp.lightInstDist.numValues = numLights;
         lp.envLightInstIndex = m_sceneSource->getEnvLightInstIndex();
-        printf("[VLR] renderWavefront: numLights=%u, envLightInstIndex=%u\n",
+        VLR_DEBUG_PRINTF("[VLR] renderWavefront: numLights=%u, envLightInstIndex=%u\n",
             numLights, lp.envLightInstIndex);
         lp.envImportanceMap = m_sceneSource->getEnvImportanceMap();
         lp.lightInstDist.weights = nullptr;
@@ -954,17 +963,17 @@ void Context::setupWavefrontLaunchParams() {
         lp.envImportanceMap.totalLuminance = 1.0f;
     }
 
-    // 设置调试参数
+    // ??????
     lp.probePixX = m_probePixelX;
     lp.probePixY = m_probePixelY;
     lp.debugMode = static_cast<uint32_t>(m_debugMode);
     
-    // 分配或更新启动参数缓冲区
+    // ????????????
     if (!wf.launchParamsBuffer) {
         CUDA_CHECK(cudaMalloc(&wf.launchParamsBuffer, sizeof(shared::WavefrontLaunchParameters)));
     }
     
-    // 复制到设备
+    // ??????
     CUDA_CHECK(cudaMemcpyAsync(
         wf.launchParamsBuffer,
         &lp,
@@ -973,10 +982,10 @@ void Context::setupWavefrontLaunchParams() {
         m_stream
     ));
     
-    // 同步以确保参数上传完成
+    // ????????????
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
     
-    // 验证：回读设备端的 counter 指针
+    // ??????????counter ??
     static bool firstVerify = true;
     if (firstVerify) {
         shared::WavefrontLaunchParameters lpVerify;
@@ -986,25 +995,25 @@ void Context::setupWavefrontLaunchParams() {
             sizeof(shared::WavefrontLaunchParameters),
             cudaMemcpyDeviceToHost
         ));
-        printf("[VLR] setupWavefrontLaunchParams VERIFY: Device-side counter ptr=%p (expected %p)\n",
+        VLR_DEBUG_PRINTF("[VLR] setupWavefrontLaunchParams VERIFY: Device-side counter ptr=%p (expected %p)\n",
                lpVerify.activePathQueue.counter, lp.activePathQueue.counter);
         firstVerify = false;
     }
     
     // ========================================================================
-    // 更新 SBT 记录中的 launch parameters 指针
+    // ?? SBT ???? launch parameters ??
     // ========================================================================
     shared::WavefrontSBTData sbtData;
     sbtData.params = static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
     
     static bool firstSBTUpdate = true;
     if (firstSBTUpdate) {
-        printf("[VLR] setupWavefrontLaunchParams: sbtData.params=%p (wf.launchParamsBuffer)\n", sbtData.params);
-        printf("[VLR] setupWavefrontLaunchParams: Uploading sbtData to raygenRecord=%p\n", wf.raygenRecord);
+        VLR_DEBUG_PRINTF("[VLR] setupWavefrontLaunchParams: sbtData.params=%p (wf.launchParamsBuffer)\n", sbtData.params);
+        VLR_DEBUG_PRINTF("[VLR] setupWavefrontLaunchParams: Uploading sbtData to raygenRecord=%p\n", wf.raygenRecord);
         firstSBTUpdate = false;
     }
     
-    // 更新 RayGen 记录
+    // ?? RayGen ??
     CUDA_CHECK(cudaMemcpy(
         static_cast<char*>(wf.raygenRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
         &sbtData,
@@ -1012,7 +1021,7 @@ void Context::setupWavefrontLaunchParams() {
         cudaMemcpyHostToDevice
     ));
     
-    // 更新 Miss 记录（2 条）- 必须使用与 createWavefrontSBT 相同的 16 字节对齐 stride
+    // ?? Miss ???? ??- ??????createWavefrontSBT ????16 ???? stride
     size_t missRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
     missRecordSize = (missRecordSize + 15) & ~15;
     CUDA_CHECK(cudaMemcpy(
@@ -1028,7 +1037,7 @@ void Context::setupWavefrontLaunchParams() {
         cudaMemcpyHostToDevice
     ));
     
-    // 更新 HitGroup 记录（2 条）- 必须使用与 createWavefrontSBT 相同的 16 字节对齐 stride
+    // ?? HitGroup ???? ??- ??????createWavefrontSBT ????16 ???? stride
     size_t hitgroupRecordSize = OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData);
     hitgroupRecordSize = (hitgroupRecordSize + 15) & ~15;
     CUDA_CHECK(cudaMemcpy(
@@ -1047,13 +1056,13 @@ void Context::setupWavefrontLaunchParams() {
 
 
 // ============================================================================
-// 清理
+// ??
 // ============================================================================
 
 void Context::cleanupWavefrontResources() {
     auto& wf = m_optix.wavefrontPathTracing;
     
-    // 销毁 OptiX 资源
+    // ???OptiX ??
     if (wf.pipeline) {
         optixPipelineDestroy(wf.pipeline);
         wf.pipeline = nullptr;
@@ -1089,7 +1098,7 @@ void Context::cleanupWavefrontResources() {
         wf.shadowHitGroupProgram = nullptr;
     }
     
-    // 释放 SBT 记录
+    // ?? SBT ??
     if (wf.raygenRecord) {
         cudaFree(wf.raygenRecord);
         wf.raygenRecord = nullptr;
@@ -1115,7 +1124,7 @@ void Context::cleanupWavefrontResources() {
         wf.shadowHitgroupRecord = nullptr;
     }
     
-    // 释放缓冲区（智能指针自动析构，显式 reset 以立即释放）
+    // ??????????????????reset ??????
     wf.pathStateBuffer.reset();
     wf.hitInfoBuffer.reset();
     wf.surfacePointBuffer.reset();
@@ -1132,21 +1141,21 @@ void Context::cleanupWavefrontResources() {
     wf.lightImportanceWeightsBuffer.reset();
     wf.lightImportanceCDFBuffer.reset();
     
-    // 销毁 CUDA 事件
+    // ???CUDA ??
     if (wf.eventsCreated) {
         cudaEventDestroy(wf.startEvent);
         cudaEventDestroy(wf.endEvent);
         wf.eventsCreated = false;
     }
 
-    // 销毁 CUDA Graphs
+    // ???CUDA Graphs
     if (wf.graphCaptured) {
         cudaGraphExecDestroy(wf.renderGraphExec);
         cudaGraphDestroy(wf.renderGraph);
         wf.graphCaptured = false;
     }
     
-    // 释放 CUB 临时存储
+    // ?? CUB ????
     wf.cubTempStorage.reset();
     wf.sortedPathIndices.reset();
     wf.compactedPathIndices.reset();
@@ -1167,7 +1176,7 @@ void Context::cleanupWavefrontResources() {
 
 
 // ============================================================================
-// 场景设置
+// ????
 // ============================================================================
 
 Scene* Context::createScene() {
@@ -1184,7 +1193,7 @@ void Context::setScene(const Scene* scene) {
 
 
 // ============================================================================
-// 渲染方法
+// ????
 // ============================================================================
 
 void Context::render(
@@ -1219,102 +1228,105 @@ void Context::renderWavefront(
 {
     auto& wf = m_optix.wavefrontPathTracing;
 
-    printf("[VLR] renderWavefront started: %ux%u, %u samples\n", width, height, numSamples);
+    VLR_DEBUG_PRINTF("[VLR] renderWavefront started: %ux%u, %u samples\n", width, height, numSamples);
     fflush(stdout);
 
-    // 若有外部场景则构建加速结构并上传到设备
+    // ????????????????????
     if (m_sceneSource) {
-        printf("[VLR] Building acceleration structure...\n");
+        VLR_DEBUG_PRINTF("[VLR] Building acceleration structure...\n");
         fflush(stdout);
         const_cast<Scene*>(m_sceneSource)->buildAccelerationStructure();
-        printf("[VLR] Uploading scene data to GPU...\n");
+        VLR_DEBUG_PRINTF("[VLR] Uploading scene data to GPU...\n");
         fflush(stdout);
         const_cast<Scene*>(m_sceneSource)->updateToGPU();
         m_scene.camera = m_sceneSource->getCamera();
         m_scene.bounds = m_sceneSource->getSceneBounds();
-        printf("[VLR] Scene ready\n");
+        VLR_DEBUG_PRINTF("[VLR] Scene ready\n");
         fflush(stdout);
     }
 
-    // 确保缓冲区已分配
+    // ????????
     if (wf.currentWidth != width || wf.currentHeight != height) {
-        printf("[VLR] Resizing buffers...\n");
+        VLR_DEBUG_PRINTF("[VLR] Resizing buffers...\n");
         fflush(stdout);
         resizeWavefrontBuffers(width, height);
     }
 
-    // 与原始 VLR 一致：新渲染开始时清除累加缓冲区和帧计数
+    // ????VLR ?????????????????????
     wf.numAccumFrames = 0;
     if (wf.accumBuffer && wf.accumBuffer->size() > 0) {
         wf.accumBuffer->clear(m_stream);
         CUDA_CHECK(cudaStreamSynchronize(m_stream));
     }
 
-    // 设置启动参数
-    printf("[VLR] Setting launch parameters...\n");
+    // ??????
+    VLR_DEBUG_PRINTF("[VLR] Setting launch parameters...\n");
     fflush(stdout);
     setupWavefrontLaunchParams();
 
-    // 记录开始时间
+    // ???????
     CUDA_CHECK(cudaEventRecord(wf.startEvent, m_stream));
 
-    // 检查调试模式：非 Normal 时使用简化渲染路径（单次采样，无多次反弹）
+    // ?????????Normal ??????????????????????
     if (m_debugMode != VLRDebugMode_Normal) {
-        printf("[VLR] Debug mode: %s (single sample, no multi-bounce)\n", getDebugModeName(m_debugMode));
+        VLR_DEBUG_PRINTF("[VLR] Debug mode: %s (single sample, no multi-bounce)\n", getDebugModeName(m_debugMode));
         fflush(stdout);
         wf.numAccumFrames = 1;
         executeWavefrontRenderDebug(static_cast<uint32_t>(m_debugMode));
     } else {
-        // 正常路径追踪
+        // ??????
         printf("[VLR] Starting render loop...\n");
         fflush(stdout);
         for (uint32_t sample = 0; sample < numSamples; ++sample) {
-            printf("[VLR] ========== Sample %u/%u START ==========\n", sample + 1, numSamples);
-            fflush(stdout);
             ++wf.numAccumFrames;
             executeWavefrontRender(1);
-            printf("[VLR] ========== Sample %u/%u END ==========\n", sample + 1, numSamples);
+            // ?????sample????
+            printf("\r[VLR] Progress: %u/%u samples (%.1f%%)", 
+                   sample + 1, numSamples, 
+                   (sample + 1) * 100.0f / numSamples);
             fflush(stdout);
         }
+        printf("\n");  // ?????
+        fflush(stdout);
     }
     
-    // 记录结束时间并计算渲染时间
+    // ??????????????
     CUDA_CHECK(cudaEventRecord(wf.endEvent, m_stream));
     CUDA_CHECK(cudaEventSynchronize(wf.endEvent));
     
     float renderTimeMs = 0.0f;
     CUDA_CHECK(cudaEventElapsedTime(&renderTimeMs, wf.startEvent, wf.endEvent));
     
-    printf("[VLR] Render completed in %.2f ms (%.2f ms/sample, %.2f Msamples/s)\n",
+    VLR_DEBUG_PRINTF("[VLR] Render completed in %.2f ms (%.2f ms/sample, %.2f Msamples/s)\n",
            renderTimeMs,
            renderTimeMs / numSamples,
            (width * height * numSamples) / (renderTimeMs * 1000.0f));
     fflush(stdout);
     
-    // 执行降噪（如果启用，调试模式跳过）
+    // ??????????????????
     if (m_denoiserConfig.enabled && m_debugMode == VLRDebugMode_Normal && wf.accumBuffer) {
-        printf("[VLR] Applying OptiX denoiser...\n");
+        VLR_DEBUG_PRINTF("[VLR] Applying OptiX denoiser...\n");
         fflush(stdout);
         
-        // 初始化降噪器（如果尚未初始化）
+        // ????????????????
         if (!m_denoiser.isInitialized()) {
             m_denoiser.initialize(width, height, m_denoiserConfig, m_optix.context);
         }
         
-        // 准备降噪输入（需要将 SpectrumStorage 转换为 float3）
-        // 注意：这里需要一个转换 kernel，暂时使用原始缓冲区
+        // ?????????? SpectrumStorage ????float3??
+        // ????????????kernel??????????
         CUdeviceptr d_colorBuffer = reinterpret_cast<CUdeviceptr>(wf.accumBuffer->getDevicePointer());
         CUdeviceptr d_albedoBuffer = wf.accumAlbedoBuffer ? reinterpret_cast<CUdeviceptr>(wf.accumAlbedoBuffer->getDevicePointer()) : 0;
         CUdeviceptr d_normalBuffer = wf.accumNormalBuffer ? reinterpret_cast<CUdeviceptr>(wf.accumNormalBuffer->getDevicePointer()) : 0;
         
-        // 执行降噪（输入和输出使用同一个缓冲区）
+        // ????????????????????
         m_denoiser.denoise(d_colorBuffer, d_colorBuffer, d_albedoBuffer, d_normalBuffer, numSamples);
         
-        printf("[VLR] Denoising completed\n");
+        VLR_DEBUG_PRINTF("[VLR] Denoising completed\n");
         fflush(stdout);
     }
     
-    // 将结果复制到输出缓冲区
+    // ????????????
     if (outputBuffer && wf.accumBuffer) {
         CUDA_CHECK(cudaMemcpyAsync(
             outputBuffer,
@@ -1337,7 +1349,7 @@ void Context::executeWavefrontRenderDebug(uint32_t debugMode) {
 
     uint32_t numPixels = wf.currentWidth * wf.currentHeight;
 
-    // 重置队列
+    // ????
     resetWavefrontQueues();
     setupWavefrontLaunchParams();
 
@@ -1351,7 +1363,7 @@ void Context::executeWavefrontRenderDebug(uint32_t debugMode) {
         ));
     }
 
-    // 阶段 1: 生成初始光线
+    // ?? 1: ??????
     launchGenerateRays(numPixels);
 
     if (wf.queueCounters) {
@@ -1364,13 +1376,13 @@ void Context::executeWavefrontRenderDebug(uint32_t debugMode) {
         ));
     }
 
-    // 阶段 2: 光线追踪（单次，无多次反弹）
+    // ?? 2: ??????????????
     launchTraceRays(numPixels);
 
-    // 阶段 3: 处理命中（填充 surfacePointBuffer、accumAlbedo、accumNormal）
+    // ?? 3: ????????surfacePointBuffer?accumAlbedo?accumNormal??
     launchProcessHits(numPixels);
 
-    // 阶段 4: 调试可视化（直接写入 accumBuffer）
+    // ?? 4: ?????????? accumBuffer??
     launchRenderDebugMode(numPixels, debugMode);
 
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
@@ -1379,7 +1391,7 @@ void Context::executeWavefrontRenderDebug(uint32_t debugMode) {
 void Context::executeWavefrontRender(uint32_t numSamples) {
     auto& wf = m_optix.wavefrontPathTracing;
 
-    printf("[VLR] ========== executeWavefrontRender START (numSamples=%u) ==========\n", numSamples);
+    VLR_DEBUG_PRINTF("[VLR] ========== executeWavefrontRender START (numSamples=%u) ==========\n", numSamples);
     fflush(stdout);
 
 #ifdef VLR_DEBUG_NAN_TRACKING
@@ -1388,13 +1400,13 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
 
     uint32_t numPixels = wf.currentWidth * wf.currentHeight;
     
-    // 重置队列
+    // ????
     resetWavefrontQueues();
     
-    // 更新启动参数到设备（确保 counter 指针指向已清除的计数器）
+    // ???????????? counter ????????????
     setupWavefrontLaunchParams();
     
-    // 再次显式重置计数器（确保 GPU 能看到）
+    // ???????????? GPU ????
     if (wf.queueCounters) {
         uint32_t zero[2] = {0, 0};
         CUDA_CHECK(cudaMemcpy(
@@ -1405,13 +1417,13 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         ));
     }
     
-    // 阶段 1: 生成初始光线
+    // ?? 1: ??????
     launchGenerateRays(numPixels);
     
-    // 与原始 VLR 一致：在主机端可靠设置活跃队列计数，避免 GPU 内核竞态
+    // ????VLR ?????????????????????GPU ?????
     if (wf.queueCounters) {
         void* counterPtr = wf.queueCounters->getDevicePointerAt(0);
-        printf("[VLR] executeWavefrontRender: Setting counter at %p to %u\n", counterPtr, numPixels);
+        VLR_DEBUG_PRINTF("[VLR] executeWavefrontRender: Setting counter at %p to %u\n", counterPtr, numPixels);
         CUDA_CHECK(cudaMemcpyAsync(
             counterPtr,
             &numPixels,
@@ -1419,53 +1431,53 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             cudaMemcpyHostToDevice,
             m_stream
         ));
-        // 同步确保计数器已更新
+        // ??????????
         CUDA_CHECK(cudaStreamSynchronize(m_stream));
-        printf("[VLR] executeWavefrontRender: Counter set complete\n");
+        VLR_DEBUG_PRINTF("[VLR] executeWavefrontRender: Counter set complete\n");
     }
     
-        // 主 Wavefront 循环
-        // 优化：减少同步频率，使用配置的同步间隔
+        // ??Wavefront ??
+        // ????????????????????
         constexpr uint32_t SYNC_INTERVAL = shared::PerformanceConfig::SyncInterval;
-        uint32_t numActivePaths = numPixels;  // 初始时所有路径都活跃
+        uint32_t numActivePaths = numPixels;  // ??????????
         
         for (uint32_t depth = 0; depth < wf.maxPathLength; ++depth) {
         wf.launchParams.currentDepth = depth;
         
-        // 优化：在同步间隔时检查活跃路径数，并支持早期终止
+        // ????????????????????????
         if (depth % SYNC_INTERVAL == 0 && depth > 0) {
             if (wf.queueCounters) {
                 wf.queueCounters->copyToHost(&numActivePaths, 1, m_stream);
                 CUDA_CHECK(cudaStreamSynchronize(m_stream));
             }
             
-            // 早期终止：当路径数很少时，提前退出
+            // ??????????????????
             constexpr float EARLY_TERMINATION_THRESHOLD = shared::PerformanceConfig::EarlyTerminationThreshold;
             constexpr uint32_t MIN_DEPTH = shared::PerformanceConfig::EarlyTerminationMinDepth;
             uint32_t minPaths = static_cast<uint32_t>(numPixels * EARLY_TERMINATION_THRESHOLD);
             
             if (numActivePaths == 0) {
-                break;  // 所有路径已终止
+                break;  // ???????
             } else if (numActivePaths < minPaths && depth > MIN_DEPTH) {
-                // 路径数很少且已经足够深，提前终止
+                // ????????????????
                 break;
             }
         }
         
-        // 阶段 2: 光线追踪
+        // ?? 2: ????
         launchTraceRays(numActivePaths);
         
-        // 阶段 3: 处理命中
+        // ?? 3: ????
         launchProcessHits(numActivePaths);
         
-        // 阶段 4: 采样光源 (NEE)
+        // ?? 4: ???? (NEE)
         launchSampleLights(numActivePaths);
         
-        // 阶段 5: 采样 BSDF
+        // ?? 5: ?? BSDF
         launchSampleBSDF(numActivePaths);
         
-        // 阶段 6: 路径压缩和排序
-        // 获取下一轮路径数量
+        // ?? 6: ????????
+        // ??????????
         uint32_t numNextPaths = 0;
         if (wf.queueCounters) {
             CUDA_CHECK(cudaMemcpyAsync(
@@ -1478,7 +1490,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             CUDA_CHECK(cudaStreamSynchronize(m_stream));
         }
         
-        // 优化：只在路径数下降超过阈值且路径数足够多时才执行压缩
+        // ???????????????????????????
         constexpr float COMPRESSION_THRESHOLD = shared::PerformanceConfig::CompressionThreshold;
         constexpr uint32_t MIN_PATHS = shared::PerformanceConfig::MinPathsForCompression;
         float compressionRatio = (numActivePaths > 0) ? 
@@ -1487,7 +1499,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                              (numNextPaths > MIN_PATHS);
         
         if (wf.useStreamCompaction && shouldCompress) {
-            // 使用 CUB Stream Compaction 移除已终止路径
+            // ?? CUB Stream Compaction ????????
             CUDA_CHECK(shared::compactPathsCUB(
                 static_cast<uint32_t*>(wf.nextActivePathIndices->getDevicePointer()),
                 numNextPaths,
@@ -1499,7 +1511,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 m_stream
             ));
             
-            // 重置下一队列计数
+            // ????????
             uint32_t zero = 0;
             CUDA_CHECK(cudaMemcpyAsync(
                 wf.queueCounters->getDevicePointerAt(1),
@@ -1509,12 +1521,12 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 m_stream
             ));
         } else if (wf.usePathSorting && numNextPaths > 0 && depth > 0) {
-            // 使用 CUB RadixSort 按材质排序
-            // 注意：仅在深度>0时排序，因为深度0时materialCategory未初始化
-            // 注意：临时存储大小需要与实际路径数匹配
+            // ?? CUB RadixSort ??????
+            // ????????0????????0?materialCategory????
+            // ????????????????????
             size_t requiredTempBytes = shared::sortPathsByMaterialTempStorageBytes(numNextPaths);
             
-            // 调试：仅在第一次警告时打印详细信息
+            // ?????????????????
             static bool firstWarning = true;
             if (requiredTempBytes > wf.cubTempStorageBytes && firstWarning) {
                 fprintf(stderr, "[VLR] DEBUG: paths=%u, required=%zu bytes (%.2f KB), allocated=%zu bytes (%.2f KB)\n",
@@ -1527,7 +1539,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 fprintf(stderr, "[VLR] Warning: CUB temp storage insufficient (%zu > %zu), using simple swap\n",
                         requiredTempBytes, wf.cubTempStorageBytes);
 
-                // 回退到简单交换
+                // ????????
                 std::swap(wf.activePathIndices, wf.nextActivePathIndices);
                 CUDA_CHECK(cudaMemcpyAsync(
                     wf.queueCounters->getDevicePointerAt(0),
@@ -1557,7 +1569,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 ));
 
                 
-                // 同步队列计数器：counters[0] = counters[1], counters[1] = 0
+                // ????????counters[0] = counters[1], counters[1] = 0
                 CUDA_CHECK(cudaMemcpyAsync(
                     wf.queueCounters->getDevicePointerAt(0),
                     wf.queueCounters->getDevicePointerAt(1),
@@ -1575,10 +1587,10 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 ));
             }
         } else {
-            // 简单队列交换（默认）
+            // ???????????
             std::swap(wf.activePathIndices, wf.nextActivePathIndices);
             
-            // 同步队列计数器：counters[0] = counters[1], counters[1] = 0
+            // ????????counters[0] = counters[1], counters[1] = 0
             CUDA_CHECK(cudaMemcpyAsync(
                 wf.queueCounters->getDevicePointerAt(0),
                 wf.queueCounters->getDevicePointerAt(1),
@@ -1597,21 +1609,21 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         }
     }
     
-    // 阶段 6: 累加结果
+    // ?? 6: ????
     launchAccumulate(numPixels);
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
 }
 
 
 // ============================================================================
-// 内核启动方法
+// ??????
 // ============================================================================
 
 void Context::launchGenerateRays(uint32_t numPaths) {
     auto& wf = m_optix.wavefrontPathTracing;
     if (!wf.launchParamsBuffer) return;
 
-    // 根据图像尺寸计算 grid/block，调用 generateRays CUDA kernel
+    // ???????? grid/block????generateRays CUDA kernel
     uint32_t width = wf.currentWidth;
     uint32_t height = wf.currentHeight;
     if (width == 0 || height == 0) return;
@@ -1625,26 +1637,26 @@ void Context::launchGenerateRays(uint32_t numPaths) {
 void Context::launchTraceRays(uint32_t numActivePaths) {
     auto& wf = m_optix.wavefrontPathTracing;
 
-    // 使用 optixLaunch 启动 OptiX Ray Generation 程序，传入 SBT 和 launchParams
+    // ?? optixLaunch ?? OptiX Ray Generation ??????SBT ??launchParams
     if (!wf.pipeline) {
         throw std::runtime_error("launchTraceRays: OptiX pipeline not initialized, call createWavefrontPrograms first");
     }
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 完全重新上传 launchParams 以确保所有指针都是最新的
+    // ?????? launchParams ????????????
     static bool firstCall = true;
     if (firstCall) {
-        printf("[VLR] launchTraceRays: Re-uploading entire launchParams to ensure consistency\n");
-        printf("[VLR] launchTraceRays HOST: counter ptr=%p, imageSize=(%u,%u), maxPathLength=%u\n",
+        VLR_DEBUG_PRINTF("[VLR] launchTraceRays: Re-uploading entire launchParams to ensure consistency\n");
+        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: counter ptr=%p, imageSize=(%u,%u), maxPathLength=%u\n",
                wf.launchParams.activePathQueue.counter,
                wf.launchParams.imageSize.x, wf.launchParams.imageSize.y,
                wf.launchParams.maxPathLength);
-        printf("[VLR] launchTraceRays HOST: pathStateBuffer=%p, topGroup=%llu\n",
+        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: pathStateBuffer=%p, topGroup=%llu\n",
                wf.launchParams.pathStateBuffer, (unsigned long long)wf.launchParams.topGroup);
-        printf("[VLR] launchTraceRays HOST: sizeof(WavefrontLaunchParameters)=%zu\n",
+        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: sizeof(WavefrontLaunchParameters)=%zu\n",
                sizeof(shared::WavefrontLaunchParameters));
-        printf("[VLR] launchTraceRays HOST: offsetof(pathStateBuffer)=%zu, offsetof(activePathQueue)=%zu\n",
+        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: offsetof(pathStateBuffer)=%zu, offsetof(activePathQueue)=%zu\n",
                offsetof(shared::WavefrontLaunchParameters, pathStateBuffer),
                offsetof(shared::WavefrontLaunchParameters, activePathQueue));
         firstCall = false;
@@ -1657,10 +1669,10 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
         cudaMemcpyHostToDevice
     ));
     
-    // 同步确保上传完成
+    // ????????
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
     
-    // 验证上传结果
+    // ??????
     static bool firstVerify = true;
     if (firstVerify) {
         shared::WavefrontLaunchParameters lpVerify;
@@ -1670,20 +1682,20 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
             sizeof(shared::WavefrontLaunchParameters),
             cudaMemcpyDeviceToHost
         ));
-        printf("[VLR] launchTraceRays VERIFY after re-upload: Device counter ptr=%p\n",
+        VLR_DEBUG_PRINTF("[VLR] launchTraceRays VERIFY after re-upload: Device counter ptr=%p\n",
                lpVerify.activePathQueue.counter);
         firstVerify = false;
     }
 
     try {
-        // 注意：我们通过 SBT 数据传递 launch parameters，所以 launchParams 参数设为 0
+        // ??????? SBT ?????launch parameters????launchParams ???? 0
         OptixResult launchResult = optixLaunch(
             wf.pipeline,
             m_stream,
-            0,  // 不使用 launchParams（通过 SBT 传递）
+            0,  // ????launchParams??? SBT ???
             0,
             &wf.sbt,
-            numActivePaths,  // 每个线程处理一条活跃路径
+            numActivePaths,  // ?????????????
             1,
             1
         );
@@ -1703,7 +1715,7 @@ void Context::launchProcessHits(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 调用 processHits CUDA kernel
+    // ?? processHits CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1715,7 +1727,7 @@ void Context::launchSampleLights(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 调用 sampleLights CUDA kernel
+    // ?? sampleLights CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1727,7 +1739,7 @@ void Context::launchSampleBSDF(uint32_t numActivePaths) {
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // 调用 sampleBSDF CUDA kernel
+    // ?? sampleBSDF CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1747,7 +1759,7 @@ void Context::launchAccumulate(uint32_t numPaths) {
     if (!wf.launchParamsBuffer) return;
     if (numPaths == 0) return;
 
-    // 调用 accumulateResults CUDA kernel
+    // ?? accumulateResults CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
@@ -1767,7 +1779,7 @@ void Context::launchRenderDebugMode(uint32_t numPixels, uint32_t debugMode) {
 
 
 // ============================================================================
-// 配置方法
+// ????
 // ============================================================================
 
 void Context::setMaxPathLength(uint32_t maxLength) {
@@ -1789,12 +1801,12 @@ void Context::setPerformanceConfig(const RuntimePerformanceConfig& config) {
     auto& wf = m_optix.wavefrontPathTracing;
     wf.usePathSorting = config.enablePathSorting;
     wf.useStreamCompaction = config.enableStreamCompaction;
-    // 其他字段（syncInterval、block sizes 等）已存储于 m_perfConfig，供后续 kernel 启动使用
+    // ?????syncInterval?block sizes ?????? m_perfConfig???? kernel ????
 }
 
 
 // ============================================================================
-// 纹理管理
+// ????
 // ============================================================================
 
 namespace {
@@ -1821,13 +1833,13 @@ size_t bytesPerPixel(shared::TextureFormat fmt) {
 
 bool Context::createTexture2D(const char* imagePath, uint32_t* outTextureIndex) {
     if (!imagePath || !outTextureIndex) {
-        printf("[VLR] createTexture2D: invalid arguments (null)\n");
+        VLR_DEBUG_PRINTF("[VLR] createTexture2D: invalid arguments (null)\n");
         return false;
     }
     TextureImage img;
     std::string error;
     if (!loadTextureImage(imagePath, img, &error)) {
-        printf("[VLR] createTexture2D: failed to load '%s': %s\n", imagePath, error.c_str());
+        VLR_DEBUG_PRINTF("[VLR] createTexture2D: failed to load '%s': %s\n", imagePath, error.c_str());
         return false;
     }
     shared::TextureFormat fmt = (img.format == TextureImageFormat::RGBA8)
@@ -1837,7 +1849,7 @@ bool Context::createTexture2D(const char* imagePath, uint32_t* outTextureIndex) 
                                         static_cast<uint32_t>(img.format), outTextureIndex);
     freeTextureImage(img);
     if (ok) {
-        printf("[VLR] createTexture2D: loaded '%s' %ux%u -> texture index %u\n",
+        VLR_DEBUG_PRINTF("[VLR] createTexture2D: loaded '%s' %ux%u -> texture index %u\n",
                imagePath, img.width, img.height, *outTextureIndex);
     }
     return ok;
@@ -1846,11 +1858,11 @@ bool Context::createTexture2D(const char* imagePath, uint32_t* outTextureIndex) 
 bool Context::createTexture2DFromMemory(const void* data, uint32_t width, uint32_t height,
                                        uint32_t format, uint32_t* outTextureIndex) {
     if (!data || width == 0 || height == 0 || !outTextureIndex) {
-        printf("[VLR] createTexture2DFromMemory: invalid arguments\n");
+        VLR_DEBUG_PRINTF("[VLR] createTexture2DFromMemory: invalid arguments\n");
         return false;
     }
     if (format > 2) {
-        printf("[VLR] createTexture2DFromMemory: invalid format %u (0=RGBA8, 1=RGB32F, 2=RGBA32F)\n", format);
+        VLR_DEBUG_PRINTF("[VLR] createTexture2DFromMemory: invalid format %u (0=RGBA8, 1=RGB32F, 2=RGBA32F)\n", format);
         return false;
     }
     try {
@@ -1876,34 +1888,34 @@ bool Context::createTexture2DFromMemory(const void* data, uint32_t width, uint32
         m_textures.push_back(std::move(rec));
         m_textureDescriptorBufferDirty = true;
         *outTextureIndex = idx;
-        printf("[VLR] createTexture2DFromMemory: created texture %u %ux%u format %u\n",
+        VLR_DEBUG_PRINTF("[VLR] createTexture2DFromMemory: created texture %u %ux%u format %u\n",
                idx, width, height, format);
         return true;
     } catch (const std::exception& e) {
-        printf("[VLR] createTexture2DFromMemory: exception: %s\n", e.what());
+        VLR_DEBUG_PRINTF("[VLR] createTexture2DFromMemory: exception: %s\n", e.what());
         return false;
     }
 }
 
 void Context::destroyTexture(uint32_t textureIndex) {
     if (textureIndex >= m_textures.size()) {
-        printf("[VLR] destroyTexture: invalid index %u (max %zu)\n",
+        VLR_DEBUG_PRINTF("[VLR] destroyTexture: invalid index %u (max %zu)\n",
                textureIndex, m_textures.size());
         return;
     }
     m_textures[textureIndex].gpuBuffer.reset();
     m_textures[textureIndex].descriptor = shared::Texture2DDescriptor();
     m_textureDescriptorBufferDirty = true;
-    printf("[VLR] destroyTexture: texture %u destroyed\n", textureIndex);
+    VLR_DEBUG_PRINTF("[VLR] destroyTexture: texture %u destroyed\n", textureIndex);
 }
 
 bool Context::setTextureFilterMode(uint32_t textureIndex, uint32_t filterMode) {
     if (textureIndex >= m_textures.size()) {
-        printf("[VLR] setTextureFilterMode: invalid index %u\n", textureIndex);
+        VLR_DEBUG_PRINTF("[VLR] setTextureFilterMode: invalid index %u\n", textureIndex);
         return false;
     }
     if (filterMode > 1) {
-        printf("[VLR] setTextureFilterMode: invalid mode %u (0=Nearest, 1=Linear)\n", filterMode);
+        VLR_DEBUG_PRINTF("[VLR] setTextureFilterMode: invalid mode %u (0=Nearest, 1=Linear)\n", filterMode);
         return false;
     }
     m_textures[textureIndex].filterMode = static_cast<shared::TextureFilterMode>(filterMode);
@@ -1912,11 +1924,11 @@ bool Context::setTextureFilterMode(uint32_t textureIndex, uint32_t filterMode) {
 
 bool Context::setTextureWrapMode(uint32_t textureIndex, uint32_t wrapU, uint32_t wrapV) {
     if (textureIndex >= m_textures.size()) {
-        printf("[VLR] setTextureWrapMode: invalid index %u\n", textureIndex);
+        VLR_DEBUG_PRINTF("[VLR] setTextureWrapMode: invalid index %u\n", textureIndex);
         return false;
     }
     if (wrapU > 1 || wrapV > 1) {
-        printf("[VLR] setTextureWrapMode: invalid wrap mode (0=Repeat, 1=Clamp)\n");
+        VLR_DEBUG_PRINTF("[VLR] setTextureWrapMode: invalid wrap mode (0=Repeat, 1=Clamp)\n");
         return false;
     }
     m_textures[textureIndex].wrapU = static_cast<shared::TextureWrapMode>(wrapU);
@@ -1956,7 +1968,7 @@ const shared::Texture2DDescriptor* Context::getTextureDescriptorBuffer() const {
 
 
 // ============================================================================
-// 统计方法
+// ????
 // ============================================================================
 
 const shared::WavefrontPerformanceStats& Context::getPerformanceStats() const {
@@ -1969,7 +1981,7 @@ void Context::resetPerformanceStats() {
 
 
 // ============================================================================
-// 缓冲区管理
+// ??????
 // ============================================================================
 
 void Context::resizeOutputBuffer(uint32_t width, uint32_t height) {
@@ -1986,13 +1998,13 @@ void* Context::getAccumBufferDevicePointer() const {
 
 
 // ============================================================================
-// 错误检查
+// ?????
 // ============================================================================
 
 void Context::checkOptixError(OptixResult result, const char* call, const char* file, int line) {
     if (result != OPTIX_SUCCESS) {
         char msg[1024];
-        snprintf(msg, sizeof(msg), "OptiX Error at %s:%d\n  %s\n  Error: %s (%d)",
+        sprintf(msg, "OptiX Error at %s:%d\n  %s\n  Error: %s (%d)",
                  file, line, call, optixGetErrorName(result), result);
         throw std::runtime_error(msg);
     }
@@ -2001,14 +2013,14 @@ void Context::checkOptixError(OptixResult result, const char* call, const char* 
 void Context::checkCudaError(cudaError_t error, const char* call, const char* file, int line) {
     if (error != cudaSuccess) {
         char msg[1024];
-        snprintf(msg, sizeof(msg), "CUDA Error at %s:%d\n  %s\n  Error: %s (%d)",
+        sprintf(msg, "CUDA Error at %s:%d\n  %s\n  Error: %s (%d)",
                  file, line, call, cudaGetErrorString(error), error);
         throw std::runtime_error(msg);
     }
 }
 
 // ============================================================================
-// 降噪器配置
+// ??????
 // ============================================================================
 
 void Context::setDenoiserConfig(const DenoiserConfig& config) {
@@ -2020,7 +2032,7 @@ const DenoiserConfig& Context::getDenoiserConfig() const {
 }
 
 // ============================================================================
-// 调试模式与探针像素
+// ??????????
 // ============================================================================
 
 void Context::setDebugMode(VLRDebugMode mode) {

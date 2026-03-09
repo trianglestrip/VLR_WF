@@ -3,15 +3,15 @@
 //
 // 实现 Wavefront 路径压缩的三种方式：
 // 1. 简单版本：队列交换（与 Context 中实现一致）
-// 2. CUB Stream Compaction：使用 DeviceSelect::Flagged 筛选活跃路径
-// 3. 按材质排序（可选）：使用 DeviceRadixSort::SortKeys 减少分支发散
+// 2. CUB Stream Compaction：使�?DeviceSelect::Flagged 筛选活跃路�?
+// 3. 按材质排序（可选）：使�?DeviceRadixSort::SortKeys 减少分支发散
 //
 // 参考：
 // - CUB 文档：https://nvlabs.github.io/cub/
 // - docs/wavefront_design.md - Compact 设计
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
+// 作者：VLR 开发团�?
+// 创建日期�?026-03-07
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
@@ -37,7 +37,7 @@ namespace shared {
 // ============================================================================
 
 /// 同步队列计数器：将下一队列计数复制到当前活跃，并重置下一队列
-/// counters[0] = 当前活跃路径数, counters[1] = 下一轮路径数
+/// counters[0] = 当前活跃路径�? counters[1] = 下一轮路径数
 /// 交换后：counters[0] <- counters[1], counters[1] <- 0
 __global__ void compactSyncCountersKernel(uint32_t* counters) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
@@ -48,7 +48,7 @@ __global__ void compactSyncCountersKernel(uint32_t* counters) {
 
 
 // ============================================================================
-// compactPathsSimple - 简单队列交换
+// compactPathsSimple - 简单队列交�?
 // ============================================================================
 
 void compactPathsSimple(
@@ -69,11 +69,11 @@ void compactPathsSimple(
 
 
 // ============================================================================
-// CUB Stream Compaction 辅助：填充活跃标志
+// CUB Stream Compaction 辅助：填充活跃标�?
 // ============================================================================
 
-/// 为每条路径填充 isActive 标志，供 DeviceSelect::Flagged 使用
-/// pathStateBuffer 需为 WavefrontPathState* 类型
+/// 为每条路径填�?isActive 标志，供 DeviceSelect::Flagged 使用
+/// pathStateBuffer 需�?WavefrontPathState* 类型
 __global__ void fillActiveFlagsKernel(
     const uint32_t* __restrict__ pathIndices,
     const WavefrontPathState* __restrict__ pathStates,
@@ -117,7 +117,7 @@ cudaError_t compactPathsCUB(
         nullptr,
         cubTempBytes,
         d_pathIndicesIn,
-        static_cast<const uint8_t*>(nullptr),  // 仅用于查询大小
+        static_cast<const uint8_t*>(nullptr),  // 仅用于查询大�?
         d_pathIndicesOut,
         d_numSelectedOut,
         numPathsIn,
@@ -126,7 +126,7 @@ cudaError_t compactPathsCUB(
     if (err != cudaSuccess)
         return err;
 
-    // 总临时存储 = CUB 工作空间（对齐到16字节） + flags 缓冲区
+    // 总临时存�?= CUB 工作空间（对齐到16字节�?+ flags 缓冲�?
     size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
     const size_t totalTempBytes = alignedCubTempBytes + flagsBytes;
     tempStorageBytes = totalTempBytes;
@@ -138,7 +138,7 @@ cudaError_t compactPathsCUB(
     if (tempStorageBytes < totalTempBytes)
         return cudaErrorInvalidValue;
 
-    // 2. 分区：d_cubTemp 供 CUB 使用，d_flags 在末尾（对齐后）
+    // 2. 分区：d_cubTemp �?CUB 使用，d_flags 在末尾（对齐后）
     void* d_cubTemp = d_tempStorage;
     uint8_t* d_flags = static_cast<uint8_t*>(d_tempStorage) + alignedCubTempBytes;
 
@@ -155,7 +155,7 @@ cudaError_t compactPathsCUB(
     if (err != cudaSuccess)
         return err;
 
-    // 4. 调用 CUB DeviceSelect::Flagged 进行流压缩
+    // 4. 调用 CUB DeviceSelect::Flagged 进行流压�?
     err = cub::DeviceSelect::Flagged(
         d_cubTemp,
         cubTempBytes,
@@ -171,16 +171,16 @@ cudaError_t compactPathsCUB(
 
 
 // ============================================================================
-// 按材质排序辅助：提取材质类别作为排序键
+// 按材质排序辅助：提取材质类别作为排序�?
 // ============================================================================
 
-/// 从路径状态中提取材质类别，作为 RadixSort 的键
+/// 从路径状态中提取材质类别，作�?RadixSort 的键
 __global__ void fillMaterialKeysKernel(
     const uint32_t* __restrict__ pathIndices,
     const WavefrontPathState* __restrict__ pathStates,
     uint32_t* __restrict__ keys,
     uint32_t numPaths,
-    uint32_t maxPathIndex)  // 添加最大索引参数用于边界检查
+    uint32_t maxPathIndex)  // 添加最大索引参数用于边界检�?
 {
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numPaths)
@@ -190,7 +190,7 @@ __global__ void fillMaterialKeysKernel(
     
     // 边界检查（虽然通常不需要，但为了安全）
     if (pathIndex >= maxPathIndex) {
-        keys[idx] = 0xFF;  // 无效路径使用最大值
+        keys[idx] = 0xFF;  // 无效路径使用最大�?
         return;
     }
     
@@ -199,7 +199,7 @@ __global__ void fillMaterialKeysKernel(
 
 
 // ============================================================================
-// sortPathsByMaterial - 按材质类别排序
+// sortPathsByMaterial - 按材质类别排�?
 // ============================================================================
 
 cudaError_t sortPathsByMaterial(
@@ -234,13 +234,13 @@ cudaError_t sortPathsByMaterial(
         static_cast<const uint32_t*>(nullptr),
         static_cast<uint32_t*>(nullptr),
         numPaths,
-        0, 8,  // 仅排序 materialCategory 的低 8 位（0~255 足够）
+        0, 8,  // 仅排�?materialCategory 的低 8 位（0~255 足够�?
         stream);
 
     if (err != cudaSuccess)
         return err;
 
-    // 总临时存储 = CUB 工作空间（对齐到16字节） + 键缓冲区
+    // 总临时存�?= CUB 工作空间（对齐到16字节�?+ 键缓冲区
     size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
     const size_t totalTempBytes = alignedCubTempBytes + keysBytes;
     tempStorageBytes = totalTempBytes;
@@ -251,11 +251,11 @@ cudaError_t sortPathsByMaterial(
     if (tempStorageBytes < totalTempBytes)
         return cudaErrorInvalidValue;
 
-    // 2. 分区：d_cubTemp 供 CUB 使用，d_keys 在末尾（使用已对齐的偏移）
+    // 2. 分区：d_cubTemp �?CUB 使用，d_keys 在末尾（使用已对齐的偏移�?
     void* d_cubTemp = d_tempStorage;
     uint32_t* d_keys = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(d_tempStorage) + alignedCubTempBytes);
 
-    // 3. Kernel 提取材质类别键
+    // 3. Kernel 提取材质类别�?
     constexpr uint32_t blockSize = 256;
     uint32_t numBlocks = (numPaths + blockSize - 1) / blockSize;
     
@@ -270,7 +270,7 @@ cudaError_t sortPathsByMaterial(
     if (err != cudaSuccess)
         return err;
 
-    // 4. 调用 CUB DeviceRadixSort::SortPairs 按材质类别排序
+    // 4. 调用 CUB DeviceRadixSort::SortPairs 按材质类别排�?
     // 键：materialCategory，值：pathIndex
     err = cub::DeviceRadixSort::SortPairs(
         d_cubTemp,
@@ -281,7 +281,7 @@ cudaError_t sortPathsByMaterial(
         d_pathIndicesOut,
         numPaths,
         0,
-        8,  // 排序低 8 位（与查询时一致）
+        8,  // 排序�?8 位（与查询时一致）
         stream);
 
     return err;
@@ -290,7 +290,7 @@ cudaError_t sortPathsByMaterial(
 
 // ============================================================================
 // 临时存储大小查询
-// 注意：这些函数需要从主机代码调用，确保正确导出
+// 注意：这些函数需要从主机代码调用，确保正确导�?
 // ============================================================================
 
 __host__ size_t compactPathsCUBTempStorageBytes(uint32_t numPaths) {
@@ -307,7 +307,7 @@ __host__ size_t compactPathsCUBTempStorageBytes(uint32_t numPaths) {
         numPaths,
         0);
 
-    // 对齐到 16 字节边界
+    // 对齐�?16 字节边界
     size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
     return alignedCubTempBytes + flagsBytes;
 }
@@ -327,10 +327,10 @@ __host__ size_t sortPathsByMaterialTempStorageBytes(uint32_t numPaths) {
         static_cast<uint32_t*>(nullptr),
         numPaths,
         0,
-        8,  // 排序低 8 位（与实际调用一致）
+        8,  // 排序�?8 位（与实际调用一致）
         0);
 
-    // 对齐到 16 字节边界
+    // 对齐�?16 字节边界
     size_t alignedCubTempBytes = (cubTempBytes + 15) & ~15;
     return alignedCubTempBytes + numPaths * sizeof(uint32_t);
 }

@@ -391,12 +391,22 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetReflectionParamsAniso(
 CUDA_DEVICE_FUNCTION CUDA_INLINE void getMicrofacetScatteringParams(
     const SurfaceMaterialDescriptor& matDesc,
     float* ior,
-    float* roughness) {
+    float* roughness,
+    SampledSpectrum* coeff = nullptr) {
     const float* d = getMaterialDataAsFloats(matDesc);
     *ior = d[MaterialDataLayout::IOR];
     *ior = (*ior < 1.0f) ? 1.0f : *ior;
     *roughness = d[MaterialDataLayout::Roughness];
     *roughness = (*roughness < 0.001f) ? 0.001f : *roughness;
+    // 读取透射系数
+    if (coeff) {
+        float r = d[MaterialDataLayout::AlbedoR];
+        float g = d[MaterialDataLayout::AlbedoG];
+        float b = d[MaterialDataLayout::AlbedoB];
+        coeff->values[0] = r;
+        coeff->values[1] = g;
+        coeff->values[2] = b;
+    }
 }
 
 /// 从材质描述符获取透射材质参数（IOR + 色散）

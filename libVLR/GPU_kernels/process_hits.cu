@@ -1,15 +1,24 @@
 // ============================================================================
 // VLR Wavefront - ProcessHits Kernel
 //
-// 本文件实现 Wavefront 路径追踪的命中处理内核。
-// 功能：表面点计算、BSDF/EDF 评估、隐式光源采样、路径终止、材质分类、Denoiser 辅助缓冲区。
+// ??????Wavefront ?????????????
+// ?????????BSDF/EDF ????????????????????Denoiser ???????
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
-// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
+// ???VLR ?????
+// ??????026-03-07
+// ???CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#define VLR_DEBUG_PROCESS_HITS 1
+#define VLR_DEBUG_PROCESS_HITS 0
+
+// ??????
+// #define VLR_ENABLE_GPU_DEBUG 1
+
+#ifdef VLR_ENABLE_GPU_DEBUG
+    #define VLR_DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#else
+    #define VLR_DEBUG_PRINTF(...) ((void)0)
+#endif
 
 #include "../shared/path_types.h"
 #include "../shared/geometry_common.h"
@@ -29,29 +38,29 @@ namespace {
 using namespace vlr;
 using namespace vlr::shared;
 
-/// 计算隐式光源采样的 MIS 权重
-/// 当路径通过 BSDF 采样到达发光表面时，与显式光源采样做平衡启发式 MIS
+/// ??????????MIS ??
+/// ????? BSDF ????????????????????????MIS
 CUDA_DEVICE_FUNCTION CUDA_INLINE float computeImplicitLightMISWeight(
     const WavefrontPathState& pathState,
     float hypAreaPDF,
     float cosOutLocal) {
 
-    // 若前一跳为 delta（镜面），显式光源采样不可能产生该路径，MIS = 1
+    // ????? delta????????????????????MIS = 1
     if (pathState.prevSampledType.isDelta())
         return 1.0f;
 
-    // 第一跳（直接相机）时无需 MIS
+    // ???????????? MIS
     if (pathState.pathLength <= 1)
         return 1.0f;
 
     // Power Heuristic: w_bsdf = pdf_bsdf^2 / (pdf_bsdf^2 + pdf_light^2)
-    // 此处为隐式命中：我们通过 BSDF 到达，故使用 prevDirPDF 作为 pdf_bsdf
-    // pdf_light 需要光源选择的概率，简化实现中若无法获取则用 1
+    // ???????????? BSDF ?????? prevDirPDF ?? pdf_bsdf
+    // pdf_light ???????????????????????1
     float pdfBSDF = pathState.prevDirPDF;
     if (pdfBSDF <= 0.0f) return 1.0f;
 
-    // 简化的光源 PDF：假设均匀选择，使用面积 PDF 近似
-    // 完整实现需从 lightInstDist 获取 instProb 和 geomInstProb
+    // ????? PDF?????????????PDF ??
+    // ???????lightInstDist ?? instProb ??geomInstProb
     float cosTerm = std::abs(cosOutLocal);
     if (cosTerm < 1e-6f) return 1.0f;
     float pdfLight = hypAreaPDF / cosTerm;
@@ -61,8 +70,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeImplicitLightMISWeight(
 }
 
 
-/// 处理环境光命中（光线击中无穷远或 Miss）
-/// 评估环境贴图并累积贡献
+/// ???????????????? Miss??
+/// ????????????
 CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     WavefrontPathState& pathState,
     const WavefrontHitInfo& hitInfo,
@@ -81,7 +90,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     if (geomInst.importance <= 0.0f)
         return;
 
-    // 构造无穷远表面点（方向即击中点）
+    // ?????????????????
     SurfacePoint surfPt;
     surfPt.position = Point3D(pathState.direction.x, pathState.direction.y, pathState.direction.z);
     surfPt.atInfinity = true;
@@ -101,14 +110,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     phi = phi - std::floor(phi / VLR_M_2PI) * VLR_M_2PI;
     surfPt.texCoord = TexCoord2D(phi / VLR_M_2PI, theta / VLR_M_PI);
 
-    // 评估环境光 EDF
+    // ??????EDF
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
     SampledSpectrum spEmittance = evaluateEmittance(matDesc);
 
     if (!spEmittance.hasNonZero())
         return;
 
-    // 出射方向：从环境球面朝向相机（与入射光线相反）
+    // ????????????????????????
     Vector3D dirOutLocal = surfPt.shadingFrame.toLocal(Vector3D(-pathState.direction.x, -pathState.direction.y, -pathState.direction.z));
     EDFContext edfCtx(matDesc, surfPt, pathState.wls);
     EDFEvaluateResult edfResult = evaluateEDF(edfCtx, dirOutLocal);
@@ -118,14 +127,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
 
     SampledSpectrum Le = edfResult.Le;
 
-    // MIS 权重：BSDF 采样 vs 环境光重要性采样
+    // MIS ???BSDF ?? vs ?????????
     float MISWeight = 1.0f;
     if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
         float bsdfPDF = pathState.prevDirPDF;
         float cosOutSafe = (std::abs(dirOutLocal.z) > 1e-6f) ? std::abs(dirOutLocal.z) : 1e-6f;
         float lightPDF;
         if (wlp.envImportanceMap.isValid()) {
-            // 使用未旋转的纹理坐标（importance map 基于原始贴图）
+            // ???????????importance map ????????
             float u = phiOrig / VLR_M_2PI;
             float v = theta / VLR_M_PI;
             lightPDF = wlp.envImportanceMap.evaluatePDF(u, v) / cosOutSafe;
@@ -146,7 +155,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     else {
         unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
         if (idx < 5) {
-            printf("[NaN] process_hits(env): px=(%u,%u) pathLen=%u envContrib=(%.4f,%.4f,%.4f) op=throughput*Le*MIS\n",
+            VLR_DEBUG_PRINTF("[NaN] process_hits(env): px=(%u,%u) pathLen=%u envContrib=(%.4f,%.4f,%.4f) op=throughput*Le*MIS\n",
                    pathState.pixelX, pathState.pixelY, pathState.pathLength,
                    envContrib.values[0], envContrib.values[1], envContrib.values[2]);
         }
@@ -155,8 +164,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
 }
 
 
-/// 处理发光表面命中（隐式光源采样）
-/// 当光线直接击中区域光表面时累积贡献
+/// ????????????????
+/// ??????????????????
 CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     WavefrontPathState& pathState,
     const SurfacePoint& surfPt,
@@ -166,7 +175,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
 
 #ifdef VLR_DEBUG_PROCESS_HITS
     if (pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 0) {
-        printf("[GPU ProcessEmissive ENTRY] px=(256,256): geomInstIndex=%u, materialIndex=%u\n",
+        VLR_DEBUG_PRINTF("[GPU ProcessEmissive ENTRY] px=(256,256): geomInstIndex=%u, materialIndex=%u\n",
             geomInst.instIndex, geomInst.materialIndex);
     }
 #endif
@@ -175,7 +184,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
 
 #ifdef VLR_DEBUG_PROCESS_HITS
     if (pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 0) {
-        printf("[GPU ProcessEmissive] px=(256,256): materialIndex=%u, hasEmission=%d\n",
+        VLR_DEBUG_PRINTF("[GPU ProcessEmissive] px=(256,256): materialIndex=%u, hasEmission=%d\n",
             geomInst.materialIndex, materialHasEmission(matDesc) ? 1 : 0);
     }
 #endif
@@ -201,7 +210,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     
 #ifdef VLR_DEBUG_PROCESS_HITS
     if (pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 0) {
-        printf("[GPU ProcessEmissive] px=(256,256): Le=(%.3f,%.3f,%.3f,%.3f), throughput=(%.3f,%.3f,%.3f,%.3f), MIS=%.3f, contrib=(%.3f,%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("[GPU ProcessEmissive] px=(256,256): Le=(%.3f,%.3f,%.3f,%.3f), throughput=(%.3f,%.3f,%.3f,%.3f), MIS=%.3f, contrib=(%.3f,%.3f,%.3f,%.3f)\n",
             Le.values[0], Le.values[1], Le.values[2], Le.values[3],
             pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2], pathState.throughput.values[3],
             MISWeight,
@@ -215,7 +224,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     else {
         unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
         if (idx < 5) {
-            printf("[NaN] process_hits(emissive): px=(%u,%u) pathLen=%u emissiveContrib=(%.4f,%.4f,%.4f) op=throughput*Le*MIS\n",
+            VLR_DEBUG_PRINTF("[NaN] process_hits(emissive): px=(%u,%u) pathLen=%u emissiveContrib=(%.4f,%.4f,%.4f) op=throughput*Le*MIS\n",
                    pathState.pixelX, pathState.pixelY, pathState.pathLength,
                    emissiveContrib.values[0], emissiveContrib.values[1], emissiveContrib.values[2]);
         }
@@ -240,7 +249,7 @@ extern "C" __global__ void processHits(
 #ifdef __CUDACC__
     WavefrontLaunchParameters& wlp = *params;
 
-    // 工作索引：每个线程处理一条活跃路径
+    // ??????????????????
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t activeCount = wlp.activePathQueue.size();
 
@@ -253,7 +262,7 @@ extern "C" __global__ void processHits(
 
 #ifdef VLR_DEBUG_PROCESS_HITS
     if (pathIndex == 0) {
-        printf("[GPU ProcessHits] pathIndex=0: isActive=%d, hasHit=%d, hitInfinity=%d, geomInstIndex=%u\n",
+        VLR_DEBUG_PRINTF("[GPU ProcessHits] pathIndex=0: isActive=%d, hasHit=%d, hitInfinity=%d, geomInstIndex=%u\n",
             pathState.isActive() ? 1 : 0, hitInfo.hasHit() ? 1 : 0, hitInfo.hitInfinity() ? 1 : 0, hitInfo.geomInstIndex);
     }
 #endif
@@ -261,14 +270,14 @@ extern "C" __global__ void processHits(
     if (!pathState.isActive())
         return;
 
-    // 无有效命中时跳过（不应发生，因 TraceRays 只为活跃路径发射）
+    // ????????????????TraceRays ??????????
     if (!hitInfo.hasHit()) {
         pathState.setTerminated();
         return;
     }
 
     // ========================================================================
-    // 1. 环境光命中：光线击中无穷远 / Miss
+    // 1. ??????????????/ Miss
     // ========================================================================
     if (hitInfo.hitInfinity()) {
         processEnvironmentHit(pathState, hitInfo, wlp);
@@ -277,7 +286,7 @@ extern "C" __global__ void processHits(
     }
 
     // ========================================================================
-    // 2. 表面点计算（decodeHitPoint + computeSurfacePoint）
+    // 2. ??????decodeHitPoint + computeSurfacePoint??
     // ========================================================================
     SurfacePoint surfPt;
     float hypAreaPDF = 1.0f;
@@ -297,7 +306,7 @@ extern "C" __global__ void processHits(
 
         computeSurfacePointBasic(input, ctx, &surfPt, &hypAreaPDF);
 
-        // Faceforward：确保法线朝向入射光线，使 NEE/BSDF 在正确半球内
+        // Faceforward??????????????NEE/BSDF ??????
         {
             Vector3D rayDir = pathState.direction;
             if (dot(surfPt.geometricNormal, rayDir) > 0.0f) {
@@ -306,7 +315,7 @@ extern "C" __global__ void processHits(
             }
         }
 
-        // 应用法线贴图（若有纹理和材质绑定，支持纹理坐标变换与法线强度）
+        // ????????????????????????????????
         if (wlp.textureDescriptorBuffer != nullptr && wlp.materialNormalMapIndices != nullptr) {
             const uint32_t matIdxForNorm = wlp.geomInstBuffer[hitInfo.geomInstIndex].materialIndex;
             const uint32_t normalMapTexIdx = wlp.materialNormalMapIndices[matIdxForNorm];
@@ -325,7 +334,7 @@ extern "C" __global__ void processHits(
             }
         }
     } else {
-        // 无顶点数据时：使用简化几何信息
+        // ????????????????
         const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
 
         if (geomInst.geomType == GeometryType_TriangleMesh &&
@@ -334,8 +343,8 @@ extern "C" __global__ void processHits(
             const Triangle& tri = geomInst.asTriMesh.triangleBuffer[hitInfo.primIndex];
             hypAreaPDF = (tri.area > 0.0f) ? (1.0f / tri.area) : 1.0f;
 
-            // 无法插值顶点属性时，使用光线参数计算交点：origin + direction * t
-            // 与原始 VLR 的射线-三角形求交逻辑一致
+            // ?????????????????????origin + direction * t
+            // ????VLR ??????????????
             surfPt.position = Point3D(
                 pathState.origin.x + pathState.direction.x * hitInfo.t,
                 pathState.origin.y + pathState.direction.y * hitInfo.t,
@@ -346,7 +355,7 @@ extern "C" __global__ void processHits(
             surfPt.atInfinity = false;
         } else {
             hypAreaPDF = 1.0f;
-            // 非三角形网格：仍用光线参数计算交点
+            // ??????????????????
             surfPt.position = Point3D(
                 pathState.origin.x + pathState.direction.x * hitInfo.t,
                 pathState.origin.y + pathState.direction.y * hitInfo.t,
@@ -358,24 +367,24 @@ extern "C" __global__ void processHits(
         }
     }
 
-    // 存储表面点供后续 SampleLights 和 SampleBSDF 使用
+    // ???????? SampleLights ??SampleBSDF ??
     wlp.surfacePointBuffer[pathIndex] = surfPt;
 
     // ========================================================================
-    // 3. 获取材质并评估
+    // 3. ????????
     // ========================================================================
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
     const uint32_t matIdx = geomInst.materialIndex;
 
     // ========================================================================
-    // 3.1 纹理采样：BaseColor、Roughness、Metallic
+    // 3.1 ?????BaseColor?Roughness?Metallic
     // ========================================================================
     if (wlp.pathTexturedParamsBuffer != nullptr) {
         PathTexturedMaterialParams& tp = wlp.pathTexturedParamsBuffer[pathIndex];
         tp.flags = 0;
 
-        // 纹理坐标变换（使用材质级 scale/offset，若无则恒等变换）
+        // ???????????? scale/offset??????????
         float tu, tv;
         if (wlp.materialTextureParamsBuffer != nullptr) {
             const MaterialTextureParams& mtp = wlp.materialTextureParamsBuffer[matIdx];
@@ -387,7 +396,7 @@ extern "C" __global__ void processHits(
 
         const float* d = getMaterialDataAsFloats(matDesc);
 
-        // 采样 BaseColor 纹理
+        // ?? BaseColor ??
         if (wlp.textureDescriptorBuffer != nullptr && wlp.materialAlbedoTextureIndices != nullptr) {
             const uint32_t albedoTexIdx = wlp.materialAlbedoTextureIndices[matIdx];
             TextureSampler albedoSampler = getTextureSampler(
@@ -406,14 +415,14 @@ extern "C" __global__ void processHits(
             tp.baseColorB = d[MaterialDataLayout::AlbedoB];
         }
 
-        // 采样 Roughness 纹理
+        // ?? Roughness ??
         if (wlp.textureDescriptorBuffer != nullptr && wlp.materialRoughnessTextureIndices != nullptr) {
             const uint32_t roughTexIdx = wlp.materialRoughnessTextureIndices[matIdx];
             TextureSampler roughSampler = getTextureSampler(
                 wlp.textureDescriptorBuffer, roughTexIdx, TextureFilter_Linear);
             if (roughSampler.isValid()) {
                 TextureSampleRGBA sample = sampleTexture2D(roughSampler, tu, tv);
-                tp.roughness = sample.r;  // 粗糙度通常在 R 通道
+                tp.roughness = sample.r;  // ???????R ??
                 tp.flags |= PathTexturedFlags::HasRoughnessTex;
             }
         }
@@ -422,14 +431,14 @@ extern "C" __global__ void processHits(
         }
         tp.roughness = ::vlr::vlr_max(0.001f, tp.roughness);
 
-        // 采样 Metallic 纹理
+        // ?? Metallic ??
         if (wlp.textureDescriptorBuffer != nullptr && wlp.materialMetallicTextureIndices != nullptr) {
             const uint32_t metalTexIdx = wlp.materialMetallicTextureIndices[matIdx];
             TextureSampler metalSampler = getTextureSampler(
                 wlp.textureDescriptorBuffer, metalTexIdx, TextureFilter_Linear);
             if (metalSampler.isValid()) {
                 TextureSampleRGBA sample = sampleTexture2D(metalSampler, tu, tv);
-                tp.metallic = sample.r;  // 金属度通常在 R 通道
+                tp.metallic = sample.r;  // ???????R ??
                 tp.flags |= PathTexturedFlags::HasMetallicTex;
             }
         }
@@ -439,16 +448,16 @@ extern "C" __global__ void processHits(
         tp.metallic = ::vlr::vlr_max(0.0f, ::vlr::vlr_min(1.0f, tp.metallic));
     }
 
-    // BSDFContext 将在 SampleBSDF kernel 中从 surfacePointBuffer 重建
-    // 此处 surfacePointBuffer 已填充，SampleLights/SampleBSDF 可直接使用
+    // BSDFContext ?? SampleBSDF kernel ?? surfacePointBuffer ??
+    // ?? surfacePointBuffer ????SampleLights/SampleBSDF ??????
 
     // ========================================================================
-    // 4. EDF 评估与隐式光源采样（命中发光表面）
+    // 4. EDF ??????????????????
     // ========================================================================
     processEmissiveSurface(pathState, surfPt, geomInst, hypAreaPDF, wlp);
 
     // ========================================================================
-    // 5. 路径长度检查与终止
+    // 5. ?????????
     // ========================================================================
     pathState.pathLength++;
 
@@ -459,7 +468,7 @@ extern "C" __global__ void processHits(
     }
 
     // ========================================================================
-    // 6. 俄罗斯轮盘赌
+    // 6. ??????
     // ========================================================================
     if (pathState.pathLength >= WavefrontConfig::RRStartDepth) {
         float importance = pathState.throughput.importance(pathState.wls.selectedLambdaIndex());
@@ -481,24 +490,24 @@ extern "C" __global__ void processHits(
     }
 
     // ========================================================================
-    // 7. 材质分类（调用 classifyMaterial 等价逻辑）
+    // 7. ????????classifyMaterial ??????
     // ========================================================================
     MaterialCategory category = bsdfTypeToMaterialCategory(getBSDFType(matDesc));
     pathState.materialCategory = category;
 
-    // 若 render_common 的 classifyMaterial 可用（依赖 BSDF），可替换为：
+    // ??render_common ??classifyMaterial ??????BSDF????????
     // BSDF<TransportMode::Radiance> bsdf(&matDesc);
     // category = classifyMaterial(bsdf);
-    // 当前使用 material_types 的 bsdfTypeToMaterialCategory 保持兼容
+    // ???? material_types ??bsdfTypeToMaterialCategory ????
 
     // ========================================================================
-    // 8. Denoiser 辅助缓冲区更新
+    // 8. Denoiser ????????
     // ========================================================================
     uint32_t stride = (wlp.imageStrideInPixels > 0) ? wlp.imageStrideInPixels : wlp.imageSize.x;
     uint32_t pixelIdx = pathState.pixelY * stride + pathState.pixelX;
 
     if (wlp.accumAlbedoBuffer != nullptr) {
-        // 反照率：优先使用纹理化参数，否则从材质获取（用于 Denoiser）
+        // ???????????????????????? Denoiser??
         BSDFType type = getBSDFType(matDesc);
         if (type == BSDFType_LambertCheckerboard) {
             SampledSpectrum albedo;
@@ -521,7 +530,7 @@ extern "C" __global__ void processHits(
     }
 
     if (wlp.accumNormalBuffer != nullptr) {
-        // 法线：着色法线（世界空间）
+        // ??????????????
         wlp.accumNormalBuffer[pixelIdx].x = surfPt.shadingFrame.z.x;
         wlp.accumNormalBuffer[pixelIdx].y = surfPt.shadingFrame.z.y;
         wlp.accumNormalBuffer[pixelIdx].z = surfPt.shadingFrame.z.z;

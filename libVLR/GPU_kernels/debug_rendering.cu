@@ -1,12 +1,12 @@
 // ============================================================================
 // VLR Wavefront - Debug Rendering Kernel
 //
-// 本文件实现调试渲染模式的可视化内核。
-// 流程：generateRays → traceRays → processHits → renderDebugMode
-// 调试模式只需单次采样，不需要 BSDF 采样和多次反弹。
+// 本文件实现调试渲染模式的可视化内核�?
+// 流程：generateRays �?traceRays �?processHits �?renderDebugMode
+// 调试模式只需单次采样，不需�?BSDF 采样和多次反弹�?
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-08
+// 作者：VLR 开发团�?
+// 创建日期�?026-03-08
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
@@ -15,7 +15,7 @@
 #include "../include/vlr/basic_types.h"
 #include "kernel_launch.h"
 
-// 使用与 VLRDebugMode 枚举一致的数值，避免包含 public_types.h（防止 CUDA 编译重复定义）
+// 使用�?VLRDebugMode 枚举一致的数值，避免包含 public_types.h（防�?CUDA 编译重复定义�?
 namespace { namespace dbg {
     constexpr uint32_t BaseColor = 1, GeometricNormal = 2, ShadingNormal = 3, Depth = 4;
     constexpr uint32_t UV = 5, Tangent = 6, Bitangent = 7, Roughness = 8, Metallic = 9;
@@ -71,8 +71,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void visualizeDepth(
     *r = *g = *b = t;
 }
 
-/// Map ID to distinct color via hash (稳定且易区分的颜色映射)
-/// 使用 0.2-1.0 范围避免过暗，提高相邻 ID 的可区分度
+/// Map ID to distinct color via hash (稳定且易区分的颜色映�?
+/// 使用 0.2-1.0 范围避免过暗，提高相�?ID 的可区分�?
 CUDA_DEVICE_FUNCTION CUDA_INLINE void visualizeID(
     uint32_t id,
     float* r, float* g, float* b) {
@@ -89,8 +89,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void visualizeID(
 // ============================================================================
 // renderDebugMode Kernel
 // ============================================================================
-// 根据调试模式将表面信息可视化为 RGB，写入 accumBuffer。
-// 每个像素对应 pathIndex，使用 pathStateBuffer、hitInfoBuffer、surfacePointBuffer。
+// 根据调试模式将表面信息可视化�?RGB，写�?accumBuffer�?
+// 每个像素对应 pathIndex，使�?pathStateBuffer、hitInfoBuffer、surfacePointBuffer�?
 
 extern "C" __global__ void renderDebugMode(
     vlr::shared::WavefrontLaunchParameters* params)
@@ -211,11 +211,11 @@ extern "C" __global__ void renderDebugMode(
             break;
         case dbg::DirectLighting:
         case dbg::IndirectLighting:
-            // 需要完整 path tracing，暂输出灰色占位
+            // 需要完�?path tracing，暂输出灰色占位
             r = g = b = 0.5f;
             break;
         default:
-            r = 1.0f; g = 0.0f; b = 1.0f;  // 错误颜色：洋红
+            r = 1.0f; g = 0.0f; b = 1.0f;  // 错误颜色：洋�?
     }
 
     accum[pixelIdx].r = r;

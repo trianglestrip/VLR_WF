@@ -1,13 +1,13 @@
 // ============================================================================
 // VLR Wavefront - SampleBSDF Kernel
 //
-// 本文件实现 Wavefront 路径追踪的 BSDF 采样内核。
-// 功能：BSDF 采样、构造 BSDFQuery、处理色散材质、更新路径吞吐量、
-//       生成下一跳光线、更新 PathState、将路径加入下一轮队列。
+// ??????Wavefront ??????BSDF ??????
+// ???BSDF ??????BSDFQuery?????????????????
+//       ???????????PathState?????????????
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
-// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
+// ???VLR ?????
+// ??????026-03-07
+// ???CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
 #include "../shared/kernel_common.h"
@@ -18,6 +18,10 @@
 #include "../shared/material_types.h"
 #include "../shared/texture_types.h"
 #include "../shared/performance_config.h"
+
+// ? constexpr ?????????????
+// ????????,??WavefrontLaunchParameters???????
+#define VLR_USE_MATERIAL_CACHE 0
 #include "../include/vlr/basic_types.h"
 #include "warp_utils.cuh"
 #include "shared_memory_cache.cuh"
@@ -35,9 +39,9 @@ using namespace vlr::shared;
 // ============================================================================
 // SampleBSDF Kernel
 // ============================================================================
-// 对活跃队列中的每条路径执行 BSDF 采样，生成下一跳方向，
-// 更新路径吞吐量，并将路径加入下一轮活跃队列。
-// 调用顺序：ProcessHits -> SampleLights -> SampleBSDF
+// ??????????????BSDF ???????????
+// ???????????????????????
+// ?????ProcessHits -> SampleLights -> SampleBSDF
 
 extern "C" __global__ void sampleBSDF(
     vlr::shared::WavefrontLaunchParameters* params) {
@@ -46,38 +50,37 @@ extern "C" __global__ void sampleBSDF(
 
 #ifdef __CUDACC__
 
-#if PerformanceConfig::UseMaterialCache
+#if VLR_USE_MATERIAL_CACHE
     __shared__ MaterialCache<PerformanceConfig::MaterialCacheSize> materialCache;
     if (threadIdx.x == 0) {
-        uint32_t numMaterials = wlp.numMaterials;
-        if (numMaterials > PerformanceConfig::MaterialCacheSize)
-            numMaterials = PerformanceConfig::MaterialCacheSize;
-        for (uint32_t i = 0; i < numMaterials; ++i) {
+        // ??:?????N???
+        uint32_t numToCache = PerformanceConfig::MaterialCacheSize;
+        for (uint32_t i = 0; i < numToCache; ++i) {
             materialCache.materials[i] = wlp.materialDescriptorBuffer[i];
         }
-        materialCache.numMaterials = numMaterials;
+        materialCache.numMaterials = numToCache;
     }
     __syncthreads();
 #endif
 
-    // 工作索引：每个线程处理一条活跃路径
+    // ??????????????????
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
     if (workIndex >= wlp.activePathQueue.size())
         return;
 
     uint32_t pathIndex = wlp.activePathQueue.pathIndices[workIndex];
     
-    // 优化：使用 __restrict__ 提示编译器优化内存访问
+    // ??????__restrict__ ????????????
     WavefrontPathState* __restrict__ pathStatePtr = &wlp.pathStateBuffer[pathIndex];
     WavefrontPathState& pathState = *pathStatePtr;
 
-    // 优化：warp-level 早期退出
-    // 如果整个 warp 都不活跃，直接返回
+    // ???warp-level ?????
+    // ???? warp ??????????
     bool isActive = pathState.isActive();
     if (warpAllInactive(isActive))
         return;
     
-    // 跳过非活跃路径
+    // ????????
     if (!isActive)
         return;
 
@@ -90,11 +93,11 @@ extern "C" __global__ void sampleBSDF(
     const SurfacePoint& surfPt = *surfPtPtr;
 
     // ========================================================================
-    // 1. 获取材质和 BSDF 上下文
+    // 1. ??????BSDF ????
     // ========================================================================
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
 
-#if PerformanceConfig::UseMaterialCache
+#if VLR_USE_MATERIAL_CACHE
     const SurfaceMaterialDescriptor& matDesc = *materialCache.get(
         geomInst.materialIndex, wlp.materialDescriptorBuffer);
 #else
@@ -105,35 +108,35 @@ extern "C" __global__ void sampleBSDF(
     if (pathIndex < 10) {
         BSDFType bsdfType = getBSDFType(matDesc);
         const float* dataAsFloat = getMaterialDataAsFloats(matDesc);
-        printf("[GPU SampleBSDF] pathIndex=%u, geomInstIndex=%u, materialIndex=%u\n",
+        VLR_DEBUG_PRINTF("[GPU SampleBSDF] pathIndex=%u, geomInstIndex=%u, materialIndex=%u\n",
             pathIndex, hitInfo.geomInstIndex, geomInst.materialIndex);
-        printf("  bsdfProcedureSetIndex=%u, getBSDFType()=%u\n",
+        VLR_DEBUG_PRINTF("  bsdfProcedureSetIndex=%u, getBSDFType()=%u\n",
             matDesc.bsdfProcedureSetIndex, (uint32_t)bsdfType);
-        printf("  Albedo: (%.3f, %.3f, %.3f)\n",
+        VLR_DEBUG_PRINTF("  Albedo: (%.3f, %.3f, %.3f)\n",
             dataAsFloat[MaterialDataLayout::AlbedoR],
             dataAsFloat[MaterialDataLayout::AlbedoG],
             dataAsFloat[MaterialDataLayout::AlbedoB]);
-        printf("  Roughness: %.3f, IOR: %.3f\n",
+        VLR_DEBUG_PRINTF("  Roughness: %.3f, IOR: %.3f\n",
             dataAsFloat[MaterialDataLayout::Roughness],
             dataAsFloat[MaterialDataLayout::IOR]);
-        printf("  Eta: (%.3f, %.3f, %.3f)\n",
+        VLR_DEBUG_PRINTF("  Eta: (%.3f, %.3f, %.3f)\n",
             dataAsFloat[MaterialDataLayout::EtaR],
             dataAsFloat[MaterialDataLayout::EtaG],
             dataAsFloat[MaterialDataLayout::EtaB]);
-        printf("  Kappa: (%.3f, %.3f, %.3f)\n",
+        VLR_DEBUG_PRINTF("  Kappa: (%.3f, %.3f, %.3f)\n",
             dataAsFloat[MaterialDataLayout::KappaR],
             dataAsFloat[MaterialDataLayout::KappaG],
             dataAsFloat[MaterialDataLayout::KappaB]);
     }
 #endif
 
-    // 构造 BSDF 采样所需参数：入射方向（局部）、几何法线
-    // 入射方向 = 光线到达表面的方向 = -pathState.direction
+    // ???BSDF ?????????????????????
+    // ???? = ??????????= -pathState.direction
     Vector3D dirInLocal = surfPt.shadingFrame.toLocal(
         Vector3D(-pathState.direction.x, -pathState.direction.y, -pathState.direction.z));
     Normal3D geomNormalLocal = surfPt.shadingFrame.toLocal(surfPt.geometricNormal);
 
-    // 纹理化材质参数：ProcessHits 已采样并写入 pathTexturedParamsBuffer
+    // ????????ProcessHits ?????? pathTexturedParamsBuffer
     const PathTexturedMaterialParams* texturedParams = nullptr;
     if (wlp.pathTexturedParamsBuffer != nullptr && pathIndex < wlp.maxNumPaths) {
         texturedParams = &wlp.pathTexturedParamsBuffer[pathIndex];
@@ -143,9 +146,9 @@ extern "C" __global__ void sampleBSDF(
     bsdfCtx.geomNormalLocal = geomNormalLocal;
 
     // ========================================================================
-    // 2. BSDF 采样（使用 sampleBSDFWithU2，部分 BSDF 需三随机数）
+    // 2. BSDF ??????sampleBSDFWithU2????BSDF ???????
     // ========================================================================
-    // 优化：预生成随机数，减少 RNG 调用开销
+    // ???????????? RNG ????
     float u0 = pathState.rng.getFloat0cTo1o();
     float u1 = pathState.rng.getFloat0cTo1o();
     float u2 = pathState.rng.getFloat0cTo1o();
@@ -165,9 +168,9 @@ extern "C" __global__ void sampleBSDF(
     }
 #endif
 
-    // 与原始 VLR path_tracing.cu:243 完全一致：
+    // ????VLR path_tracing.cu:243 ?????
     // if (fs == SampledSpectrum::Zero() || fsResult.dirPDF == 0.0f) return;
-    // 仅检查 dirPDF == 0.0f，不使用 1e-10 等过严阈值，否则会错误终止有效路径
+    // ????dirPDF == 0.0f???? 1e-10 ??????????????????
 #ifdef __CUDACC__
     bool pdfInvalid = (result.pdf <= 0.0f || __isnanf(result.pdf) || __isinf(result.pdf));
 #else
@@ -178,17 +181,17 @@ extern "C" __global__ void sampleBSDF(
         return;
     }
 
-    // BSDF 值必须有限，避免 NaN/Inf 污染 throughput（原始 VLR 无此检查，作为额外防护）
+    // BSDF ???????? NaN/Inf ?? throughput????VLR ?????????????
     if (!result.f.allFinite()) {
         pathState.setTerminated();
         return;
     }
 
     // ========================================================================
-    // 3. 处理色散材质（仅当 dispersionStrength > 0 时）
+    // 3. ??????????dispersionStrength > 0 ??
     // ========================================================================
-    // 与 libWR 对比：libWR 无光谱色散，玻璃使用 RGB 直接计算。
-    // isDispersiveBSDFType 内部已检查 dispersionStrength，仅实际启用色散时返回 true。
+    // ??libWR ???libWR ?????????? RGB ??????
+    // isDispersiveBSDFType ??????dispersionStrength????????????true??
     bool isDispersive = isDispersiveBSDFType(result.sampledBSDFType, matDesc);
     
     if (isDispersive && !pathState.singleWlSelected()) {
@@ -197,17 +200,17 @@ extern "C" __global__ void sampleBSDF(
     }
 
     // ========================================================================
-    // 4. 更新路径吞吐量：throughput *= fs * |cos| / pdf
+    // 4. ????????throughput *= fs * |cos| / pdf
     // ========================================================================
-    // 与原始 VLR path_tracing.cu 完全一致：alpha *= fs * (|cosFactor| / dirPDF)
-    // 注意：禁止对 pdf 做 clamp，否则小 pdf 时 throughput 会爆炸产生洋红色
+    // ????VLR path_tracing.cu ?????alpha *= fs * (|cosFactor| / dirPDF)
+    // ?????? pdf ??clamp???? pdf ??throughput ????????
     float cosFactor = dot(result.dirLocal, geomNormalLocal);
     float cosAbs = std::abs(cosFactor);
 
     pathState.throughput *= result.f * (cosAbs / result.pdf);
 
-    // 与 libWR 一致：SpecularTransmission 折射时应用 adjoint BSDF 校正
-    // （Veach 5.3：当 shading normal != geometric normal 时，cosGeometric/cosShading）
+    // ??libWR ???SpecularTransmission ??????adjoint BSDF ??
+    // ?Veach 5.3?? shading normal != geometric normal ??cosGeometric/cosShading??
     if (result.sampledBSDFType == BSDFType_SpecularTransmission) {
         float cosShading = std::abs(result.dirLocal.z);  // shading normal = (0,0,1) in local frame
         float cosGeometric = std::abs(dot(result.dirLocal, geomNormalLocal));
@@ -218,16 +221,16 @@ extern "C" __global__ void sampleBSDF(
     }
 
 #ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
-    // 调试：在指定像素处打印 SpecularTransmission 关键值（cmake -DVLR_DEBUG_SPECULAR_TRANSMISSION=ON）
+    // ????????????SpecularTransmission ????cmake -DVLR_DEBUG_SPECULAR_TRANSMISSION=ON??
     if (getBSDFType(matDesc) == BSDFType_SpecularTransmission &&
         pathState.pixelX == 256 && pathState.pixelY == 256 && pathState.pathLength == 1) {
-        printf("[SpecTrans] px=(256,256) len=1 pdf=%.6f f=(%.4f,%.4f,%.4f) cosAbs=%.4f throughput=(%.4f,%.4f,%.4f)\n",
+        VLR_DEBUG_PRINTF("[SpecTrans] px=(256,256) len=1 pdf=%.6f f=(%.4f,%.4f,%.4f) cosAbs=%.4f throughput=(%.4f,%.4f,%.4f)\n",
                result.pdf, result.f.values[0], result.f.values[1], result.f.values[2],
                cosAbs, pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
     }
 #endif
 
-    // 检查吞吐量有效性
+    // ?????????
     bool throughputValid = true;
     for (int i = 0; i < NumSpectralSamples && throughputValid; ++i) {
 #ifdef __CUDACC__
@@ -242,7 +245,7 @@ extern "C" __global__ void sampleBSDF(
         {
             unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
             if (idx < 5) {
-                printf("[NaN] sample_bsdf: px=(%u,%u) pathLen=%u throughput=(%.4f,%.4f,%.4f) op=throughput*=f*cos/pdf\n",
+                VLR_DEBUG_PRINTF("[NaN] sample_bsdf: px=(%u,%u) pathLen=%u throughput=(%.4f,%.4f,%.4f) op=throughput*=f*cos/pdf\n",
                        pathState.pixelX, pathState.pixelY, pathState.pathLength,
                        pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
             }
@@ -253,7 +256,7 @@ extern "C" __global__ void sampleBSDF(
     }
 
     // ========================================================================
-    // 5. 生成下一跳光线（使用 offsetRayOriginForNextBounce）
+    // 5. ?????????? offsetRayOriginForNextBounce??
     // ========================================================================
     Vector3D dirIn = surfPt.shadingFrame.toWorld(result.dirLocal);
 
@@ -261,14 +264,14 @@ extern "C" __global__ void sampleBSDF(
     pathState.direction = dirIn;
 
     // ========================================================================
-    // 6. 更新 PathState
+    // 6. ?? PathState
     // ========================================================================
     pathState.prevDirPDF = result.pdf;
     pathState.prevSampledType = bsdfTypeToDirectionType(result.sampledBSDFType);
-    // pathLength 已在 ProcessHits 中递增，此处不重复
+    // pathLength ?? ProcessHits ?????????
 
     // ========================================================================
-    // 7. 将路径加入下一轮队列（nextActivePathQueue）
+    // 7. ???????????nextActivePathQueue??
     // ========================================================================
     wlp.nextActivePathQueue.enqueue(pathIndex);
 #endif

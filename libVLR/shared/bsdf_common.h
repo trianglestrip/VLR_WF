@@ -931,6 +931,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetScatteringBSDFPDF(
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSDF(
     float ior,
     float roughness,
+    const SampledSpectrum& coeff,
     const Vector3D& dirInLocal,
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal,
@@ -939,6 +940,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
     float NdotL = dot(dirInLocal, geomNormalLocal);
     float NdotV = dot(dirOutLocal, geomNormalLocal);
     float dotNVdotNL = NdotL * NdotV;
+
+    // 判断是从外部进入还是从内部出射(参考materials.cu第1388行)
+    bool entering = (NdotL >= 0.0f);
+    float eEnter = entering ? 1.0f : ior;
+    float eExit = entering ? ior : 1.0f;
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
@@ -957,18 +963,19 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
 
         float VdotH = dot(dirOutLocal, halfVec);
         float D = GGX_D(NdotH, alpha2);
-        float G1_l = GGX_G1(NdotL, alpha2);
-        float G1_v = GGX_G1(NdotV, alpha2);
+        float G1_l = GGX_G1(std::abs(NdotL), alpha2);
+        float G1_v = GGX_G1(std::abs(NdotV), alpha2);
         float G = G1_l * G1_v;
 
-        float F = FresnelDielectric(std::abs(VdotH), 1.0f, ior);
+        float F = FresnelDielectric(std::abs(VdotH), eEnter, eExit);
 
-        float denom = 4.0f * dotNVdotNL;
+        float denom = 4.0f * std::abs(dotNVdotNL);
         if (denom < 1e-7f)
             return SampledSpectrum::Zero();
 
         float spec = D * G * F / denom;
-        return SampledSpectrum(spec);
+        // 应用透射系数
+        return coeff * spec;
     }
     // 折射：dotNVdotNL < 0（异半球）
     else if (dotNVdotNL < 0.0f) {
@@ -1007,7 +1014,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
         float adjoint = (transportMode == ::vlr::TransportMode::Radiance) ? (eEnter * eEnter) : (eExit * eExit);
         ret = ret * adjoint;
 
-        return ret;
+        // 应用透射系数
+        return ret * coeff;
     }
 
     return SampledSpectrum::Zero();
@@ -1032,6 +1040,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getGGXVNDFPDF(
 CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
     float ior,
     float roughness,
+    const SampledSpectrum& coeff,
     const Vector3D& dirInLocal,
     const Normal3D& geomNormalLocal,
     float u0, float u1, float u2,
@@ -1039,84 +1048,83 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
     ::vlr::TransportMode transportMode = ::vlr::TransportMode::Radiance) {
 
     float NdotL = dot(dirInLocal, geomNormalLocal);
-    if (NdotL <= 0.0f) {
-        result->pdf = 0.0f;
-        result->f = SampledSpectrum::Zero();
-        return;
-    }
-
-    // NdotL > 0 表示从外部进入，eEnter=1, eExit=ior
-    float eEnter = 1.0f;
-    float eExit = ior;
-    float recRelIOR = eEnter / eExit;  // 1/ior
+    
+    // 判断是从外部进入(entering=true)还是从内部出射(entering=false)
+    // 参考materials.cu第1277-1284行
+    bool entering = (NdotL >= 0.0f);
+    float eEnter = entering ? 1.0f : ior;
+    float eExit = entering ? ior : 1.0f;
+    float recRelIOR = eEnter / eExit;
+    
+    // 将方向转换到统一的坐标系(参考第1284行)
+    Vector3D dirV = entering ? dirInLocal : -dirInLocal;
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
-    Vector3D H = sampleGGXVNDF(dirInLocal, alpha, u0, u1);
+    Vector3D H = sampleGGXVNDF(dirV, alpha, u0, u1);
 
-    float dotHV = dot(dirInLocal, H);
+    float dotHV = dot(dirV, H);
     if (dotHV <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
     }
 
-    float F = FresnelDielectric(dotHV, 1.0f, ior);
+    float F = FresnelDielectric(dotHV, eEnter, eExit);
     float reflectProb = F;
     bool sampleReflection = (u2 < reflectProb);
 
     if (sampleReflection) {
-        // 反射：dirL = 2*dotHV*m - dirV（参考第1307行）
-        Vector3D dirL = 2.0f * dotHV * H - dirInLocal;
-        float NdotV = dot(dirL, geomNormalLocal);
-        if (NdotV <= 0.0f) {
+        // 反射：dirL = 2*dotHV*m - dirV（参考第1308行）
+        Vector3D dirL = 2.0f * dotHV * H - dirV;
+        if (dirL.z * dirV.z <= 0.0f) {
             result->pdf = 0.0f;
             result->f = SampledSpectrum::Zero();
             return;
         }
 
-        result->dirLocal = dirL;
+        result->dirLocal = entering ? dirL : -dirL;
         result->isDelta = false;
         result->sampledBSDFType = BSDFType_MicrofacetScattering;
 
         // PDF = reflectProb / (4*dotHV) * mPDF（参考第1314-1315行）
-        float mPDF = getGGXVNDFPDF(H, dirInLocal, geomNormalLocal, alpha2);
+        float mPDF = getGGXVNDFPDF(H, dirV, geomNormalLocal, alpha2);
         float dotHV_safe = ::vlr::vlr_max(dotHV, 1e-6f);
         result->pdf = (reflectProb / (4.0f * dotHV_safe)) * mPDF;
 
-        // BSDF = coeff*F*D*G/(4*dirV.z*dirL.z)，coeff=1
+        // BSDF = coeff*F*D*G/(4*dirV.z*dirL.z)（参考第1319行）
         float D = GGX_D(std::abs(dot(H, geomNormalLocal)), alpha2);
-        float G1_v = GGX_G1(NdotL, alpha2);
-        float G1_l = GGX_G1(NdotV, alpha2);
+        float G1_v = GGX_G1(std::abs(dirV.z), alpha2);
+        float G1_l = GGX_G1(std::abs(dirL.z), alpha2);
         float G = G1_v * G1_l;
-        float denom = 4.0f * NdotL * NdotV;
+        float denom = 4.0f * std::abs(dirV.z * dirL.z);
         if (denom > 1e-7f) {
-            result->f = SampledSpectrum(F * D * G / denom);
+            // 应用coeff系数(参考libVLR_reference第1319行)
+            result->f = coeff * (F * D * G / denom);
         } else {
             result->f = SampledSpectrum::Zero();
         }
     } else {
-        // 折射：dirL = (recRelIOR*dotHV - sqrt(innerRoot))*m - recRelIOR*dirV（参考第1334-1339行）
+        // 折射：dirL = (recRelIOR*dotHV - sqrt(innerRoot))*m - recRelIOR*dirV（参考第1341行）
         float innerRoot = 1.0f + recRelIOR * recRelIOR * (dotHV * dotHV - 1.0f);
         if (innerRoot < 0.0f) {
             result->pdf = 0.0f;
             result->f = SampledSpectrum::Zero();
             return;
         }
-        Vector3D dirL = (recRelIOR * dotHV - safeSqrt(innerRoot)) * H - recRelIOR * dirInLocal;
-        float NdotV = dot(dirL, geomNormalLocal);
-        if (NdotV >= 0.0f) {
+        Vector3D dirL = (recRelIOR * dotHV - safeSqrt(innerRoot)) * H - recRelIOR * dirV;
+        if (dirL.z * dirV.z >= 0.0f) {
             result->pdf = 0.0f;
             result->f = SampledSpectrum::Zero();
             return;
         }
 
-        result->dirLocal = dirL;
+        result->dirLocal = entering ? dirL : -dirL;
         result->isDelta = false;
         result->sampledBSDFType = BSDFType_MicrofacetScattering;
 
         float dotHL = dot(dirL, H);
-        // PDF = (1-reflectProb) / (eEnter*dotHV + eExit*dotHL)^2 * mPDF * eExit^2 * |dotHL|（参考第1347-1348行）
+        // PDF = (1-reflectProb) / (eEnter*dotHV + eExit*dotHL)^2 * mPDF * eExit^2 * |dotHL|（参考第1348-1349行）
         float denomPdf = eEnter * dotHV + eExit * dotHL;
         float denomPdfSq = denomPdf * denomPdf;
         if (denomPdfSq < 1e-14f) {
@@ -1124,11 +1132,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
             result->f = SampledSpectrum::Zero();
             return;
         }
-        float mPDF = getGGXVNDFPDF(H, dirInLocal, geomNormalLocal, alpha2);
+        float mPDF = getGGXVNDFPDF(H, dirV, geomNormalLocal, alpha2);
         result->pdf = (1.0f - reflectProb) / denomPdfSq * mPDF * (eExit * eExit) * std::fabs(dotHL);
 
         // BSDF 通过 evaluate 计算（含每波长、adjoint）
-        result->f = evaluateMicrofacetScatteringBSDF(ior, roughness, dirInLocal, dirL, geomNormalLocal, transportMode);
+        // 注意:evaluate函数需要世界空间方向,所以传入原始dirInLocal
+        result->f = evaluateMicrofacetScatteringBSDF(ior, roughness, coeff, dirInLocal, result->dirLocal, geomNormalLocal, transportMode);
     }
 }
 
@@ -1293,34 +1302,58 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool refract(
     return true;
 }
 
-/// 评估完美镜面透射（Delta，评估时通常返回 0）
+/// 评估完美镜面透射 BSDF（支持反射+折射）
+/// 参考libVLR_reference SpecularBSDF::evaluateInternal
 /// 正确处理进入/离开：cosThetaI<0 表示从外进入(etaI=1,etaT=ior)，cosThetaI>0 表示从内离开(etaI=ior,etaT=1)
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSDF(
     float ior, const SampledSpectrum& transmittance,
     const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
-    if (cosOut >= 0.0f) return SampledSpectrum::Zero();  // 透射出射在法线负侧
-
+    
     float cosThetaI = dot(dirInLocal, geomNormalLocal);
+    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    
+    // 判断进入/离开
+    bool entering = (cosThetaI >= 0.0f);
     float etaI, etaT;
     Normal3D nEff;
-    if (cosThetaI < 0.0f) {
-        nEff = Vector3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
+    if (entering) {
+        nEff = geomNormalLocal;
         etaI = 1.0f;
         etaT = ior;
     } else {
-        nEff = geomNormalLocal;
+        nEff = Vector3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
         etaI = ior;
         etaT = 1.0f;
     }
+    
+    float F = FresnelDielectric(std::abs(cosThetaI), etaI, etaT);
+    float etaRatio = etaI / etaT;
+    
+    // 检查是否为反射方向(同半球)
+    if (cosThetaI * cosOut > 0.0f) {
+        // 反射: 检查是否为镜面反射方向
+        Vector3D dirReflected = 2.0f * cosThetaI * geomNormalLocal - dirInLocal;
+        float diff = std::abs(dot(dirReflected, dirOutLocal) - 1.0f);
+        if (diff < 1e-5f) {
+            float cosAbs = std::abs(cosThetaI);
+            if (cosAbs < 1e-6f) return SampledSpectrum::Zero();
+            // 反射: f = transmittance * F / |cos|
+            // 参考libVLR_reference SpecularBSDF line 925
+            return transmittance * (F / cosAbs);
+        }
+        return SampledSpectrum::Zero();
+    }
+    
+    // 检查是否为折射方向(异半球)
     Vector3D wt;
-    if (!refract(dirInLocal, nEff, etaI / etaT, &wt))
+    if (!refract(dirInLocal, nEff, etaRatio, &wt))
         return SampledSpectrum::Zero();
     float diff = std::abs(dot(wt, dirOutLocal) - 1.0f);
     if (diff < 1e-5f) {
-        float F = FresnelDielectric(std::abs(cosThetaI), etaI, etaT);
-        return transmittance * (1.0f - F);  // 透射 = (1-F) * 透射率
+        // 折射: f = transmittance * (1-F)
+        // 参考libVLR_reference SpecularBSDF line 941
+        return transmittance * (1.0f - F);
     }
     return SampledSpectrum::Zero();
 }
@@ -1385,17 +1418,21 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
     }
 
     // 根据 Fresnel 概率选择反射或透射（离散采样）
-    // 与原始 VLR SpecularBSDF 一致：
-    // 反射: f = F/|cos|, pdf = F, throughput *= f*cos/pdf = F/|cos|*|cos|/F = 1
-    // 透射: f = (1-F)*(etaI/etaT)^2/|cosT|, pdf = (1-F)*(etaI/etaT)^2, throughput *= f*cosT/pdf = 1
+    // 参考libVLR_reference SpecularBSDF::sampleInternal line 1305-1330
+    // 反射: f = coeff*F/|cos|, pdf = F, throughput *= f*cos/pdf = coeff
+    // 透射: f = coeff*(1-F)*(etaI/etaT)^2/|cosT|, pdf = (1-F)*(etaI/etaT)^2, throughput *= f*cosT/pdf = coeff
     if (u0 < F) {
-        // 反射（不经过介质，无透射系数）
+        // 反射（应用transmittance系数,参考line 1319）
         float NdotL = dot(dirInLocal, geomNormalLocal);
         result->dirLocal = 2.0f * NdotL * geomNormalLocal - dirInLocal;
         float cosAbs = std::abs(NdotL);
-        float fVal = (cosAbs > 1e-6f) ? (F / cosAbs) : 0.0f;
-        for (int i = 0; i < NumSpectralSamples; ++i)
-            result->f.values[i] = fVal;
+        if (cosAbs < 1e-6f) {
+            result->pdf = 0.0f;
+            result->f = SampledSpectrum::Zero();
+            return;
+        }
+        // f = transmittance * F / |cos|
+        result->f = transmittance * (F / cosAbs);
         result->pdf = F;
         result->sampledBSDFType = BSDFType_Specular;
         result->isDelta = true;
@@ -1721,7 +1758,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float DisneySubsurface(
 CUDA_DEVICE_FUNCTION CUDA_INLINE void DisneySpecularF0(
     const SampledSpectrum& baseColor, float metallic, float specular, float specularTint,
     SampledSpectrum* F0) {
-    constexpr float dielectricF0 = 0.04f;
     float specF0 = 0.08f * specular;  // [0, 0.08]
     float lum = baseColor.values[0] * 0.2126f + baseColor.values[1] * 0.7152f + baseColor.values[2] * 0.0722f;
     for (int i = 0; i < NumSpectralSamples; ++i) {
@@ -2148,8 +2184,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateBSDF(
     }
     case BSDFType_MicrofacetScattering: {
         float ior, roughness;
-        getMicrofacetScatteringParams(matDesc, &ior, &roughness);
-        return evaluateMicrofacetScatteringBSDF(ior, roughness, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
+        SampledSpectrum coeff;
+        getMicrofacetScatteringParams(matDesc, &ior, &roughness, &coeff);
+        return evaluateMicrofacetScatteringBSDF(ior, roughness, coeff, dirInLocal, dirOutLocal, ctx.geomNormalLocal);
     }
     case BSDFType_Specular: {
         SampledSpectrum coeffR, eta, kappa;
@@ -2300,8 +2337,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
     }
     case BSDFType_MicrofacetScattering: {
         float ior, roughness;
-        getMicrofacetScatteringParams(matDesc, &ior, &roughness);
-        sampleMicrofacetScatteringBSDF(ior, roughness, dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
+        SampledSpectrum coeff;
+        getMicrofacetScatteringParams(matDesc, &ior, &roughness, &coeff);
+        sampleMicrofacetScatteringBSDF(ior, roughness, coeff, dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
         break;
     }
     case BSDFType_Specular: {

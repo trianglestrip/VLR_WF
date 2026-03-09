@@ -1,28 +1,37 @@
 // ============================================================================
 // VLR Wavefront - GenerateRays Kernel
 //
-// 本文件实现 Wavefront 路径追踪的初始光线生成内核。
-// 功能：RNG 初始化、波长采样、相机采样、IDF 评估、PathState 初始化、加入活跃队列。
+// ??????Wavefront ???????????????
+// ???RNG ??????????????IDF ???PathState ????????????
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
-// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
+// ???VLR ?????
+// ??????026-03-07
+// ???CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#define VLR_DEBUG_GENERATE_RAYS 1
+#define VLR_DEBUG_GENERATE_RAYS 0
+
+// ??????
+// #define VLR_ENABLE_GPU_DEBUG 1
+
+#ifdef VLR_ENABLE_GPU_DEBUG
+    #define VLR_DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#else
+    #define VLR_DEBUG_PRINTF(...) ((void)0)
+#endif
 
 #include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
 
 #include <cuda_runtime.h>
 
-// 启动参数说明：
-// 1. 直接 CUDA 调用：使用 generateRays(params) 传入设备端参数指针
-// 2. OptiX 管线：因 WavefrontLaunchParameters 含非平凡类型，无法使用 __constant__
-//    需将 kernel 作为 Ray Gen 时，需通过 pipeline 的 launch params 机制或 wrapper 适配
+// ????????
+// 1. ?? CUDA ??????generateRays(params) ??????????
+// 2. OptiX ???? WavefrontLaunchParameters ????????????__constant__
+//    ???kernel ?? Ray Gen ????? pipeline ??launch params ????wrapper ??
 
 // ============================================================================
-// 透视相机采样辅助函数
+// ??????????
 // ============================================================================
 
 namespace {
@@ -30,8 +39,8 @@ namespace {
 using namespace vlr;
 using namespace vlr::shared;
 
-/// 透视相机生成光线（不依赖外部 callable 程序）
-/// 当 lensRadius = 0 时为针孔相机
+/// ?????????????? callable ????
+/// ??lensRadius = 0 ??????
 CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
     const CameraDescriptor& camera,
     float pixelCoordX,
@@ -42,18 +51,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
     Vector3D* rayDirection,
     float* dirPDF) {
     
-    // 像素中心 + [0,1) 随机偏移得到亚像素采样
+    // ???? + [0,1) ????????????
     float vh = 2.0f * tanf(camera.fovY * 0.5f);
     float vw = camera.aspect * vh;
     
-    // 将像素坐标映射到 NDC [-0.5, 0.5]
+    // ???????? NDC [-0.5, 0.5]
     float ndcX = (pixelCoordX / static_cast<float>(imageWidth)) - 0.5f;
     float ndcY = (pixelCoordY / static_cast<float>(imageHeight)) - 0.5f;
     
-    // 针孔相机：光线起源于相机位置
+    // ??????????????
     *rayOrigin = camera.position;
     
-    // 光线方向：穿过成像平面上的采样点
+    // ????????????????
     Vector3D rayDir = normalize(
         camera.orientation.x * (vw * ndcX) +
         camera.orientation.y * (vh * ndcY) +
@@ -61,10 +70,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
     
     *rayDirection = rayDir;
     
-    // 透视相机的方向 PDF（与原始 VLR PerspectiveCameraIDF 一致）：
+    // ????????PDF???? VLR PerspectiveCameraIDF ?????
     // dirPDF = imageSize.x * imageSize.y / (cos^3 * imgPlaneArea)
-    // 其中 imgPlaneArea = opWidth * opHeight，opHeight = 2*tan(fovY/2)，opWidth = aspect * opHeight
-    // orientation.z 为相机前向
+    // ?? imgPlaneArea = opWidth * opHeight?opHeight = 2*tan(fovY/2)?opWidth = aspect * opHeight
+    // orientation.z ??????
     float cosTheta = dot(rayDir, camera.orientation.z);
     if (cosTheta <= 0.0f) cosTheta = 1e-6f;
     float cos3 = cosTheta * cosTheta * cosTheta;
@@ -77,7 +86,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
 // ============================================================================
 // GenerateRays Kernel
 // ============================================================================
-// 启动参数通过参数传入，避免 __constant__ 对含非平凡类型 struct 的限制
+// ??????????????__constant__ ????????struct ????
 
 extern "C" __global__ void generateRays(
     vlr::shared::WavefrontLaunchParameters* params) {
@@ -85,18 +94,18 @@ extern "C" __global__ void generateRays(
     WavefrontLaunchParameters& wlp = *params;
     
 #ifdef __CUDACC__
-    // 线程索引映射到像素坐标
+    // ????????????
     uint32_t pixelX = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t pixelY = blockIdx.y * blockDim.y + threadIdx.y;
     
-    // 边界检查
+    // ?????
     if (pixelX >= wlp.imageSize.x || pixelY >= wlp.imageSize.y)
         return;
     
     uint32_t pathIndex = pixelY * wlp.imageSize.x + pixelX;
     
     // ========================================================================
-    // 1. RNG 初始化（使用 PCG32）
+    // 1. RNG ?????? PCG32??
     // ========================================================================
     KernelRNG rng;
     if (wlp.rngBuffer.data != nullptr) {
@@ -104,14 +113,14 @@ extern "C" __global__ void generateRays(
         uint32_t pixelIdx = pixelY * stride + pixelX;
         rng = wlp.rngBuffer.data[pixelIdx];
     } else {
-        // 无 RNG 缓冲区时，用像素坐标和帧数初始化
+        // ??RNG ????????????????
         uint64_t seed = (static_cast<uint64_t>(wlp.numAccumFrames) * wlp.imageSize.x * wlp.imageSize.y + pathIndex) * 0x853c49e6748fea9bULL;
         rng.state = seed ^ 0xda3e39cb94b95bdbULL;
         rng.inc = 0xda3e39cb94b95bdbULL;
     }
     
     // ========================================================================
-    // 2. 波长采样（4 个光谱采样）
+    // 2. ?????? ??????
     // ========================================================================
     float selectWLPDF;
     WavelengthSamples wls = WavelengthSamples::createWithEqualOffsets(
@@ -120,7 +129,7 @@ extern "C" __global__ void generateRays(
         &selectWLPDF);
     
     // ========================================================================
-    // 3. 相机采样（Perspective 透视相机）
+    // 3. ?????Perspective ??????
     // ========================================================================
     float pixelSampleX = pixelX + rng.getFloat0cTo1o();
     float pixelSampleY = pixelY + rng.getFloat0cTo1o();
@@ -137,11 +146,11 @@ extern "C" __global__ void generateRays(
         &rayOrigin, &rayDirection, &dirPDF);
     
     // ========================================================================
-    // 4. IDF 评估与吞吐量计算
+    // 4. IDF ????????
     // ========================================================================
-    // 针孔相机：重要性函数 We 与主光线 PDF 相互抵消，初始 throughput = 1
-    // 参考：https://agraphicsguynotes.com/posts/the_missing_primary_ray_pdf_in_path_tracing/
-    // 原公式 throughput = (We*cos)/(areaPDF*dirPDF*selectWLPDF) 中 dirPDF 过大导致全黑
+    // ???????????We ???? PDF ????????throughput = 1
+    // ???https://agraphicsguynotes.com/posts/the_missing_primary_ray_pdf_in_path_tracing/
+    // ????throughput = (We*cos)/(areaPDF*dirPDF*selectWLPDF) ??dirPDF ??????
     SampledSpectrum We = SampledSpectrum::One();
     
     float areaPDF = 1.0f;
@@ -155,15 +164,15 @@ extern "C" __global__ void generateRays(
     
     SampledSpectrum throughput;
     if (camera.lensRadius <= 0.0f) {
-        // 针孔相机：PDF 项抵消，throughput = 1（物理正确，输出为 radiance）
+        // ?????PDF ????throughput = 1??????????radiance??
         throughput = SampledSpectrum::One();
     } else {
-        // 景深相机：使用完整公式
+        // ????????????
         throughput = (We * cosTheta) / (areaPDF * dirPDF * selectWLPDF);
     }
     
     // ========================================================================
-    // 5. 初始化 PathState 所有字段
+    // 5. ????PathState ?????
     // ========================================================================
     WavefrontPathState& pathState = wlp.pathStateBuffer[pathIndex];
     
@@ -185,14 +194,14 @@ extern "C" __global__ void generateRays(
     
     pathState.setActive(true);
     
-    // 重置 HitInfo（新路径）
+    // ?? HitInfo??????
     if (wlp.hitInfoBuffer != nullptr) {
         wlp.hitInfoBuffer[pathIndex].reset();
     }
     
 #ifdef VLR_DEBUG_GENERATE_RAYS
     if (pixelX == 256 && pixelY == 256) {
-        printf("[GPU GenerateRays] pixel(%u,%u): origin=(%.3f,%.3f,%.3f), dir=(%.3f,%.3f,%.3f), dirPDF=%.6f\n",
+        VLR_DEBUG_PRINTF("[GPU GenerateRays] pixel(%u,%u): origin=(%.3f,%.3f,%.3f), dir=(%.3f,%.3f,%.3f), dirPDF=%.6f\n",
                pixelX, pixelY,
                rayOrigin.x, rayOrigin.y, rayOrigin.z,
                rayDirection.x, rayDirection.y, rayDirection.z,
@@ -201,33 +210,33 @@ extern "C" __global__ void generateRays(
 #endif
     
     // ========================================================================
-    // 6. 将路径加入活跃队列
+    // 6. ??????????
     // ========================================================================
-    // 简化：直接使用 pathIndex 作为队列索引（1:1 映射）
+    // ??????? pathIndex ????????:1 ????
     wlp.activePathQueue.pathIndices[pathIndex] = pathIndex;
     
-    // 更新队列大小（使用原子操作确保正确）
+    // ??????????????????
     if (pathIndex == wlp.imageSize.x * wlp.imageSize.y - 1) {
-        // 最后一个线程设置队列大小
+        // ?????????????
         *wlp.activePathQueue.counter = wlp.imageSize.x * wlp.imageSize.y;
     }
     
     // ========================================================================
-    // 7. 处理 Denoiser 辅助缓冲区
+    // 7. ?? Denoiser ??????
     // ========================================================================
-    // 初始光线阶段尚无命中信息，将辅助通道初始化为默认值
+    // ??????????????????????????
     uint32_t stride = wlp.imageStrideInPixels > 0 ? wlp.imageStrideInPixels : wlp.imageSize.x;
     uint32_t pixelIdx = pixelY * stride + pixelX;
     
     if (wlp.accumAlbedoBuffer != nullptr) {
-        // 反照率：初始为黑色（后续由表面着色填充）
+        // ????????????????????
         wlp.accumAlbedoBuffer[pixelIdx].r = 0.0f;
         wlp.accumAlbedoBuffer[pixelIdx].g = 0.0f;
         wlp.accumAlbedoBuffer[pixelIdx].b = 0.0f;
     }
     
     if (wlp.accumNormalBuffer != nullptr) {
-        // 法线：初始为视图方向（后续由表面法线填充）
+        // ??????????????????????
         wlp.accumNormalBuffer[pixelIdx].x = rayDirection.x;
         wlp.accumNormalBuffer[pixelIdx].y = rayDirection.y;
         wlp.accumNormalBuffer[pixelIdx].z = rayDirection.z;

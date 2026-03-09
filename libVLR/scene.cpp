@@ -2,12 +2,21 @@
 // VLR 场景管理 - 实现
 //
 // 本文件实现了 Scene 类的全部逻辑，包括几何、材质、光源、实例、相机管理，
-// 以及 OptiX 加速结构构建与 GPU 数据上传。
+// 以及 OptiX 加速结构构建与 GPU 数据上传�?
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
+// 作者：VLR 开发团�?
+// 创建日期�?026-03-07
 // 环境：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
+
+// ????????????????
+// #define VLR_ENABLE_CPU_DEBUG 1
+
+#ifdef VLR_ENABLE_CPU_DEBUG
+    #define VLR_DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#else
+    #define VLR_DEBUG_PRINTF(...) ((void)0)
+#endif
 
 #include "scene.h"
 #include "shared/env_importance.h"
@@ -215,16 +224,16 @@ uint32_t Scene::createMaterialEx(
     m_materials.push_back(mat);
     
 #ifdef VLR_DEBUG_MATERIAL
-    printf("[Material Debug] createMaterialEx: index=%u, bsdfType=%u\n", matIndex, bsdfType);
-    printf("  Albedo: (%.3f, %.3f, %.3f)\n", albedoR, albedoG, albedoB);
-    printf("  Roughness: %.3f, Metallic: %.3f, IOR: %.3f\n", roughness, metallic, ior);
-    printf("  Emission: (%.3f, %.3f, %.3f)\n", emissionR, emissionG, emissionB);
-    printf("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
+    VLR_DEBUG_PRINTF("[Material Debug] createMaterialEx: index=%u, bsdfType=%u\n", matIndex, bsdfType);
+    VLR_DEBUG_PRINTF("  Albedo: (%.3f, %.3f, %.3f)\n", albedoR, albedoG, albedoB);
+    VLR_DEBUG_PRINTF("  Roughness: %.3f, Metallic: %.3f, IOR: %.3f\n", roughness, metallic, ior);
+    VLR_DEBUG_PRINTF("  Emission: (%.3f, %.3f, %.3f)\n", emissionR, emissionG, emissionB);
+    VLR_DEBUG_PRINTF("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
     
     const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
-    printf("  Verify data[AlbedoR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[AlbedoR]: %.3f (expected %.3f)\n", 
         dataAsFloat[MaterialDataLayout::AlbedoR], albedoR);
-    printf("  Verify data[IOR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[IOR]: %.3f (expected %.3f)\n", 
         dataAsFloat[MaterialDataLayout::IOR], ior);
 #endif
     
@@ -250,7 +259,7 @@ uint32_t Scene::createMaterialConductor(
     mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&kappaG);
     mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&kappaB);
     
-    // 设置 Albedo 为 (1,1,1)，让铜的颜色完全由 Fresnel 决定
+    // 设置 Albedo �?(1,1,1)，让铜的颜色完全�?Fresnel 决定
     float one = 1.0f;
     mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&one);
     mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&one);
@@ -265,19 +274,19 @@ uint32_t Scene::createMaterialConductor(
     m_materials.push_back(mat);
     
 #ifdef VLR_DEBUG_MATERIAL
-    printf("[Material Debug] createMaterialConductor: index=%u, bsdfType=%u (MicrofacetReflection)\n", 
+    VLR_DEBUG_PRINTF("[Material Debug] createMaterialConductor: index=%u, bsdfType=%u (MicrofacetReflection)\n", 
         matIndex, bsdfType);
-    printf("  Eta: (%.3f, %.3f, %.3f)\n", etaR, etaG, etaB);
-    printf("  Kappa: (%.3f, %.3f, %.3f)\n", kappaR, kappaG, kappaB);
-    printf("  Roughness: %.3f\n", roughness);
-    printf("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
+    VLR_DEBUG_PRINTF("  Eta: (%.3f, %.3f, %.3f)\n", etaR, etaG, etaB);
+    VLR_DEBUG_PRINTF("  Kappa: (%.3f, %.3f, %.3f)\n", kappaR, kappaG, kappaB);
+    VLR_DEBUG_PRINTF("  Roughness: %.3f\n", roughness);
+    VLR_DEBUG_PRINTF("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
     
     const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
-    printf("  Verify data[EtaR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[EtaR]: %.3f (expected %.3f)\n", 
         dataAsFloat[MaterialDataLayout::EtaR], etaR);
-    printf("  Verify data[KappaR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[KappaR]: %.3f (expected %.3f)\n", 
         dataAsFloat[MaterialDataLayout::KappaR], kappaR);
-    printf("  Verify data[Roughness]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[Roughness]: %.3f (expected %.3f)\n", 
         dataAsFloat[MaterialDataLayout::Roughness], roughness);
 #endif
     
@@ -332,6 +341,11 @@ uint32_t Scene::createMaterialMicrofacetScattering(
     mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
     mat.data[MaterialDataLayout::IOR] = *reinterpret_cast<uint32_t*>(&ior);
     mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
+    // 为玻璃材质设置默认的透射系数（接近完全透射�?
+    float defaultAlbedo = 0.999f;
+    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&defaultAlbedo);
+    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&defaultAlbedo);
+    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&defaultAlbedo);
     float zero = 0.0f;
     mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
     mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
@@ -555,7 +569,7 @@ void Scene::setInstanceTransform(uint32_t instanceId, const InstanceTransform& t
     if (instanceId >= m_instances.size()) return;
     m_instances[instanceId].transform = transformToReferenceFrame(transform);
     m_instances[instanceId].rotationPhi = transform.rotationRadians;
-    // 原始 VLR：IAS 构建使用 InstanceRecord.transform，必须同步更新
+    // 原始 VLR：IAS 构建使用 InstanceRecord.transform，必须同步更�?
     if (instanceId < m_instanceRecords.size())
         m_instanceRecords[instanceId].transform = transform;
 }
@@ -629,7 +643,7 @@ void Scene::addAreaLight(const AreaLightParams& params) {
 }
 
 void Scene::addPointLight(const PointLightParams& params) {
-    // 创建点光源材质
+    // 创建点光源材�?
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
     uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
@@ -642,7 +656,7 @@ void Scene::addPointLight(const PointLightParams& params) {
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // 创建点光源几何实例
+    // 创建点光源几何实�?
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_Point;
@@ -653,7 +667,7 @@ void Scene::addPointLight(const PointLightParams& params) {
     geomInst.nodeNormal = -1;
     geomInst.nodeTangent = -1;
     
-    // 点光源位置存储在 asPoint 中
+    // 点光源位置存储在 asPoint �?
     geomInst.asPoint.x = params.position.x;
     geomInst.asPoint.y = params.position.y;
     geomInst.asPoint.z = params.position.z;
@@ -665,7 +679,7 @@ void Scene::addPointLight(const PointLightParams& params) {
     shared::Instance inst;
     memset(&inst, 0, sizeof(inst));
     
-    // 分配并设置几何实例索引数组
+    // 分配并设置几何实例索引数�?
     uint32_t* geomIndices = new uint32_t[1];
     geomIndices[0] = geomInstIndex;
     inst.geomInstIndices = geomIndices;
@@ -686,12 +700,12 @@ void Scene::addPointLight(const PointLightParams& params) {
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // 添加到光源列表
+    // 添加到光源列�?
     m_lightInstIndices.push_back(instIndex);
 }
 
 void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum& radiance) {
-    // 创建方向光材质
+    // 创建方向光材�?
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
     uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
@@ -704,7 +718,7 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // 创建方向光几何实例（方向存储在 Instance.transform.z 中）
+    // 创建方向光几何实例（方向存储�?Instance.transform.z 中）
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_Directional;
@@ -717,7 +731,7 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
     m_geometryInstances.push_back(geomInst);
     
-    // 创建方向光实例（方向存储在 transform.z 中）
+    // 创建方向光实例（方向存储�?transform.z 中）
     Instance inst;
     memset(&inst, 0, sizeof(inst));
     uint32_t* geomIndices = new uint32_t[1];
@@ -739,25 +753,25 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // 添加到光源列表
+    // 添加到光源列�?
     m_lightInstIndices.push_back(instIndex);
 }
 
 void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     // 环境光实现说明：
-    // - 环境光参与 NEE（加入 m_lightInstIndices）以支持重要性采样
+    // - 环境光参�?NEE（加�?m_lightInstIndices）以支持重要性采�?
     // - 光线 miss 时通过 processEnvironmentHit 提供背景照明
-    // - 需要创建 GeometryType_InfiniteSphere 实例供 miss shader 查询
+    // - 需要创�?GeometryType_InfiniteSphere 实例�?miss shader 查询
     
-    // 清理旧的环境光实例（如果存在）
+    // 清理旧的环境光实例（如果存在�?
     if (m_envLightInstIndex.has_value() && m_envLightInstIndex.value() < m_instances.size()) {
-        // 从 m_lightInstIndices 移除旧的环境光
+        // �?m_lightInstIndices 移除旧的环境�?
         auto it = std::find(m_lightInstIndices.begin(), m_lightInstIndices.end(), m_envLightInstIndex.value());
         if (it != m_lightInstIndices.end())
             m_lightInstIndices.erase(it);
     }
     
-    // 创建环境光材质
+    // 创建环境光材�?
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
     uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
@@ -781,7 +795,7 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // 创建环境光几何实例
+    // 创建环境光几何实�?
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_InfiniteSphere;
@@ -792,16 +806,16 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     geomInst.nodeNormal = -1;
     geomInst.nodeTangent = -1;
     
-    // 环境光纹理与重要性贴图
+    // 环境光纹理与重要性贴�?
     if (!params.useConstant && params.textureData && params.textureWidth > 0 && params.textureHeight > 0) {
-        geomInst.asInfSphere.importanceMap = 1;  // 1 = 使用重要性采样
+        geomInst.asInfSphere.importanceMap = 1;  // 1 = 使用重要性采�?
         // 存储纹理数据
         size_t numPixels = static_cast<size_t>(params.textureWidth) * params.textureHeight * 3;
         m_envTextureData.resize(numPixels);
         std::memcpy(m_envTextureData.data(), params.textureData, numPixels * sizeof(float));
         m_envTextureWidth = params.textureWidth;
         m_envTextureHeight = params.textureHeight;
-        // 构建重要性贴图
+        // 构建重要性贴�?
         float* cdfTheta = nullptr;
         float* cdfPhi = nullptr;
         if (buildEnvironmentImportanceMap(
@@ -853,7 +867,7 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // 环境光加入 m_lightInstIndices 以参与 NEE 重要性采样
+    // 环境光加�?m_lightInstIndices 以参�?NEE 重要性采�?
     m_lightInstIndices.push_back(instIndex);
     m_envLightInstIndex = instIndex;
 }
@@ -881,7 +895,7 @@ void Scene::setCamera(const CameraParams& params) {
 }
 
 // ============================================================================
-// 加速结构构建
+// 加速结构构�?
 // ============================================================================
 
 void Scene::buildGeometryAccelerationStructures() {
@@ -933,7 +947,7 @@ void Scene::buildGeometryAccelerationStructures() {
         triangleInput.triangleArray.numIndexTriplets = static_cast<uint32_t>(mesh.triangles.size());
         triangleInput.triangleArray.indexBuffer = d_indices;
         
-        // 关键修复：flags 不能为 nullptr，需要指向有效的 flags 数组
+        // 关键修复：flags 不能�?nullptr，需要指向有效的 flags 数组
         static const uint32_t triangleInputFlags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
         triangleInput.triangleArray.flags = triangleInputFlags;
         triangleInput.triangleArray.numSbtRecords = 1;
@@ -969,7 +983,7 @@ void Scene::buildInstanceAccelerationStructure() {
     optixInstances.reserve(m_instances.size());
     for (size_t i = 0; i < m_instances.size(); ++i) {
         const InstanceRecord& rec = m_instanceRecords[i];
-        // 排除虚拟光源：点光源、方向光、环境光不参与 IAS（无几何体，仅用于 NEE 采样）
+        // 排除虚拟光源：点光源、方向光、环境光不参�?IAS（无几何体，仅用�?NEE 采样�?
         if (!rec.geomInstIndices.empty()) {
             const GeometryInstance& geomInst = m_geometryInstances[rec.geomInstIndices[0]];
             if (geomInst.geomType == GeometryType_Point ||
@@ -987,11 +1001,11 @@ void Scene::buildInstanceAccelerationStructure() {
         oi.traversableHandle = m_gasHandles[gasIdx];
         const ReferenceFrame& rf = m_instances[i].transform;
         const InstanceTransform& it = rec.transform;
-        // OptiX transform 是行优先（row-major）3x4 矩阵：
+        // OptiX transform 是行优先（row-major�?x4 矩阵�?
         // Row 0: [m00, m01, m02, tx]
         // Row 1: [m10, m11, m12, ty]
         // Row 2: [m20, m21, m22, tz]
-        // ReferenceFrame 有 x, y, z 三个向量（列向量），需要转置为行向量
+        // ReferenceFrame �?x, y, z 三个向量（列向量），需要转置为行向�?
         oi.transform[0] = rf.x.x; oi.transform[1] = rf.y.x; oi.transform[2] = rf.z.x; oi.transform[3] = it.position.x;
         oi.transform[4] = rf.x.y; oi.transform[5] = rf.y.y; oi.transform[6] = rf.z.y; oi.transform[7] = it.position.y;
         oi.transform[8] = rf.x.z; oi.transform[9] = rf.y.z; oi.transform[10] = rf.z.z; oi.transform[11] = it.position.z;
@@ -1093,7 +1107,7 @@ void Scene::updateToGPU() {
     m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTriangles.size());
     m_triangleBuffer->copyToDevice(allTriangles.data(), allTriangles.size(), m_stream);
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
-        // 仅对三角形网格设置 triangleBuffer；Point/Directional/InfiniteSphere 使用 union 其他成员
+        // 仅对三角形网格设�?triangleBuffer；Point/Directional/InfiniteSphere 使用 union 其他成员
         if (m_geometryInstances[g].geomType != GeometryType_TriangleMesh)
             continue;
         uint32_t meshId = (g < m_instanceRecords.size()) ? m_instanceRecords[g].meshId : 0;
@@ -1124,23 +1138,23 @@ void Scene::updateToGPU() {
     m_materialBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_materials.size());
     
 #ifdef VLR_DEBUG_MATERIAL
-    printf("\n[Material Debug] updateToGPU: Uploading %zu materials to GPU\n", m_materials.size());
+    VLR_DEBUG_PRINTF("\n[Material Debug] updateToGPU: Uploading %zu materials to GPU\n", m_materials.size());
     for (size_t i = 0; i < m_materials.size(); ++i) {
         const SurfaceMaterialDescriptor& mat = m_materials[i];
         const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
-        printf("  Material[%zu]: bsdfProcedureSetIndex=%u\n", i, mat.bsdfProcedureSetIndex);
-        printf("    Albedo: (%.3f, %.3f, %.3f)\n", 
+        VLR_DEBUG_PRINTF("  Material[%zu]: bsdfProcedureSetIndex=%u\n", i, mat.bsdfProcedureSetIndex);
+        VLR_DEBUG_PRINTF("    Albedo: (%.3f, %.3f, %.3f)\n", 
             dataAsFloat[MaterialDataLayout::AlbedoR],
             dataAsFloat[MaterialDataLayout::AlbedoG],
             dataAsFloat[MaterialDataLayout::AlbedoB]);
-        printf("    Roughness: %.3f, IOR: %.3f\n", 
+        VLR_DEBUG_PRINTF("    Roughness: %.3f, IOR: %.3f\n", 
             dataAsFloat[MaterialDataLayout::Roughness],
             dataAsFloat[MaterialDataLayout::IOR]);
-        printf("    Eta: (%.3f, %.3f, %.3f)\n",
+        VLR_DEBUG_PRINTF("    Eta: (%.3f, %.3f, %.3f)\n",
             dataAsFloat[MaterialDataLayout::EtaR],
             dataAsFloat[MaterialDataLayout::EtaG],
             dataAsFloat[MaterialDataLayout::EtaB]);
-        printf("    Kappa: (%.3f, %.3f, %.3f)\n",
+        VLR_DEBUG_PRINTF("    Kappa: (%.3f, %.3f, %.3f)\n",
             dataAsFloat[MaterialDataLayout::KappaR],
             dataAsFloat[MaterialDataLayout::KappaG],
             dataAsFloat[MaterialDataLayout::KappaB]);
@@ -1149,7 +1163,7 @@ void Scene::updateToGPU() {
     
     m_materialBuffer->copyToDevice(m_materials.data(), m_materials.size(), m_stream);
 
-    // 材质纹理索引与参数：确保数组大小与材质数量一致
+    // 材质纹理索引与参数：确保数组大小与材质数量一�?
     ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
         m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
     if (!m_materialAlbedoTextureIndices.empty()) {

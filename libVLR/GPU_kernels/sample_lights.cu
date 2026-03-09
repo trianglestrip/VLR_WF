@@ -1,16 +1,16 @@
 // ============================================================================
 // VLR Wavefront - SampleLights Kernel (Next Event Estimation)
 //
-// 本文件实现 Wavefront 路径追踪的显式光源采样内核（NEE）。
-// 功能：光源选择、位置采样、辐射评估、可见性测试、BSDF 评估、MIS 权重、
-//       几何项计算、累积直接光照贡献。跳过 delta 材质。
+// ??????Wavefront ??????????????NEE???
+// ????????????????????????BSDF ???MIS ????
+//       ??????????????????delta ????
 //
-// 作者：VLR 开发团队
-// 创建日期：2026-03-07
-// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
+// ???VLR ?????
+// ??????026-03-07
+// ???CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-#define VLR_DEBUG_LIGHT_SAMPLING 1
+#define VLR_DEBUG_LIGHT_SAMPLING 0
 
 #include "../shared/kernel_common.h"
 #include "kernel_launch.h"
@@ -30,7 +30,11 @@
 #include <cfloat>
 #include <cmath>
 
-// OptiX 阴影光线追踪（当可用时）
+// ? constexpr ?????????????
+// ????????,??WavefrontLaunchParameters???????
+#define VLR_USE_LIGHT_CACHE 0
+
+// OptiX ????????????
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
     #include <optix_device.h>
 #endif
@@ -41,18 +45,18 @@ using namespace vlr;
 using namespace vlr::shared;
 
 // ============================================================================
-// 可见性测试：发射阴影光线，检查着色点与光源之间是否遮挡
+// ????????????????????????????
 // ============================================================================
 
-/// 测试着色点到光源的可见性
-/// 从着色点沿 dirToLight 方向发射阴影光线，若未命中任何几何则可见
+/// ?????????????
+/// ??????dirToLight ????????????????????
 ///
-/// @param shadingSurfPt    着色点（表面点）
-/// @param lightSurfPt      光源表面点
-/// @param dirToLight       从着色点指向光源的方向（已归一化）
-/// @param distance        着色点到光源的距离
-/// @param topGroup        OptiX 可遍历句柄
-/// @return fractionalVisibility: 1.0=完全可见, 0.0=完全遮挡
+/// @param shadingSurfPt    ?????????
+/// @param lightSurfPt      ??????
+/// @param dirToLight       ?????????????????
+/// @param distance        ?????????
+/// @param topGroup        OptiX ??????
+/// @return fractionalVisibility: 1.0=????, 0.0=????
 CUDA_DEVICE_FUNCTION CUDA_INLINE float testVisibility(
     const SurfacePoint& shadingSurfPt,
     const SurfacePoint& lightSurfPt,
@@ -60,9 +64,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float testVisibility(
     float distance,
     uint64_t topGroup) {
 
-    // 注意：optixTrace 只能在 OptiX RayGen/Hit/Miss 中调用，不能从普通 CUDA kernel 调用。
-    // SampleLights 是 CUDA kernel，故暂不发射阴影光线，假定光源可见。
-    // 后续可通过将阴影测试移至单独的 OptiX 内核实现完整的可见性测试
+    // ???optixTrace ????OptiX RayGen/Hit/Miss ??????????CUDA kernel ????
+    // SampleLights ??CUDA kernel???????????????????
+    // ??????????????? OptiX ?????????????
     (void)shadingSurfPt;
     (void)lightSurfPt;
     (void)dirToLight;
@@ -76,8 +80,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float testVisibility(
 // ============================================================================
 // SampleLights Kernel
 // ============================================================================
-// 对活跃队列中的每条路径执行 Next Event Estimation
-// 调用顺序：ProcessHits -> SampleLights -> SampleBSDF
+// ??????????????Next Event Estimation
+// ?????ProcessHits -> SampleLights -> SampleBSDF
 
 extern "C" __global__ void sampleLights(
     vlr::shared::WavefrontLaunchParameters* params) {
@@ -86,7 +90,7 @@ extern "C" __global__ void sampleLights(
 
 #ifdef __CUDACC__
 
-#if PerformanceConfig::UseLightCache
+#if VLR_USE_LIGHT_CACHE
     __shared__ LightCache<PerformanceConfig::LightCacheSize> lightCache;
     if (threadIdx.x == 0) {
         uint32_t numLights = wlp.numLights;
@@ -107,16 +111,16 @@ extern "C" __global__ void sampleLights(
 
     uint32_t pathIndex = wlp.activePathQueue.pathIndices[workIndex];
     
-    // 优化：使用 __restrict__ 提示编译器优化内存访问
+    // ??????__restrict__ ????????????
     WavefrontPathState* __restrict__ pathStatePtr = &wlp.pathStateBuffer[pathIndex];
     WavefrontPathState& pathState = *pathStatePtr;
 
-    // 优化：warp-level 早期退出
+    // ???warp-level ?????
     bool isActive = pathState.isActive();
     if (warpAllInactive(isActive))
         return;
     
-    // 跳过非活跃路径
+    // ????????
     if (!isActive)
         return;
 
@@ -128,23 +132,23 @@ extern "C" __global__ void sampleLights(
     const SurfacePoint* __restrict__ surfPtPtr = &wlp.surfacePointBuffer[pathIndex];
     const SurfacePoint& surfPt = *surfPtPtr;
 
-    // 获取材质和 BSDF 上下文
+    // ??????BSDF ????
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
 
-    // 优化：跳过 delta 材质（完美镜面等），NEE 对 delta 无贡献
+    // ??????delta ??????????NEE ??delta ????
     if (materialIsDelta(matDesc))
         return;
 
     // ========================================================================
-    // 1. 选择光源
+    // 1. ????
     // ========================================================================
     float uLight = pathState.rng.getFloat0cTo1o();
     LightSelectResult selectResult;
     if (!selectLight(uLight, &selectResult, wlp)) {
 #ifdef VLR_DEBUG_LIGHT_SAMPLING
         if (pathIndex == 0) {
-            printf("[GPU] selectLight failed: numLights=%u\n", wlp.lightInstDist.numValues);
+            VLR_DEBUG_PRINTF("[GPU] selectLight failed: numLights=%u\n", wlp.lightInstDist.numValues);
         }
 #endif
         return;
@@ -152,13 +156,13 @@ extern "C" __global__ void sampleLights(
     
 #ifdef VLR_DEBUG_LIGHT_SAMPLING
     if (pathIndex == 0) {
-        printf("[GPU] selectLight success: lightType=%u, instIndex=%u, geomInstIndex=%u\n",
+        VLR_DEBUG_PRINTF("[GPU] selectLight success: lightType=%u, instIndex=%u, geomInstIndex=%u\n",
             selectResult.descriptor.type, selectResult.descriptor.instIndex, selectResult.descriptor.geomInstIndex);
     }
 #endif
 
     // ========================================================================
-    // 2. 采样光源位置
+    // 2. ??????
     // ========================================================================
     float u0 = pathState.rng.getFloat0cTo1o();
     float u1 = pathState.rng.getFloat0cTo1o();
@@ -169,7 +173,7 @@ extern "C" __global__ void sampleLights(
 
     sampleResult.lightSelectProb = selectResult.selectProb;
 
-    // 计算从着色点到光源的方向和距离
+    // ????????????????
     Vector3D dirToLight = sampleResult.lightSurfPt.position - surfPt.position;
     float distance = length(dirToLight);
     if (distance < 1e-8f)
@@ -177,9 +181,9 @@ extern "C" __global__ void sampleLights(
     dirToLight = dirToLight / distance;
 
     // ========================================================================
-    // 3. 评估光源辐射
+    // 3. ??????
     // ========================================================================
-    Vector3D dirToShading = -dirToLight;  // 从光源指向着色点
+    Vector3D dirToShading = -dirToLight;  // ????????
     LightEmissionResult emissionResult;
     if (!evaluateLightEmission(selectResult.descriptor, sampleResult.lightSurfPt,
                               dirToShading, pathState.wls, &emissionResult, wlp))
@@ -189,7 +193,7 @@ extern "C" __global__ void sampleLights(
         return;
 
     // ========================================================================
-    // 4. 可见性测试（发射阴影光线）
+    // 4. ??????????????
     // ========================================================================
     float fractionalVisibility = testVisibility(
         surfPt, sampleResult.lightSurfPt, dirToLight, distance, wlp.topGroup);
@@ -198,7 +202,7 @@ extern "C" __global__ void sampleLights(
         return;
 
     // ========================================================================
-    // 5. BSDF 评估（用于渲染方程中的 f 项，以及 MIS）
+    // 5. BSDF ????????????f ???? MIS??
     // ========================================================================
     Vector3D dirInLocal = surfPt.shadingFrame.toLocal(-pathState.direction);
     Vector3D dirOutLocal = surfPt.shadingFrame.toLocal(dirToLight);
@@ -206,22 +210,22 @@ extern "C" __global__ void sampleLights(
 
 #ifdef VLR_DEBUG_BSDF_VERBOSE
     if (pathIndex < 5) {
-        printf("[GPU SampleLights] pathIndex=%u: Direction check\n", pathIndex);
-        printf("  pathState.direction (world)=(%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("[GPU SampleLights] pathIndex=%u: Direction check\n", pathIndex);
+        VLR_DEBUG_PRINTF("  pathState.direction (world)=(%.3f,%.3f,%.3f)\n",
             pathState.direction.x, pathState.direction.y, pathState.direction.z);
-        printf("  dirToLight (world)=(%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("  dirToLight (world)=(%.3f,%.3f,%.3f)\n",
             dirToLight.x, dirToLight.y, dirToLight.z);
-        printf("  surfPt.geometricNormal (world)=(%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("  surfPt.geometricNormal (world)=(%.3f,%.3f,%.3f)\n",
             surfPt.geometricNormal.x, surfPt.geometricNormal.y, surfPt.geometricNormal.z);
-        printf("  dirInLocal=(%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("  dirInLocal=(%.3f,%.3f,%.3f)\n",
             dirInLocal.x, dirInLocal.y, dirInLocal.z);
-        printf("  dirOutLocal=(%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("  dirOutLocal=(%.3f,%.3f,%.3f)\n",
             dirOutLocal.x, dirOutLocal.y, dirOutLocal.z);
-        printf("  geomNormalLocal=(%.3f,%.3f,%.3f)\n",
+        VLR_DEBUG_PRINTF("  geomNormalLocal=(%.3f,%.3f,%.3f)\n",
             geomNormalLocal.x, geomNormalLocal.y, geomNormalLocal.z);
         float NdotIn = dot(dirInLocal, geomNormalLocal);
         float NdotOut = dot(dirOutLocal, geomNormalLocal);
-        printf("  NdotIn=%.3f, NdotOut=%.3f\n", NdotIn, NdotOut);
+        VLR_DEBUG_PRINTF("  NdotIn=%.3f, NdotOut=%.3f\n", NdotIn, NdotOut);
     }
 #endif
 
@@ -231,9 +235,9 @@ extern "C" __global__ void sampleLights(
 #ifdef VLR_DEBUG_MATERIAL
     if (pathIndex < 5) {
         BSDFType bsdfType = getBSDFType(matDesc);
-        printf("[GPU SampleLights] pathIndex=%u: evaluateBSDF result\n", pathIndex);
-        printf("  BSDFType=%u\n", (uint32_t)bsdfType);
-        printf("  fs=(%.6f, %.6f, %.6f, %.6f)\n", 
+        VLR_DEBUG_PRINTF("[GPU SampleLights] pathIndex=%u: evaluateBSDF result\n", pathIndex);
+        VLR_DEBUG_PRINTF("  BSDFType=%u\n", (uint32_t)bsdfType);
+        VLR_DEBUG_PRINTF("  fs=(%.6f, %.6f, %.6f, %.6f)\n", 
             fs.values[0], fs.values[1], fs.values[2], fs.values[3]);
     }
 #endif
@@ -242,14 +246,14 @@ extern "C" __global__ void sampleLights(
         return;
 
     // ========================================================================
-    // 6. 光源 PDF 与 BSDF PDF（用于 MIS）
-    // 与原始 VLR path_tracing.cu 一致：使用面积 PDF
+    // 6. ?? PDF ??BSDF PDF????MIS??
+    // ????VLR path_tracing.cu ??????? PDF
     // ========================================================================
-    // 光源面积 PDF = 选择概率 * 位置面积 PDF（原始 VLR: lightPDF = lightProb * lpResult.areaPDF）
+    // ???? PDF = ???? * ???? PDF????VLR: lightPDF = lightProb * lpResult.areaPDF??
     float lightAreaPDF = sampleResult.lightSelectProb * sampleResult.areaPDF;
 
-    // BSDF 方向 PDF 需转换为面积 PDF 空间以与 lightAreaPDF 做 MIS
-    // 原始 VLR: bsdfPDF = bsdf.evaluatePDF() * cosLight * recSquaredDistance
+    // BSDF ?? PDF ???????PDF ???? lightAreaPDF ??MIS
+    // ?? VLR: bsdfPDF = bsdf.evaluatePDF() * cosLight * recSquaredDistance
     float cosLight = absDot(-dirToLight, sampleResult.lightSurfPt.geometricNormal);
     float squaredDistance = distance * distance;
     float recSquaredDistance = (squaredDistance > 1e-12f) ? (1.0f / squaredDistance) : 0.0f;
@@ -257,9 +261,9 @@ extern "C" __global__ void sampleLights(
     float bsdfAreaPDF = bsdfDirPDF * cosLight * recSquaredDistance;
 
     // ========================================================================
-    // 7. MIS 权重（Power Heuristic）
-    // 原始 VLR: MISWeight = (lightPDF^2) / (lightPDF^2 + bsdfPDF^2)
-    // 当光源为 delta 或 lightPDF 无穷大时，MISWeight = 1
+    // 7. MIS ???Power Heuristic??
+    // ?? VLR: MISWeight = (lightPDF^2) / (lightPDF^2 + bsdfPDF^2)
+    // ???? delta ??lightPDF ?????MISWeight = 1
     // ========================================================================
     float MISWeight = 1.0f;
     bool lightPDFInf = (lightAreaPDF != lightAreaPDF) || (lightAreaPDF >= 1e30f);
@@ -267,8 +271,8 @@ extern "C" __global__ void sampleLights(
         MISWeight = computeMISWeight(lightAreaPDF, bsdfAreaPDF);
 
     // ========================================================================
-    // 8. 几何项 G = cos(theta_shading) * cos(theta_light) / distance^2
-    // 原始 VLR: G = fractionalVisibility * absDot(...) * cosLight * recSquaredDistance
+    // 8. ????G = cos(theta_shading) * cos(theta_light) / distance^2
+    // ?? VLR: G = fractionalVisibility * absDot(...) * cosLight * recSquaredDistance
     // ========================================================================
     float G = computeGeometryTerm(surfPt, sampleResult.lightSurfPt, dirToLight, squaredDistance);
     G *= fractionalVisibility;
@@ -277,10 +281,10 @@ extern "C" __global__ void sampleLights(
         return;
 
     // ========================================================================
-    // 9. 累积直接光照贡献
-    // 原始 VLR: scalarCoeff = G * MISWeight / lightPDF
+    // 9. ????????
+    // ?? VLR: scalarCoeff = G * MISWeight / lightPDF
     //          contribution += alpha * Le * fs * scalarCoeff
-    // 即: contribution = throughput * Le * fs * G * MISWeight / lightAreaPDF
+    // ?? contribution = throughput * Le * fs * G * MISWeight / lightAreaPDF
     // ========================================================================
     float invLightPDF = 1.0f;
     if (!lightPDFInf && lightAreaPDF > 1e-10f)
@@ -288,7 +292,7 @@ extern "C" __global__ void sampleLights(
 
     SampledSpectrum contrib = pathState.throughput * emissionResult.Le * fs * G * MISWeight * invLightPDF;
 
-    // 与原始 VLR 一致：仅当贡献有限时才累加，避免 NaN/Inf 污染输出
+    // ????VLR ?????????????????NaN/Inf ????
     if (contrib.allFinite() && contrib.hasNonZero()) {
         pathState.contribution += contrib;
     }
@@ -296,14 +300,14 @@ extern "C" __global__ void sampleLights(
     else if (!contrib.allFinite()) {
         unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
         if (idx < 5) {
-            printf("[NaN] sample_lights: px=(%u,%u) pathLen=%u contrib=(%.4f,%.4f,%.4f) op=throughput*Le*fs*G*MIS/invPDF\n",
+            VLR_DEBUG_PRINTF("[NaN] sample_lights: px=(%u,%u) pathLen=%u contrib=(%.4f,%.4f,%.4f) op=throughput*Le*fs*G*MIS/invPDF\n",
                    pathState.pixelX, pathState.pixelY, pathState.pathLength,
                    contrib.values[0], contrib.values[1], contrib.values[2]);
         }
     }
 #endif
 
-    // 可选：统计阴影光线数
+    // ???????????
     if (wlp.numShadowRays != nullptr) {
         atomicAdd(wlp.numShadowRays, 1u);
     }
