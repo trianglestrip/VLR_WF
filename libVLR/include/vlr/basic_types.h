@@ -490,10 +490,11 @@ struct SurfacePoint {
     Normal3D geometricNormal;
     ReferenceFrame shadingFrame;
     TexCoord2D texCoord;
+    bool isFrontFace;
     bool atInfinity;
     
     CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE
-    SurfacePoint() : atInfinity(false) {}
+    SurfacePoint() : isFrontFace(true), atInfinity(false) {}
 };
 
 

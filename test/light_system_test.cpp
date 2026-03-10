@@ -259,10 +259,15 @@ static int testAreaLight(VLRContext context, VLRScene scene,
     if (res != VLRResult_Success) return 1;
 
     VLRCameraParams camera = {};
-    float dx = 0.0f - 0.0f, dy = 1.5f - 1.5f, dz = 0.0f - 6.0f;
+    // 修复: 将相机放在盒子内部,看向后墙
+    float camPosX = 0.0f, camPosY = 1.5f, camPosZ = 1.2f;  // 在盒子内部靠近前墙
+    float targetX = 0.0f, targetY = 1.5f, targetZ = -1.0f;  // 看向后墙
+    float dx = targetX - camPosX;
+    float dy = targetY - camPosY;
+    float dz = targetZ - camPosZ;
     float len = std::sqrt(dx*dx + dy*dy + dz*dz);
     if (len < 1e-6f) len = 1.0f;
-    camera.position[0] = 0.0f; camera.position[1] = 1.5f; camera.position[2] = 6.0f;
+    camera.position[0] = camPosX; camera.position[1] = camPosY; camera.position[2] = camPosZ;
     camera.direction[0] = dx/len; camera.direction[1] = dy/len; camera.direction[2] = dz/len;
     camera.up[0] = 0.0f; camera.up[1] = 1.0f; camera.up[2] = 0.0f;
     camera.fovY = 40.0f * PI / 180.0f;
@@ -345,10 +350,15 @@ static int testPointLight(VLRContext context, VLRScene scene,
     if (res != VLRResult_Success) return 1;
 
     VLRCameraParams camera = {};
-    float dx = 0.0f - 0.0f, dy = 1.5f - 1.5f, dz = 0.0f - 6.0f;
+    // 修复: 将相机放在盒子内部,看向后墙
+    float camPosX = 0.0f, camPosY = 1.5f, camPosZ = 1.2f;  // 在盒子内部靠近前墙
+    float targetX = 0.0f, targetY = 1.5f, targetZ = -1.0f;  // 看向后墙
+    float dx = targetX - camPosX;
+    float dy = targetY - camPosY;
+    float dz = targetZ - camPosZ;
     float len = std::sqrt(dx*dx + dy*dy + dz*dz);
     if (len < 1e-6f) len = 1.0f;
-    camera.position[0] = 0.0f; camera.position[1] = 1.5f; camera.position[2] = 6.0f;
+    camera.position[0] = camPosX; camera.position[1] = camPosY; camera.position[2] = camPosZ;
     camera.direction[0] = dx/len; camera.direction[1] = dy/len; camera.direction[2] = dz/len;
     camera.up[0] = 0.0f; camera.up[1] = 1.0f; camera.up[2] = 0.0f;
     camera.fovY = 40.0f * PI / 180.0f;

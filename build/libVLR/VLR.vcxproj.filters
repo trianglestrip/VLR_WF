@@ -1,25 +1,25 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\vlr.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\vlr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\context.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\scene.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\scene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\image_loader.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\image_loader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\env_importance.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\env_importance.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\tinyexr_impl.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\tinyexr_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="F:\project\VLR_WF\libVLR\denoiser.cpp">
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\denoiser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -50,11 +50,11 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="F:\project\VLR_WF\libVLR\CMakeLists.txt" />
+    <CustomBuild Include="D:\gitProject\VLR_WF\libVLR\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{30B28666-184C-31A6-820D-3FA44BCBAD8B}</UniqueIdentifier>
+      <UniqueIdentifier>{ADADAA5B-0DAF-34D1-AB9E-7BC446CD6BE3}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

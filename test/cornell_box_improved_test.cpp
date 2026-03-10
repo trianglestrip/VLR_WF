@@ -27,9 +27,100 @@
 #include <string>
 
 #include "ini_parser.h"
+#include <fstream>
+#include <sstream>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+
+// ----------------------------------------------------------------------------
+// Tuning knobs (keep defaults here, override via INI/CLI where available)
+// ----------------------------------------------------------------------------
+#define VLR_CB_DEFAULT_WIDTH 512u
+#define VLR_CB_DEFAULT_HEIGHT 512u
+#define VLR_CB_DEFAULT_SPP 256u
+#define VLR_CB_DEFAULT_MAX_DEPTH 8u
+#define VLR_CB_DEFAULT_EXPOSURE 1.0f
+
+#define VLR_CB_DEFAULT_ENV_ENABLED 1
+#define VLR_CB_DEFAULT_ENV_INTENSITY 0.3f
+
+// Area light emission (RGB)
+#define VLR_CB_DEFAULT_LIGHT_EMISSION 15.0f  // Normal level for Cornell Box
+
+// Glass model:
+// 1 = SpecularTransmission (stable, clear glass)
+// 0 = MicrofacetScattering (harder to sample, more sensitive)
+#define VLR_CB_GLASS_USE_SPECULAR_TRANSMISSION 1
+#define VLR_CB_GLASS_IOR 1.5f
+#define VLR_CB_GLASS_ROUGHNESS 0.001f
+
+#define VLR_CB_TONEMAP_ACES 1
+
+// ============================================================================
+// Helper Macros & Functions
+// ============================================================================
+
+// Error checking macro for VLR API calls
+#define VLR_CHECK(call, msg) \
+    do { \
+        res = (call); \
+        if (res != VLRResult_Success) { \
+            fprintf(stderr, "[Error] %s: %d\n", (msg), res); \
+            goto cleanup; \
+        } \
+    } while(0)
+
+// Warning macro for non-critical failures
+#define VLR_WARN(call, msg) \
+    do { \
+        res = (call); \
+        if (res != VLRResult_Success) { \
+            fprintf(stderr, "[Warning] %s: %d\n", (msg), res); \
+        } \
+    } while(0)
+
+// Simplified color definition (sRGB to linear conversion)
+#define DEFINE_COLOR3(name, r, g, b) float name[] = { (r), (g), (b) }
+
+// Common transform values
+static const float kIdentityOrigin[] = { 0.0f, 0.0f, 0.0f };
+static const float kIdentityScale[] = { 1.0f, 1.0f, 1.0f };
+static const float kIdentityAxis[] = { 0.0f, 1.0f, 0.0f };
+
+// Material creation helpers
+static inline VLRResult createMatteMaterial(
+    VLRScene scene, const float* color, const float* emission, 
+    VLRMaterial* outMat, const char* name) {
+    VLRResult res = vlrCreateMaterial(scene, 0 /* Matte */, color, emission, outMat);
+    if (res != VLRResult_Success) {
+        fprintf(stderr, "[Error] %s material creation failed\n", name);
+    }
+    return res;
+}
+
+// Mesh creation helper
+static inline VLRResult createQuadMesh(
+    VLRScene scene, const float* vertices, const uint32_t* indices,
+    VLRMaterial material, VLRTriangleMesh* outMesh, const char* name) {
+    VLRResult res = vlrCreateTriangleMesh(scene, vertices, 4, indices, 2, material, outMesh);
+    if (res != VLRResult_Success) {
+        fprintf(stderr, "[Error] %s mesh creation failed\n", name);
+    }
+    return res;
+}
+
+// Instance creation helper
+static inline VLRResult createSimpleInstance(
+    VLRScene scene, VLRTriangleMesh mesh, 
+    const float* origin, const float* scale, const float* axis, float angle,
+    VLRInstance* outInstance, const char* name) {
+    VLRResult res = vlrCreateInstance(scene, mesh, origin, scale, axis, angle, outInstance);
+    if (res != VLRResult_Success) {
+        fprintf(stderr, "[Error] %s instance creation failed\n", name);
+    }
+    return res;
+}
 
 // ============================================================================
 // Usage
@@ -37,14 +128,14 @@
 static void printUsage(const char* prog) {
     printf("\nUsage:\n");
     printf("  %s [scene.ini] [performance.ini]\n", prog);
-    printf("  %s -w <width> -h <height> -s <samples> -o <output>\n", prog);
+    printf("  %s -w <width> -h <height> -s <samples> [--max-depth <d>] [--exposure <ev>] -o <output> [--env 0|1] [--env-intensity <v>]\n", prog);
     printf("\nModes:\n");
     printf("  1. INI mode:  %s scene.ini [performance.ini]\n", prog);
-    printf("     - scene.ini: [Render] Width,Height,Samples,MaxDepth,Exposure\n");
+    printf("     - scene.ini: [Render] Width,Height,Samples,MaxDepth,Exposure,EnableEnvironment,EnvironmentIntensity\n");
     printf("                   [Output] Filename, Format\n");
     printf("                   [Camera] PositionX/Y/Z, TargetX/Y/Z, FOV, LensRadius, FocusDistance\n");
     printf("     - performance.ini: delegated to libVLR (Optimization, KernelConfig, etc.)\n");
-    printf("  2. Legacy mode: -w -h -s -o (used when no INI provided)\n");
+    printf("  2. Legacy mode: -w -h -s --max-depth --exposure -o --env --env-intensity\n");
     printf("\nPriority: INI file > command line > defaults\n");
     printf("\nExamples:\n");
     printf("  %s config_presets/preview_scene.ini config_presets/preview_performance.ini\n", prog);
@@ -60,6 +151,15 @@ static void savePNG(const char* filename, uint32_t width, uint32_t height,
                     const float* rgb, uint32_t numSamples, float exposure) {
     std::vector<unsigned char> pixels(width * height * 3);
     float invSamples = (numSamples > 0) ? (1.0f / (float)numSamples) : 1.0f;
+    auto saturate = [](float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); };
+    auto toneMapACES = [&](float x) {
+        const float a = 2.51f;
+        const float b = 0.03f;
+        const float c = 2.43f;
+        const float d = 0.59f;
+        const float e = 0.14f;
+        return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+    };
 
     for (uint32_t y = 0; y < height; ++y) {
         uint32_t srcY = height - 1 - y;
@@ -67,13 +167,18 @@ static void savePNG(const char* filename, uint32_t width, uint32_t height,
             uint32_t srcIdx = (srcY * width + x) * 3;
             uint32_t dstIdx = (y * width + x) * 3;
 
-            float r = rgb[srcIdx + 0] * invSamples * exposure;
-            float g = rgb[srcIdx + 1] * invSamples * exposure;
-            float b = rgb[srcIdx + 2] * invSamples * exposure;
-
-            r = r < 0 ? 0 : (r > 1 ? 1 : r);
-            g = g < 0 ? 0 : (g > 1 ? 1 : g);
-            b = b < 0 ? 0 : (b > 1 ? 1 : b);
+            float r = fmaxf(0.0f, rgb[srcIdx + 0] * invSamples * exposure);
+            float g = fmaxf(0.0f, rgb[srcIdx + 1] * invSamples * exposure);
+            float b = fmaxf(0.0f, rgb[srcIdx + 2] * invSamples * exposure);
+#if VLR_CB_TONEMAP_ACES
+            r = toneMapACES(r);
+            g = toneMapACES(g);
+            b = toneMapACES(b);
+#else
+            r = saturate(r);
+            g = saturate(g);
+            b = saturate(b);
+#endif
 
             r = powf(r, 1.0f / 2.2f);
             g = powf(g, 1.0f / 2.2f);
@@ -98,6 +203,60 @@ static void savePNG(const char* filename, uint32_t width, uint32_t height,
 
 static const float PI = 3.14159265358979323846f;
 static const float TWO_PI = 6.28318530717958647692f;
+
+/// Load OBJ file (simple version, only vertices and faces)
+static bool loadOBJ(const char* filename, std::vector<float>& vertices, std::vector<uint32_t>& indices,
+                   float scale = 1.0f, float tx = 0.0f, float ty = 0.0f, float tz = 0.0f) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        fprintf(stderr, "[Error] Cannot open OBJ file: %s\n", filename);
+        return false;
+    }
+    
+    vertices.clear();
+    indices.clear();
+    
+    std::vector<float> tempVerts;
+    std::string line;
+    
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        
+        std::istringstream iss(line);
+        std::string prefix;
+        iss >> prefix;
+        
+        if (prefix == "v") {
+            float x, y, z;
+            iss >> x >> y >> z;
+            tempVerts.push_back(x * scale + tx);
+            tempVerts.push_back(y * scale + ty);
+            tempVerts.push_back(z * scale + tz);
+        }
+        else if (prefix == "f") {
+            std::string v1, v2, v3;
+            iss >> v1 >> v2 >> v3;
+            
+            // Parse vertex indices (format: v or v/vt or v/vt/vn)
+            auto parseIndex = [](const std::string& s) -> uint32_t {
+                size_t slash = s.find('/');
+                std::string indexStr = (slash != std::string::npos) ? s.substr(0, slash) : s;
+                return (uint32_t)(std::stoi(indexStr) - 1);  // OBJ indices are 1-based
+            };
+            
+            indices.push_back(parseIndex(v1));
+            indices.push_back(parseIndex(v2));
+            indices.push_back(parseIndex(v3));
+        }
+    }
+    
+    vertices = tempVerts;
+    file.close();
+    
+    printf("[Info] Loaded OBJ: %s (%zu vertices, %zu triangles)\n", 
+           filename, vertices.size() / 3, indices.size() / 3);
+    return true;
+}
 
 /// UV sphere: center (cx,cy,cz), radius, segments (longitude), rings (latitude)
 static void createSphere(std::vector<float>& vertices, std::vector<uint32_t>& indices,
@@ -251,11 +410,11 @@ int main(int argc, char** argv) {
     fflush(stdout);
 
     // Defaults (priority: INI file > command line > these values)
-    uint32_t width = 512;
-    uint32_t height = 512;
-    uint32_t numSamples = 128;  // 默认采样数
-    uint32_t maxDepth = 8;
-    float exposure = 2.0f;  // 大幅增加曝光度测试
+    uint32_t width = VLR_CB_DEFAULT_WIDTH;
+    uint32_t height = VLR_CB_DEFAULT_HEIGHT;
+    uint32_t numSamples = VLR_CB_DEFAULT_SPP;
+    uint32_t maxDepth = VLR_CB_DEFAULT_MAX_DEPTH;
+    float exposure = VLR_CB_DEFAULT_EXPOSURE;
     std::string outputFile = "cornell_box_improved.png";
     std::string outputFormat = "png";
 
@@ -263,11 +422,13 @@ int main(int argc, char** argv) {
     float camTargetX = 0.0f, camTargetY = 1.5f, camTargetZ = 0.0f;
     float camFOV = 40.0f, lensRadius = 0.0f, focusDistance = 1.0f;
     
-    // 降噪器配置（默认禁用）
+    // Denoiser config (disabled by default)
     bool denoiserEnabled = false;
     bool denoiserUseAlbedo = true;
     bool denoiserUseNormal = true;
     float denoiserHDRIntensity = 1.0f;
+    bool enableEnvironmentLight = (VLR_CB_DEFAULT_ENV_ENABLED != 0);
+    float environmentIntensity = VLR_CB_DEFAULT_ENV_INTENSITY;
 
     bool useIniScene = false;
     const char* perfConfigFile = nullptr;
@@ -277,11 +438,11 @@ int main(int argc, char** argv) {
         INIParser parser;
         if (parser.load(argv[1])) {
             useIniScene = true;
-            width = (uint32_t)parser.getInt("Render", "Width", 512);
-            height = (uint32_t)parser.getInt("Render", "Height", 512);
-            numSamples = (uint32_t)parser.getInt("Render", "Samples", 1024);
-            maxDepth = (uint32_t)parser.getInt("Render", "MaxDepth", 8);
-            exposure = parser.getFloat("Render", "Exposure", 1.0f);
+            width = (uint32_t)parser.getInt("Render", "Width", (int)VLR_CB_DEFAULT_WIDTH);
+            height = (uint32_t)parser.getInt("Render", "Height", (int)VLR_CB_DEFAULT_HEIGHT);
+            numSamples = (uint32_t)parser.getInt("Render", "Samples", (int)VLR_CB_DEFAULT_SPP);
+            maxDepth = (uint32_t)parser.getInt("Render", "MaxDepth", (int)VLR_CB_DEFAULT_MAX_DEPTH);
+            exposure = parser.getFloat("Render", "Exposure", VLR_CB_DEFAULT_EXPOSURE);
             outputFile = parser.getString("Output", "Filename", "cornell_box_improved.png");
             outputFormat = parser.getString("Output", "Format", "png");
             camPosX = parser.getFloat("Camera", "PositionX", 0.0f);
@@ -293,8 +454,10 @@ int main(int argc, char** argv) {
             camFOV = parser.getFloat("Camera", "FOV", 40.0f);
             lensRadius = parser.getFloat("Camera", "LensRadius", 0.0f);
             focusDistance = parser.getFloat("Camera", "FocusDistance", 1.0f);
+            enableEnvironmentLight = parser.getInt("Render", "EnableEnvironment", VLR_CB_DEFAULT_ENV_ENABLED) != 0;
+            environmentIntensity = parser.getFloat("Render", "EnvironmentIntensity", VLR_CB_DEFAULT_ENV_INTENSITY);
             
-            // 读取降噪器配置
+            // Read denoiser config
             denoiserEnabled = parser.getInt("Denoiser", "Enabled", 0) != 0;
             denoiserUseAlbedo = parser.getInt("Denoiser", "UseAlbedo", 1) != 0;
             denoiserUseNormal = parser.getInt("Denoiser", "UseNormal", 1) != 0;
@@ -307,18 +470,24 @@ int main(int argc, char** argv) {
         }
     }
 
-    // 2. Command line: legacy mode (when no INI) or --help
-    if (!useIniScene) {
-        for (int i = 1; i < argc; ++i) {
-            if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
-                width = (uint32_t)atoi(argv[++i]);
-            } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
-                height = (uint32_t)atoi(argv[++i]);
-            } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-                numSamples = (uint32_t)atoi(argv[++i]);
-            } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
-                outputFile = argv[++i];
-            }
+    // 2. Command line: flags override defaults/INI values.
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
+            width = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
+            height = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+            numSamples = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--max-depth") == 0 && i + 1 < argc) {
+            maxDepth = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--exposure") == 0 && i + 1 < argc) {
+            exposure = (float)atof(argv[++i]);
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            outputFile = argv[++i];
+        } else if (strcmp(argv[i], "--env") == 0 && i + 1 < argc) {
+            enableEnvironmentLight = atoi(argv[++i]) != 0;
+        } else if (strcmp(argv[i], "--env-intensity") == 0 && i + 1 < argc) {
+            environmentIntensity = (float)atof(argv[++i]);
         }
     }
     for (int i = 1; i < argc; ++i) {
@@ -338,6 +507,9 @@ int main(int argc, char** argv) {
     } else {
         printf("Denoiser: Disabled\n");
     }
+    printf("Environment: %s (Intensity: %.3f)\n",
+           enableEnvironmentLight ? "Enabled" : "Disabled",
+           environmentIntensity);
     if (useIniScene) printf("Scene config: %s\n", argv[1]);
     if (perfConfigFile) printf("Performance config: %s (delegated to libVLR)\n", perfConfigFile);
     fflush(stdout);
@@ -349,47 +521,32 @@ int main(int argc, char** argv) {
     std::vector<float> sphereVerts, boxVerts;
     std::vector<uint32_t> sphereInds, boxInds;
     
-    // Materials
-    float whiteColor[] = { 0.522f, 0.522f, 0.522f };
-    float redColor[] = { 0.522f, 0.0508f, 0.0508f };
-    float blueColor[] = { 0.0508f, 0.0508f, 0.522f };
-    float blackColor[] = { 0.0508f, 0.0508f, 0.0508f };
-    VLRMaterial matWhite = nullptr;
-    VLRMaterial matRed = nullptr;
-    VLRMaterial matBlue = nullptr;
-    VLRMaterial matFloor = nullptr;
-    VLRMaterial matLight = nullptr;
-    float lightEmission[] = { 150.0f, 150.0f, 150.0f };  // 大幅增加光照强度测试
-    VLRMaterial matGlass = nullptr;
-    float glassColor[] = { 0.999f, 0.999f, 0.999f };
-    VLRMaterial matGold = nullptr;
-    float etaGold[] = { 0.143f, 0.374f, 1.442f };
-    float kappaGold[] = { 3.984f, 2.386f, 1.603f };
-    float envColor[] = { 0.1f, 0.1f, 0.1f };  // 降低环境光强度
+    // Materials (sRGB to linear: white=0.522, red/blue=0.522/0.0508, black=0.0508)
+    DEFINE_COLOR3(whiteColor, 0.522f, 0.522f, 0.522f);
+    DEFINE_COLOR3(redColor, 0.522f, 0.0508f, 0.0508f);
+    DEFINE_COLOR3(blueColor, 0.0508f, 0.0508f, 0.522f);
+    DEFINE_COLOR3(blackColor, 0.0508f, 0.0508f, 0.0508f);
+    DEFINE_COLOR3(lightEmission, VLR_CB_DEFAULT_LIGHT_EMISSION, VLR_CB_DEFAULT_LIGHT_EMISSION, VLR_CB_DEFAULT_LIGHT_EMISSION);
+    DEFINE_COLOR3(glassColor, 0.999f, 0.999f, 0.999f);
+    DEFINE_COLOR3(etaGold, 0.143f, 0.374f, 1.442f);
+    DEFINE_COLOR3(kappaGold, 3.984f, 2.386f, 1.603f);
+    DEFINE_COLOR3(envColor, environmentIntensity, environmentIntensity, environmentIntensity);
+    DEFINE_COLOR3(pointLightPos, 0.0f, 2.5f, 0.5f);
+    DEFINE_COLOR3(pointLightIntensity, 10.0f, 10.0f, 10.0f);  // Normal point light intensity
+    
+    VLRMaterial matWhite = nullptr, matRed = nullptr, matBlue = nullptr;
+    VLRMaterial matFloor = nullptr, matLight = nullptr;
+    VLRMaterial matGlass = nullptr, matGold = nullptr;
     
     // Geometry
-    VLRTriangleMesh meshFloor = nullptr;
-    VLRTriangleMesh meshCeiling = nullptr;
-    VLRTriangleMesh meshBackWall = nullptr;
-    VLRTriangleMesh meshLeftWall = nullptr;
-    VLRTriangleMesh meshRightWall = nullptr;
-    VLRTriangleMesh meshFrontWall = nullptr;
-    VLRTriangleMesh meshLight = nullptr;
-    VLRTriangleMesh meshSphere = nullptr;
-    VLRTriangleMesh meshBox = nullptr;
+    VLRTriangleMesh meshFloor = nullptr, meshCeiling = nullptr, meshBackWall = nullptr;
+    VLRTriangleMesh meshLeftWall = nullptr, meshRightWall = nullptr, meshFrontWall = nullptr;
+    VLRTriangleMesh meshLight = nullptr, meshSphere = nullptr, meshBox = nullptr;
     
     // Instances
-    float origin[] = { 0, 0, 0 };
-    float scale[] = { 1, 1, 1 };
-    float axis[] = { 0, 1, 0 };
-    VLRInstance instFloor = nullptr;
-    VLRInstance instCeiling = nullptr;
-    VLRInstance instBackWall = nullptr;
-    VLRInstance instLeftWall = nullptr;
-    VLRInstance instRightWall = nullptr;
-    VLRInstance instLight = nullptr;
-    VLRInstance instSphere = nullptr;
-    VLRInstance instBox = nullptr;
+    VLRInstance instFloor = nullptr, instCeiling = nullptr, instBackWall = nullptr;
+    VLRInstance instLeftWall = nullptr, instRightWall = nullptr;
+    VLRInstance instLight = nullptr, instSphere = nullptr, instBox = nullptr;
     
     // Camera
     float dx, dy, dz, len;
@@ -406,18 +563,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 设置降噪器配置
-    res = vlrSetDenoiserConfig(context, denoiserEnabled, denoiserUseAlbedo, denoiserUseNormal, denoiserHDRIntensity);
-    if (res != VLRResult_Success) {
-        fprintf(stderr, "[Warning] Failed to set denoiser config\n");
-    }
+    VLR_WARN(vlrSetDenoiserConfig(context, denoiserEnabled, denoiserUseAlbedo, denoiserUseNormal, denoiserHDRIntensity),
+             "Set denoiser config");
 
-    // Load performance config (delegated to libVLR)
     if (perfConfigFile) {
-        res = vlrLoadPerformanceConfig(context, perfConfigFile);
-        if (res != VLRResult_Success) {
-            fprintf(stderr, "[Warning] Failed to load performance config: %s, using defaults\n", perfConfigFile);
-        }
+        VLR_WARN(vlrLoadPerformanceConfig(context, perfConfigFile), "Load performance config");
     }
 
     res = vlrCreateScene(context, &scene);
@@ -435,111 +585,80 @@ int main(int argc, char** argv) {
     // blue:  sRGB blue -> linear (0.0508, 0.0508, 0.522)
     // black: sRGB 0.25 -> linear ~0.0508
 
-    res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, nullptr, &matWhite);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] White material\n"); goto cleanup; }
+    VLR_CHECK(createMatteMaterial(scene, whiteColor, nullptr, &matWhite, "White"), "White material");
+    VLR_CHECK(createMatteMaterial(scene, redColor, nullptr, &matRed, "Red"), "Red material");
+    VLR_CHECK(createMatteMaterial(scene, blueColor, nullptr, &matBlue, "Blue"), "Blue material");
+    VLR_CHECK(vlrCreateMaterialCheckerboard(scene, blackColor, whiteColor, 20, 1.5f, &matFloor), "Floor material");
+    VLR_CHECK(createMatteMaterial(scene, whiteColor, lightEmission, &matLight, "Light"), "Light material");
 
-    res = vlrCreateMaterial(scene, 0 /* Matte */, redColor, nullptr, &matRed);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Red material\n"); goto cleanup; }
+    // Glass sphere: use SpecularTransmission (BSDFType = 6)
+#if VLR_CB_GLASS_USE_SPECULAR_TRANSMISSION
+    printf("[Test] Creating glass material: BSDFType=6 (SpecularTransmission), IOR=%.2f, Color=(%.2f,%.2f,%.2f)\n",
+           VLR_CB_GLASS_IOR, glassColor[0], glassColor[1], glassColor[2]);
+    VLR_CHECK(vlrCreateMaterialEx(scene, 6 /* BSDFType_SpecularTransmission */, glassColor, 0.0f, 0.0f, 
+                                   VLR_CB_GLASS_IOR, nullptr, &matGlass), "Glass material (SpecularTransmission)");
+#else
+    VLR_CHECK(vlrCreateMaterialMicrofacetScattering(scene, VLR_CB_GLASS_IOR, VLR_CB_GLASS_ROUGHNESS, &matGlass),
+              "Glass material (MicrofacetScattering)");
+#endif
 
-    res = vlrCreateMaterial(scene, 0 /* Matte */, blueColor, nullptr, &matBlue);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Blue material\n"); goto cleanup; }
-
-    res = vlrCreateMaterialCheckerboard(scene, blackColor, whiteColor, 20, 1.5f, &matFloor);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor material\n"); goto cleanup; }
-
-    res = vlrCreateMaterial(scene, 0 /* Matte */, whiteColor, lightEmission, &matLight);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light material\n"); goto cleanup; }
-
-    // Glass sphere: 使用MicrofacetScattering(type 4)支持反射+折射
-    // 参考libVLR_reference使用SpecularScattering,对应我们的MicrofacetScattering
-    // IOR 2.4 (钻石), roughness 0.001 (接近完美镜面,减少散射)
-    // 参考libVLR_reference scene.cpp line 732-735
-    res = vlrCreateMaterialMicrofacetScattering(scene, 2.4f, 0.001f, &matGlass);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Glass material\n"); goto cleanup; }
-
-    // Gold metal box: MicrofacetReflection, roughness 0.2 (更光滑)
-    res = vlrCreateMaterialConductor(scene, etaGold, kappaGold, 0.2f, &matGold);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Gold material\n"); goto cleanup; }
+    // Gold metal box: MicrofacetReflection, roughness 0.2
+    VLR_CHECK(vlrCreateMaterialConductor(scene, etaGold, kappaGold, 0.2f, &matGold), "Gold material");
 
     // ========================================================================
     // Geometry
     // ========================================================================
 
-    res = vlrCreateTriangleMesh(scene, kFloorVertices, 4, kFloorIndices, 2, matFloor, &meshFloor);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor mesh\n"); goto cleanup; }
+    VLR_CHECK(createQuadMesh(scene, kFloorVertices, kFloorIndices, matFloor, &meshFloor, "Floor"), "Floor mesh");
+    VLR_CHECK(createQuadMesh(scene, kCeilingVertices, kCeilingIndices, matWhite, &meshCeiling, "Ceiling"), "Ceiling mesh");
+    VLR_CHECK(createQuadMesh(scene, kBackWallVertices, kBackWallIndices, matWhite, &meshBackWall, "BackWall"), "BackWall mesh");
+    VLR_CHECK(createQuadMesh(scene, kLeftWallVertices, kLeftWallIndices, matBlue, &meshLeftWall, "LeftWall"), "LeftWall mesh");
+    VLR_CHECK(createQuadMesh(scene, kRightWallVertices, kRightWallIndices, matRed, &meshRightWall, "RightWall"), "RightWall mesh");
+    VLR_CHECK(createQuadMesh(scene, kFrontWallVertices, kFrontWallIndices, matWhite, &meshFrontWall, "FrontWall"), "FrontWall mesh");
+    VLR_CHECK(createQuadMesh(scene, kLightVertices, kLightIndices, matLight, &meshLight, "Light"), "Light mesh");
 
-    res = vlrCreateTriangleMesh(scene, kCeilingVertices, 4, kCeilingIndices, 2, matWhite, &meshCeiling);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Ceiling mesh\n"); goto cleanup; }
+    // Load glass sphere from OBJ file
+    // For debugging: can switch material to see reflections better
+    if (!loadOBJ("bin/resources/sphere/sphere.obj", sphereVerts, sphereInds, 
+                 0.5f, -0.6f, 0.5f, 0.0f)) {
+        fprintf(stderr, "[Warning] Failed to load sphere.obj, using procedural sphere\n");
+        createSphere(sphereVerts, sphereInds, -0.6f, 0.5f, 0.0f, 0.5f, 64, 48);
+    }
+    
+    // Alternative: Use mirror material to test reflections
+    // Uncomment to see pure reflections instead of glass
+    // matGlass = matGold;  // Use mirror material for debugging
+    
+    createRotatedBox(boxVerts, boxInds, 0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);
 
-    res = vlrCreateTriangleMesh(scene, kBackWallVertices, 4, kBackWallIndices, 2, matWhite, &meshBackWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Back wall mesh\n"); goto cleanup; }
-
-    res = vlrCreateTriangleMesh(scene, kLeftWallVertices, 4, kLeftWallIndices, 2, matBlue, &meshLeftWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Left wall mesh\n"); goto cleanup; }
-
-    res = vlrCreateTriangleMesh(scene, kRightWallVertices, 4, kRightWallIndices, 2, matRed, &meshRightWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Right wall mesh\n"); goto cleanup; }
-
-    res = vlrCreateTriangleMesh(scene, kFrontWallVertices, 4, kFrontWallIndices, 2, matWhite, &meshFrontWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Front wall mesh\n"); goto cleanup; }
-
-    res = vlrCreateTriangleMesh(scene, kLightVertices, 4, kLightIndices, 2, matLight, &meshLight);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light mesh\n"); goto cleanup; }
-
-    createSphere(sphereVerts, sphereInds, -0.6f, 0.5f, 0.0f, 0.5f, 64, 48);  // glass sphere on left
-    createRotatedBox(boxVerts, boxInds, 0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);  // metal box on right
-
-    res = vlrCreateTriangleMesh(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
-                               sphereInds.data(), (uint32_t)(sphereInds.size() / 3), matGlass, &meshSphere);  // 球用玻璃
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Sphere mesh\n"); goto cleanup; }
-
-    res = vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),
-                               boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox);  // 盒子用金属
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box mesh\n"); goto cleanup; }
+    VLR_CHECK(vlrCreateTriangleMesh(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
+                                    sphereInds.data(), (uint32_t)(sphereInds.size() / 3), matGlass, &meshSphere),
+              "Sphere mesh");
+    VLR_CHECK(vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),
+                                    boxInds.data(), (uint32_t)(boxInds.size() / 3), matGold, &meshBox),
+              "Box mesh");
 
     // ========================================================================
     // Instances
     // ========================================================================
 
-    res = vlrCreateInstance(scene, meshFloor, origin, scale, axis, 0.0f, &instFloor);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Floor instance\n"); goto cleanup; }
+    VLR_CHECK(createSimpleInstance(scene, meshFloor, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instFloor, "Floor"), "Floor instance");
+    VLR_CHECK(createSimpleInstance(scene, meshCeiling, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instCeiling, "Ceiling"), "Ceiling instance");
+    VLR_CHECK(createSimpleInstance(scene, meshBackWall, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instBackWall, "BackWall"), "BackWall instance");
+    VLR_CHECK(createSimpleInstance(scene, meshLeftWall, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instLeftWall, "LeftWall"), "LeftWall instance");
+    VLR_CHECK(createSimpleInstance(scene, meshRightWall, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instRightWall, "RightWall"), "RightWall instance");
+    VLR_CHECK(createSimpleInstance(scene, meshLight, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instLight, "Light"), "Light instance");
+    VLR_CHECK(createSimpleInstance(scene, meshSphere, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instSphere, "Sphere"), "Sphere instance");
+    VLR_CHECK(createSimpleInstance(scene, meshBox, kIdentityOrigin, kIdentityScale, kIdentityAxis, 0.0f, &instBox, "Box"), "Box instance");
 
-    res = vlrCreateInstance(scene, meshCeiling, origin, scale, axis, 0.0f, &instCeiling);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Ceiling instance\n"); goto cleanup; }
+    VLR_CHECK(vlrAddAreaLight(scene, instLight), "Add area light");
 
-    res = vlrCreateInstance(scene, meshBackWall, origin, scale, axis, 0.0f, &instBackWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Back wall instance\n"); goto cleanup; }
+    if (enableEnvironmentLight) {
+        VLR_CHECK(vlrSetEnvironmentLight(scene, envColor), "Set environment light");
+    }
 
-    res = vlrCreateInstance(scene, meshLeftWall, origin, scale, axis, 0.0f, &instLeftWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Left wall instance\n"); goto cleanup; }
-
-    res = vlrCreateInstance(scene, meshRightWall, origin, scale, axis, 0.0f, &instRightWall);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Right wall instance\n"); goto cleanup; }
-
-    res = vlrCreateInstance(scene, meshLight, origin, scale, axis, 0.0f, &instLight);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Light instance\n"); goto cleanup; }
-
-    res = vlrCreateInstance(scene, meshSphere, origin, scale, axis, 0.0f, &instSphere);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Sphere instance\n"); goto cleanup; }
-
-    res = vlrCreateInstance(scene, meshBox, origin, scale, axis, 0.0f, &instBox);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Box instance\n"); goto cleanup; }
-
-    res = vlrAddAreaLight(scene, instLight);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add area light\n"); goto cleanup; }
-
-    // 不添加环境光,参考libVLR_reference也没有环境光
-    // res = vlrSetEnvironmentLight(scene, envColor);
-    // if (res != VLRResult_Success) { fprintf(stderr, "[Error] Set environment light\n"); goto cleanup; }
-
-    // 点光源测试（参考 VLR scene.cpp 的 PointEmitter 配置）
-    // 位置：(0.0f, 2.9f, 0.0f) - 顶部中心
-    // 强度：2.4 W/sr（参考值）
-    // 注：默认注释掉，与参考场景一致；需要时可取消注释测试
-    // float pointLightPos[] = { 0.0f, 2.9f, 0.0f };
-    // float pointLightIntensity[] = { 2.4f, 2.4f, 2.4f };
-    // res = vlrAddPointLight(scene, pointLightPos, pointLightIntensity);
-    // if (res != VLRResult_Success) { fprintf(stderr, "[Error] Add point light\n"); goto cleanup; }
+    // Add point light for better glass illumination
+    VLR_CHECK(vlrAddPointLight(scene, pointLightPos, pointLightIntensity), "Add point light");
 
     // ========================================================================
     // Camera: from config or defaults
@@ -565,8 +684,7 @@ int main(int argc, char** argv) {
     camera.focalLength = 0.0f;
     camera.cameraType = 0;
 
-    res = vlrSetCamera(scene, &camera);
-    if (res != VLRResult_Success) { fprintf(stderr, "[Error] Set camera\n"); goto cleanup; }
+    VLR_CHECK(vlrSetCamera(scene, &camera), "Set camera");
 
     // ========================================================================
     // Environment Light (optional, for ambient lighting)
@@ -592,12 +710,7 @@ int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    res = vlrRender(context, scene, width, height, numSamples, vlr::VLRRenderer_WavefrontPathTracing);
-    if (res != VLRResult_Success) {
-        fprintf(stderr, "[Error] Render failed: %d\n", res);
-        free(outputBuffer);
-        goto cleanup;
-    }
+    VLR_CHECK(vlrRender(context, scene, width, height, numSamples, vlr::VLRRenderer_WavefrontPathTracing), "Render");
 
     deviceBuffer = vlrGetOutputBuffer(context);
     if (!deviceBuffer) {

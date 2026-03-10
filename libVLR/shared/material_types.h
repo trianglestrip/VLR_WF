@@ -729,8 +729,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE MaterialCategory bsdfTypeToMaterialCategory(
     case BSDFType_DisneyBRDF:
         return MaterialCategory_Glossy;
     case BSDFType_Specular:
-    case BSDFType_SpecularTransmission:
         return MaterialCategory_Specular;
+    case BSDFType_SpecularTransmission:
+        return MaterialCategory_Transmissive;  // Fixed: SpecularTransmission is transmissive!
     case BSDFType_GGXTransmission:
     case BSDFType_MicrofacetScattering:
         return MaterialCategory_Transmissive;

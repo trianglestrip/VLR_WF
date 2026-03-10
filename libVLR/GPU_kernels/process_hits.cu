@@ -94,6 +94,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
     SurfacePoint surfPt;
     surfPt.position = Point3D(pathState.direction.x, pathState.direction.y, pathState.direction.z);
     surfPt.atInfinity = true;
+    surfPt.isFrontFace = true;
     surfPt.geometricNormal = Vector3D(-pathState.direction.x, -pathState.direction.y, -pathState.direction.z);
 
     float theta, phi;
@@ -306,12 +307,17 @@ extern "C" __global__ void processHits(
 
         computeSurfacePointBasic(input, ctx, &surfPt, &hypAreaPDF);
 
-        // Faceforward??????????????NEE/BSDF ??????
+        // Always faceforward the geometric normal for a consistent local frame,
+        // but preserve whether this hit was on the front face (outside -> inside).
         {
             Vector3D rayDir = pathState.direction;
-            if (dot(surfPt.geometricNormal, rayDir) > 0.0f) {
+            float ndotd = dot(surfPt.geometricNormal, rayDir);
+            surfPt.isFrontFace = (ndotd <= 0.0f);
+            if (ndotd > 0.0f) {
                 surfPt.geometricNormal = -surfPt.geometricNormal;
-                surfPt.shadingFrame = ReferenceFrame(surfPt.shadingFrame.x, surfPt.geometricNormal);
+                // Flip the shading normal consistently with the geometric normal.
+                // Keep the original tangent as much as possible to preserve texture orientation.
+                surfPt.shadingFrame = ReferenceFrame(surfPt.shadingFrame.x, -surfPt.shadingFrame.z);
             }
         }
 
@@ -353,6 +359,7 @@ extern "C" __global__ void processHits(
             surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
             surfPt.texCoord = TexCoord2D(hitInfo.u, hitInfo.v);
             surfPt.atInfinity = false;
+            surfPt.isFrontFace = (dot(surfPt.geometricNormal, pathState.direction) <= 0.0f);
         } else {
             hypAreaPDF = 1.0f;
             // ??????????????????
@@ -364,6 +371,7 @@ extern "C" __global__ void processHits(
             surfPt.shadingFrame = ReferenceFrame(Vector3D(1, 0, 0), surfPt.geometricNormal);
             surfPt.texCoord = TexCoord2D(hitInfo.u, hitInfo.v);
             surfPt.atInfinity = false;
+            surfPt.isFrontFace = (dot(surfPt.geometricNormal, pathState.direction) <= 0.0f);
         }
     }
 

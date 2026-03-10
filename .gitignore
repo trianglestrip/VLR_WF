@@ -119,3 +119,12 @@ scripts/
 # Tools 文件夹（教学文档和示意图）
 # 不忽略 - 保留用于教学目的
 # tools/
+
+# Viewer外部依赖临时文件
+viewer/external/assimp/temp/
+viewer/external/assimp/build/
+viewer/external/taskflow/temp/
+viewer/external/taskflow/extracted/
+
+# 模型文件（体积大，不纳入版本控制）
+models/

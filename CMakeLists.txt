@@ -87,6 +87,9 @@ endforeach()
 # ----------------------------------------------------------------------------
 add_subdirectory(libVLR)
 
+# Viewer：3D场景查看器和渲染器前端（使用Assimp加载模型）
+add_subdirectory(viewer)
+
 # ----------------------------------------------------------------------------
 # 测试可执行文件（仅包含存在的测试文件）
 # ----------------------------------------------------------------------------
@@ -184,6 +187,49 @@ target_include_directories(glass_metal_test PRIVATE
     ${CMAKE_SOURCE_DIR}/test
 )
 target_link_libraries(glass_metal_test PRIVATE VLR CUDA::cudart)
+
+# ----------------------------------------------------------------------------
+# Viewer 示例程序（如果Viewer库可用）
+# ----------------------------------------------------------------------------
+if(TARGET Viewer)
+    # 简单的Viewer测试程序
+    add_executable(simple_viewer_test viewer/examples/simple_viewer_test.cpp)
+    target_include_directories(simple_viewer_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/viewer/include
+        ${CMAKE_SOURCE_DIR}/libVLR/include
+    )
+    target_link_libraries(simple_viewer_test PRIVATE Viewer VLR CUDA::cudart)
+    
+    # 零拷贝性能基准测试（需要直接链接Assimp）
+    set(ASSIMP_LIB_RELEASE "${CMAKE_SOURCE_DIR}/viewer/external/assimp/lib/assimp-vc143-mt.lib")
+    if(EXISTS "${ASSIMP_LIB_RELEASE}")
+        add_executable(zero_copy_benchmark viewer/examples/zero_copy_benchmark.cpp)
+        target_include_directories(zero_copy_benchmark PRIVATE
+            ${CMAKE_SOURCE_DIR}/viewer/include
+            ${CMAKE_SOURCE_DIR}/viewer/external/assimp/include
+        )
+        target_link_libraries(zero_copy_benchmark PRIVATE ${ASSIMP_LIB_RELEASE})
+        message(STATUS "[VLR] 零拷贝基准测试已启用: zero_copy_benchmark")
+    endif()
+    
+    # Taskflow并行加载性能基准测试
+    add_executable(parallel_benchmark viewer/examples/parallel_benchmark.cpp)
+    target_include_directories(parallel_benchmark PRIVATE
+        ${CMAKE_SOURCE_DIR}/viewer/include
+        ${CMAKE_SOURCE_DIR}/libVLR/include
+    )
+    target_link_libraries(parallel_benchmark PRIVATE Viewer VLR CUDA::cudart)
+    
+    # Kitchen场景渲染测试（295个PLY网格）
+    add_executable(kitchen_render_test viewer/examples/kitchen_render_test.cpp)
+    target_include_directories(kitchen_render_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/viewer/include
+        ${CMAKE_SOURCE_DIR}/libVLR/include
+    )
+    target_link_libraries(kitchen_render_test PRIVATE Viewer VLR CUDA::cudart)
+    
+    message(STATUS "[VLR] Viewer测试程序已启用: simple_viewer_test, zero_copy_benchmark, parallel_benchmark, kitchen_render_test")
+endif()
 
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

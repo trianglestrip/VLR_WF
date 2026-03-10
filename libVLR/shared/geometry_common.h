@@ -164,6 +164,9 @@ void decodeHitPointTriangleMesh(
         shadingNormalLocal = geomNormalLocal;
     }
     Normal3D shadingNormal = transformInstanceNormal(inst, shadingNormalLocal);
+    // Keep shading normal consistent with the geometric normal's hemisphere.
+    if (dot(shadingNormal, surfPt->geometricNormal) < 0.0f)
+        shadingNormal = -shadingNormal;
 
     // 切线（从 UV 或几何构造）
     Vector3D tangentLocal;
@@ -176,7 +179,9 @@ void decodeHitPointTriangleMesh(
         tangentLocal = Vector3D(0.0f, 0.0f, 0.0f);
     }
 
-    surfPt->shadingFrame = computeShadingFrame(shadingNormal, tangentLocal);
+    // Tangent is computed in local space; bring it to world to match the shading normal space.
+    Vector3D tangent = transformInstanceVector(inst, tangentLocal);
+    surfPt->shadingFrame = computeShadingFrame(shadingNormal, tangent);
 
     // 纹理坐标插值（若有）
     if (ctx.vertexData.hasTexCoords()) {

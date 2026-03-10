@@ -29,6 +29,16 @@
 #include <cuda_runtime.h>
 #include <cmath>
 
+#ifndef VLR_DEBUG_SPEC_TRANS_ONEPIX
+#define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
+#endif
+#ifndef VLR_DEBUG_SPEC_TRANS_PX
+#define VLR_DEBUG_SPEC_TRANS_PX 320
+#endif
+#ifndef VLR_DEBUG_SPEC_TRANS_PY
+#define VLR_DEBUG_SPEC_TRANS_PY 84
+#endif
+
 namespace {
 
 using namespace vlr;
@@ -156,6 +166,31 @@ extern "C" __global__ void sampleBSDF(
     BSDFSampleResult result;
     sampleBSDFWithU2(bsdfCtx, dirInLocal, u0, u1, u2, &result);
 
+#if VLR_DEBUG_SPEC_TRANS_ONEPIX
+    {
+        BSDFType bsdfType = getBSDFType(matDesc);
+        if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX &&
+            pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
+            pathState.pathLength <= 4 &&
+            (bsdfType == BSDFType_SpecularTransmission || bsdfType == BSDFType_Specular)) {
+            unsigned int idx = atomicAdd(&g_vlrDebugPrintCount, 1u);
+            if (idx < 64) {
+                printf("[SpecTransDbg] px=(%u,%u) len=%u bsdf=%u frontFace=%d wo=(%.3f,%.3f,%.3f) geomNLocal=(%.3f,%.3f,%.3f)\n",
+                    pathState.pixelX, pathState.pixelY,
+                    pathState.pathLength,
+                    (uint32_t)bsdfType,
+                    surfPt.isFrontFace ? 1 : 0,
+                    dirInLocal.x, dirInLocal.y, dirInLocal.z,
+                    geomNormalLocal.x, geomNormalLocal.y, geomNormalLocal.z);
+                printf("[SpecTransDbg] sampled=%u pdf=%.6g f=(%.6g,%.6g,%.6g) wi=(%.3f,%.3f,%.3f)\n",
+                    (uint32_t)result.sampledBSDFType, result.pdf,
+                    result.f.values[0], result.f.values[1], result.f.values[2],
+                    result.dirLocal.x, result.dirLocal.y, result.dirLocal.z);
+            }
+        }
+    }
+#endif
+
 #ifdef VLR_DEBUG_MATERIAL
     if (pathIndex < 10) {
         printf("[GPU SampleBSDF] pathIndex=%u: BSDF sampling result\n", pathIndex);
@@ -207,18 +242,13 @@ extern "C" __global__ void sampleBSDF(
     float cosFactor = dot(result.dirLocal, geomNormalLocal);
     float cosAbs = std::abs(cosFactor);
 
-    pathState.throughput *= result.f * (cosAbs / result.pdf);
-
-    // ??libWR ???SpecularTransmission ??????adjoint BSDF ??
-    // ?Veach 5.3?? shading normal != geometric normal ??cosGeometric/cosShading??
-    if (result.sampledBSDFType == BSDFType_SpecularTransmission) {
-        float cosShading = std::abs(result.dirLocal.z);  // shading normal = (0,0,1) in local frame
-        float cosGeometric = std::abs(dot(result.dirLocal, geomNormalLocal));
-        if (cosShading >= 1e-6f && cosGeometric >= 1e-6f) {
-            float correction = cosGeometric / cosShading;
-            pathState.throughput *= SampledSpectrum(correction);
-        }
+    // Safety check: If cosAbs is too small (perpendicular hit), terminate to avoid division issues
+    if (cosAbs < 1e-7f) {
+        pathState.setTerminated();
+        return;
     }
+
+    pathState.throughput *= result.f * (cosAbs / result.pdf);
 
 #ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
     // ????????????SpecularTransmission ????cmake -DVLR_DEBUG_SPECULAR_TRANSMISSION=ON??
