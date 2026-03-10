@@ -2794,22 +2794,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF_FrontFace(
         result->pdf = (1.0f - F) * squeezeFactor;
         result->sampledBSDFType = BSDFType_SpecularTransmission;
         result->isDelta = true;
-
-#if defined(__CUDA_ARCH__)
-        // Debug: Print first few transmission samples
-        uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if (idx < 5) {
-            printf("[SpecTrans] idx=%u: F=%.3f, etaI=%.3f, etaT=%.3f, frontFace=%d\n",
-                   idx, F, etaIncident, etaTransmitted, frontFace);
-            printf("  trans=(%.3f,%.3f,%.3f), f=(%.6f,%.6f,%.6f), pdf=%.6f\n",
-                   transmittance.values[0], transmittance.values[1], transmittance.values[2],
-                   result->f.values[0], result->f.values[1], result->f.values[2],
-                   result->pdf);
-            printf("  dirIn=(%.3f,%.3f,%.3f), dirOut=(%.3f,%.3f,%.3f)\n",
-                   dirInLocal.x, dirInLocal.y, dirInLocal.z,
-                   result->dirLocal.x, result->dirLocal.y, result->dirLocal.z);
-        }
-#endif
     }
 }
 

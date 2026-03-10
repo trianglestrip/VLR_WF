@@ -250,6 +250,17 @@ extern "C" __global__ void sampleBSDF(
 
     pathState.throughput *= result.f * (cosAbs / result.pdf);
 
+#if defined(__CUDA_ARCH__)
+    // Temporary debug: print first few SpecularTransmission samples
+    if (result.sampledBSDFType == BSDFType_SpecularTransmission && pathIndex < 5) {
+        printf("[BSDF] pathIdx=%u: SpecTrans sampled, f=(%.6f,%.6f,%.6f), pdf=%.6f, cosAbs=%.6f, throughput=(%.6f,%.6f,%.6f)\n",
+               pathIndex,
+               result.f.values[0], result.f.values[1], result.f.values[2],
+               result.pdf, cosAbs,
+               pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
+    }
+#endif
+
 #ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
     // ????????????SpecularTransmission ????cmake -DVLR_DEBUG_SPECULAR_TRANSMISSION=ON??
     if (getBSDFType(matDesc) == BSDFType_SpecularTransmission &&
