@@ -21,6 +21,9 @@ x86/
 *.dll
 *.lib
 *.exp
+# 但保留 viewer 外部依赖的预编译库
+!viewer/external/assimp/lib/*.lib
+!viewer/external/assimp/bin/*.dll
 
 # Visual Studio 缓存
 .vs/
