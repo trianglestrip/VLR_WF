@@ -2716,6 +2716,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF_FrontFace(
     TransportMode mode,
     float u0, float /*u1*/,
     BSDFSampleResult* result) {
+    
     float etaT_eff = etaT;
     if (wls && singleWlSelected && dispersionStrength > 0.0f) {
         uint32_t idx = wls->selectedLambdaIndex() % NumSpectralSamples;

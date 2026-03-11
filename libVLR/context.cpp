@@ -103,15 +103,19 @@ Context::Context(cudaStream_t cudaStream, bool enableLogging)
     , m_cudaContext(nullptr)
     , m_sceneSource(nullptr)
 {
+    // 增加 CUDA printf 缓冲区大小以便调试
+    size_t printfBufferSize = 8 * 1024 * 1024;  // 8 MB
+    cudaDeviceSetLimit(cudaLimitPrintfFifoSize, printfBufferSize);
+    
     // ????CUDA ????
     m_cudaContext = new cudau::Context();
-    
+
     // ????????
     m_denoiserConfig.enabled = false;
     m_denoiserConfig.useAlbedo = true;
     m_denoiserConfig.useNormal = true;
     m_denoiserConfig.hdrIntensity = 1.0f;
-    
+
     // ????????
     m_debugMode = VLRDebugMode_Normal;
     m_probePixelX = -1;
