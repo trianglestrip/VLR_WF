@@ -750,6 +750,43 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
         }
     }
     
+    // LVC-BPT buffers
+    if (wf.useBDPT) {
+        uint32_t numLightPaths = numPixels;
+        uint32_t maxLightVertices = numLightPaths * 4;
+        
+        if (!wf.lightVertexCacheBuffer) {
+            wf.lightVertexCacheBuffer = std::make_unique<cudau::Buffer<shared::LightPathVertex>>();
+        }
+        wf.lightVertexCacheBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxLightVertices);
+        
+        if (!wf.numLightVerticesBuffer) {
+            wf.numLightVerticesBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
+        }
+        wf.numLightVerticesBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 1);
+        wf.numLightVerticesBuffer->clear(m_stream);
+        
+        if (!wf.lightPathStateBuffer) {
+            wf.lightPathStateBuffer = std::make_unique<cudau::Buffer<shared::LightPathState>>();
+        }
+        wf.lightPathStateBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numLightPaths);
+        
+        if (!wf.lightHitInfoBuffer) {
+            wf.lightHitInfoBuffer = std::make_unique<cudau::Buffer<shared::WavefrontHitInfo>>();
+        }
+        wf.lightHitInfoBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numLightPaths);
+        
+        if (!wf.lightSurfacePointBuffer) {
+            wf.lightSurfacePointBuffer = std::make_unique<cudau::Buffer<shared::SurfacePoint>>();
+        }
+        wf.lightSurfacePointBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numLightPaths);
+        
+        printf("[VLR] LVC-BPT buffers allocated: %u light paths, %u max vertices (%.2f MB)\n",
+               numLightPaths, maxLightVertices,
+               (maxLightVertices * sizeof(shared::LightPathVertex) +
+                numLightPaths * sizeof(shared::LightPathState)) / (1024.0f * 1024.0f));
+    }
+
     // ????
     wf.maxNumPaths = numPixels;
     wf.currentWidth = width;
@@ -965,6 +1002,27 @@ void Context::setupWavefrontLaunchParams() {
         lp.envImportanceMap.thetaRes = 0;
         lp.envImportanceMap.phiRes = 0;
         lp.envImportanceMap.totalLuminance = 1.0f;
+    }
+
+    // LVC-BPT params
+    uint32_t numPixels = wf.currentWidth * wf.currentHeight;
+    lp.useBDPT = wf.useBDPT;
+    if (wf.useBDPT && wf.lightVertexCacheBuffer) {
+        lp.lightVertexCache = wf.lightVertexCacheBuffer->getDevicePointer();
+        lp.numLightVertices = wf.numLightVerticesBuffer->getDevicePointer();
+        lp.lightPathStateBuffer = wf.lightPathStateBuffer->getDevicePointer();
+        lp.lightHitInfoBuffer = wf.lightHitInfoBuffer->getDevicePointer();
+        lp.lightSurfacePointBuffer = wf.lightSurfacePointBuffer->getDevicePointer();
+        lp.numLightPaths = numPixels;
+        lp.maxLightVertices = numPixels * 4;
+    } else {
+        lp.lightVertexCache = nullptr;
+        lp.numLightVertices = nullptr;
+        lp.lightPathStateBuffer = nullptr;
+        lp.lightHitInfoBuffer = nullptr;
+        lp.lightSurfacePointBuffer = nullptr;
+        lp.numLightPaths = 0;
+        lp.maxLightVertices = 0;
     }
 
     // ??????
@@ -1440,6 +1498,33 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         VLR_DEBUG_PRINTF("[VLR] executeWavefrontRender: Counter set complete\n");
     }
     
+    // LVC-BPT: Generate light paths before the main eye path loop
+    if (wf.useBDPT && wf.numLightVerticesBuffer && wf.lightVertexCacheBuffer) {
+        uint32_t zero = 0;
+        CUDA_CHECK(cudaMemcpy(
+            wf.numLightVerticesBuffer->getDevicePointer(),
+            &zero,
+            sizeof(uint32_t),
+            cudaMemcpyHostToDevice
+        ));
+        
+        shared::WavefrontLaunchParameters* d_params =
+            static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+        launchGenerateLightPathsKernel(d_params, numPixels, m_stream);
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+        
+        uint32_t numLV = 0;
+        CUDA_CHECK(cudaMemcpy(
+            &numLV,
+            wf.numLightVerticesBuffer->getDevicePointer(),
+            sizeof(uint32_t),
+            cudaMemcpyDeviceToHost
+        ));
+        if (wf.numAccumFrames <= 1) {
+            printf("[VLR-BDPT] Light vertices generated: %u\n", numLV);
+        }
+    }
+
         // ??Wavefront ??
         // ????????????????????
         constexpr uint32_t SYNC_INTERVAL = shared::PerformanceConfig::SyncInterval;

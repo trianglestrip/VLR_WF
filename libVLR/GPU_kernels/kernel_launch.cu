@@ -1,12 +1,12 @@
 // ============================================================================
-// VLR Wavefront - Kernel 启动辅助函数实现
+// VLR Wavefront - Kernel ????????
 //
-// 本文件实�?CUDA 内核的启动逻辑，供 Context 调用�?
-// 须使�?nvcc 编译以支�?<<<>>> kernel 启动语法�?
+// ??????CUDA ????????? Context ????
+// ????nvcc ??????<<<>>> kernel ??????
 //
-// 作者：VLR 开发团�?
-// 创建日期�?026-03-07
-// 环境：CUDA 13.1, OptiX 8.0.0, VS2022
+// ???VLR ?????
+// ??????026-03-07
+// ???CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
 #include "kernel_launch.h"
@@ -20,7 +20,7 @@ void resetNanDebugCount() {
 }
 #endif
 
-// 通用调试计数器（不需�?VLR_DEBUG_NAN_TRACKING 宏）
+// ????????????VLR_DEBUG_NAN_TRACKING ??
 extern "C" __device__ __managed__ unsigned int g_vlrDebugPrintCount = 0;
 
 extern "C" void resetDebugCount() {
@@ -33,7 +33,7 @@ extern "C" void resetDebugCount() {
 namespace vlr {
 
 // ============================================================================
-// CUDA Kernel 外部声明（实现在�?kernel .cu 文件中）
+// CUDA Kernel ??????????kernel .cu ????
 // ============================================================================
 
 extern "C" __global__ void generateRays(
@@ -55,8 +55,14 @@ extern "C" __global__ void renderDebugMode(
     shared::WavefrontLaunchParameters* params,
     uint32_t debugMode);
 
+extern "C" __global__ void generateLightPaths(
+    shared::WavefrontLaunchParameters* params);
+
+extern "C" __global__ void processLightHits(
+    shared::WavefrontLaunchParameters* params);
+
 // ============================================================================
-// 内核启动辅助函数实现
+// ??????????
 // ============================================================================
 
 void launchGenerateRaysKernel(
@@ -65,7 +71,7 @@ void launchGenerateRaysKernel(
     uint32_t height,
     cudaStream_t stream)
 {
-    // 使用性能配置�?block 尺寸
+    // ????????block ??
     constexpr uint32_t blockWidth = shared::PerformanceConfig::GenerateRaysBlockWidth;
     constexpr uint32_t blockHeight = shared::PerformanceConfig::GenerateRaysBlockHeight;
     dim3 blockDim(blockWidth, blockHeight);
@@ -82,7 +88,7 @@ void launchProcessHitsKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    // 使用性能配置�?block size
+    // ????????block size
     constexpr uint32_t blockSize = shared::PerformanceConfig::ProcessHitsBlockSize;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
@@ -96,7 +102,7 @@ void launchSampleLightsKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    // 使用性能配置�?block size
+    // ????????block size
     constexpr uint32_t blockSize = shared::PerformanceConfig::SampleLightsBlockSize;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
@@ -110,7 +116,7 @@ void launchSampleBSDFKernel(
     uint32_t numActivePaths,
     cudaStream_t stream)
 {
-    // 使用性能配置�?block size
+    // ????????block size
     constexpr uint32_t blockSize = shared::PerformanceConfig::SampleBSDFBlockSize;
     uint32_t gridSize = (numActivePaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
@@ -124,7 +130,7 @@ void launchAccumulateKernel(
     uint32_t numPaths,
     cudaStream_t stream)
 {
-    // 使用性能配置�?block size
+    // ????????block size
     constexpr uint32_t blockSize = shared::PerformanceConfig::AccumulateBlockSize;
     uint32_t gridSize = (numPaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
@@ -147,8 +153,32 @@ void launchRenderDebugModeKernel(
     CUDA_CHECK(cudaGetLastError());
 }
 
+void launchGenerateLightPathsKernel(
+    shared::WavefrontLaunchParameters* d_params,
+    uint32_t numLightPaths,
+    cudaStream_t stream)
+{
+    constexpr uint32_t blockSize = 256;
+    uint32_t gridSize = (numLightPaths + blockSize - 1) / blockSize;
+    if (gridSize == 0) return;
+    generateLightPaths<<<gridSize, blockSize, 0, stream>>>(d_params);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+void launchProcessLightHitsKernel(
+    shared::WavefrontLaunchParameters* d_params,
+    uint32_t numLightPaths,
+    cudaStream_t stream)
+{
+    constexpr uint32_t blockSize = 256;
+    uint32_t gridSize = (numLightPaths + blockSize - 1) / blockSize;
+    if (gridSize == 0) return;
+    processLightHits<<<gridSize, blockSize, 0, stream>>>(d_params);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 // ============================================================================
-// RNG 初始�?Kernel
+// RNG ????Kernel
 // ============================================================================
 
 __global__ void initializeRNGKernel(
@@ -159,11 +189,11 @@ __global__ void initializeRNGKernel(
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numPixels) return;
 
-    // 为每个像素生成唯一�?RNG 种子
-    // 使用 PCG32 的初始化方式
+    // ???????????RNG ??
+    // ?? PCG32 ??????
     uint64_t seed = baseSeed + idx;
     rngBuffer[idx].state = seed ^ 0xda3e39cb94b95bdbULL;
-    rngBuffer[idx].inc = (idx << 1u) | 1u;  // 每个像素�?inc 必须是奇数且不同
+    rngBuffer[idx].inc = (idx << 1u) | 1u;  // ??????inc ????????
 }
 
 void initializeRNGBuffer(

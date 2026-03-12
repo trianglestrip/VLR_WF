@@ -465,6 +465,49 @@ extern "C" __global__ void processHits(
     processEmissiveSurface(pathState, surfPt, geomInst, hypAreaPDF, wlp);
 
     // ========================================================================
+    // 4.5 LVC-BPT: Vertex Connection with Light Vertex Cache
+    // ========================================================================
+    if (wlp.useBDPT && wlp.lightVertexCache != nullptr && wlp.numLightVertices != nullptr) {
+        uint32_t numLV = *wlp.numLightVertices;
+        if (numLV > 0 && !materialIsDelta(matDesc)) {
+            uint32_t lvIndex = vlr_min(
+                static_cast<uint32_t>(pathState.rng.getFloat0cTo1o() * numLV),
+                numLV - 1);
+            const LightPathVertex& lv = wlp.lightVertexCache[lvIndex];
+
+            Vector3D conDir = lv.position - surfPt.position;
+            float dist2 = dot(conDir, conDir);
+            if (dist2 > 1e-8f) {
+                float dist = sqrtf(dist2);
+                conDir = conDir / dist;
+
+                float cosE = dot(conDir, surfPt.geometricNormal);
+                float cosL = -dot(conDir, lv.geometricNormal);
+
+                if (cosE > 1e-5f && cosL > 1e-5f) {
+                    float G = cosE * cosL / dist2;
+
+                    Vector3D dirInLocal = surfPt.shadingFrame.toLocal(-pathState.direction);
+                    Vector3D conDirLocal = surfPt.shadingFrame.toLocal(conDir);
+                    BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls);
+                    SampledSpectrum fsE = evaluateBSDF(bsdfCtx, dirInLocal, conDirLocal);
+
+                    if (fsE.hasNonZero()) {
+                        float vertexProb = 1.0f / static_cast<float>(numLV);
+                        // EDF directional factor for Lambertian area light: 1/π
+                        float edfFactor = (lv.pathLength == 0) ? VLR_M_INV_PI : 1.0f;
+                        SampledSpectrum contrib = pathState.throughput * fsE * G * lv.flux * edfFactor / vertexProb;
+
+                        if (contrib.allFinite() && contrib.hasNonZero()) {
+                            pathState.contribution += contrib;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ========================================================================
     // 5. ?????????
     // ========================================================================
     pathState.pathLength++;

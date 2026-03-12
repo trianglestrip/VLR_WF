@@ -240,6 +240,14 @@ private:
             std::unique_ptr<cudau::Buffer<uint32_t>> compactedPathIndices;  // 压缩后的路径索引
             std::unique_ptr<cudau::Buffer<uint32_t>> numCompactedPaths;  // CUB 输出的压缩后路径数
             
+            // LVC-BPT buffers
+            std::unique_ptr<cudau::Buffer<shared::LightPathVertex>> lightVertexCacheBuffer;
+            std::unique_ptr<cudau::Buffer<uint32_t>> numLightVerticesBuffer;
+            std::unique_ptr<cudau::Buffer<shared::LightPathState>> lightPathStateBuffer;
+            std::unique_ptr<cudau::Buffer<shared::WavefrontHitInfo>> lightHitInfoBuffer;
+            std::unique_ptr<cudau::Buffer<shared::SurfacePoint>> lightSurfacePointBuffer;
+            bool useBDPT;
+            
             // 配置
             uint32_t maxPathLength;
             uint32_t maxNumPaths;
@@ -279,6 +287,7 @@ private:
                 , cubTempStorageBytes(0)
                 , maxPathLength(shared::WavefrontConfig::DefaultMaxPathLength)
                 , maxNumPaths(0)
+                , useBDPT(true)
                 , usePathSorting(shared::WavefrontConfig::UsePathSorting)
                 , useMaterialQueues(shared::WavefrontConfig::UseMaterialQueues)
                 , useStreamCompaction(shared::WavefrontConfig::UseStreamCompaction)

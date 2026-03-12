@@ -248,6 +248,10 @@ struct WavefrontMaterialQueues {
 // 3. 启动参数
 // ============================================================================
 
+// 前向声明：LVC-BPT 类型（完整定义见 Section 5.5）
+struct LightPathVertex;
+struct LightPathState;
+
 /// 波前渲染启动参数
 /// 此结构体上传到 GPU 常量内存
 #ifndef VLR_WAVEFRONT_LAUNCH_PARAMETERS_MINIMAL_DEFINED
@@ -342,6 +346,16 @@ struct WavefrontLaunchParameters {
     int32_t probePixY;                 // 探测像素 Y
     uint32_t debugMode;                // 调试模式
     
+    // === LVC-BPT 数据（必须在末尾，不能破坏已有字段偏移） ===
+    LightPathVertex* lightVertexCache;
+    uint32_t* numLightVertices;
+    LightPathState* lightPathStateBuffer;
+    WavefrontHitInfo* lightHitInfoBuffer;
+    SurfacePoint* lightSurfacePointBuffer;
+    uint32_t numLightPaths;
+    uint32_t maxLightVertices;
+    bool useBDPT;
+    
 #if !defined(__CUDACC__)
     void print() {
         printf("=== Wavefront Launch Parameters ===\n");
@@ -388,6 +402,57 @@ enum WFRayType {
     WFRayType_Shadow,                  // 阴影光线
     NumWFRayTypes
 };
+
+
+// ============================================================================
+// 5.5 LVC-BPT 数据结构（Light Vertex Cache Bidirectional Path Tracing）
+// ============================================================================
+
+#ifndef VLR_LIGHT_PATH_VERTEX_DEFINED
+#define VLR_LIGHT_PATH_VERTEX_DEFINED
+/// 光路顶点：存储光源子路径上的表面信息，用于与视线路径做 vertex connection
+struct alignas(16) LightPathVertex {
+    // 几何信息（用于重建 SurfacePoint）
+    Point3D position;           // 世界空间位置
+    Normal3D geometricNormal;   // 几何法线
+    ReferenceFrame shadingFrame;// 着色参考帧
+    
+    // 光路信息
+    SampledSpectrum flux;       // 到达此顶点的 flux（= alpha * Le）
+    Vector3D dirInLocal;        // 入射方向（local space）
+    
+    // 材质信息
+    uint32_t materialIndex;     // 材质描述符索引
+    
+    // 标志
+    uint32_t flags;             // bit0: deltaSampled, bit1: prevDeltaSampled, bit2: wlSelected, bit3: isPoint
+    uint32_t pathLength;        // 光路长度（从光源出发的步数）
+    float _padding;
+    
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDeltaSampled() const { return flags & 0x1; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isPrevDeltaSampled() const { return flags & 0x2; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isWlSelected() const { return flags & 0x4; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isPoint() const { return flags & 0x8; }
+};
+
+/// 光路追踪状态（wavefront 架构的光路状态）
+struct alignas(16) LightPathState {
+    Point3D origin;
+    Vector3D direction;
+    SampledSpectrum flux;       // 累积 flux
+    WavelengthSamples wls;     // 波长采样（BSDF/EDF 评估所需）
+    KernelRNG rng;
+    uint32_t pathLength;
+    uint32_t flags;             // bit0: active, bit1: terminated, bit2: singleWlSelected
+    
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isActive() const { return flags & 0x1; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setActive(bool a) { if(a) flags|=0x1; else flags&=~0x1; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setTerminated() { flags |= 0x2; flags &= ~0x1; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isTerminated() const { return flags & 0x2; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool singleWlSelected() const { return flags & 0x4; }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setSingleWlSelected() { flags |= 0x4; }
+};
+#endif
 
 
 // ============================================================================

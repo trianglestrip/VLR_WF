@@ -93,6 +93,7 @@ set(LIBVLR_CUDA_SOURCES
     GPU_kernels/process_hits.cu
     GPU_kernels/sample_lights.cu
     GPU_kernels/sample_bsdf.cu
+    GPU_kernels/light_path.cu
     GPU_kernels/compact.cu
     GPU_kernels/accumulate.cu
     GPU_kernels/debug_rendering.cu
