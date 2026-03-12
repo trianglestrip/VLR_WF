@@ -1464,25 +1464,27 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
     float u0,
     BSDFSampleResult* result)
 {
-    (void)geomNormalLocal;  // Use shading normal instead
-    (void)frontFace;        // We'll determine entering/exiting from dot product
+    (void)geomNormalLocal;
 
-    // wo is the outgoing direction (toward camera)
     Vector3D wo = dirInLocal;
-    float cosThetaO = wo.z;  // In local space, shading normal is (0,0,1)
+    float cosThetaO = wo.z;
 
-    // Determine if ray is entering or exiting the medium
-    bool entering = cosThetaO > 0.0f;
+    // CRITICAL: Use frontFace to determine entering/exiting, NOT cosThetaO sign.
+    // process_hits.cu always flips the shading frame to face the ray, so cosThetaO
+    // is always positive regardless of whether the ray is inside or outside.
+    // frontFace correctly tracks whether the original geometric normal faced the ray.
+    bool entering = frontFace;
 
     float etaI = entering ? etaExt : etaInt;
     float etaT = entering ? etaInt : etaExt;
     float eta = etaI / etaT;
 
-    // Normal in local space (flip if exiting)
-    Normal3D n = entering ? Normal3D(0.0f, 0.0f, 1.0f) : Normal3D(0.0f, 0.0f, -1.0f);
+    Normal3D n = Normal3D(0.0f, 0.0f, 1.0f);
 
     // Compute Fresnel reflectance
     float Fr = FresnelDielectric(std::abs(cosThetaO), etaI, etaT);
+
+    (void)u0; // suppress unused warning when debug off
     
     // Sample reflection or refraction based on Fresnel
     if (u0 < Fr) {
@@ -1502,13 +1504,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
         // -------------------------
         // Specular transmission
         // -------------------------
-        Vector3D wi;
         
-        // refractVector expects wo (outgoing direction) and internally computes -wo
-        if (!refractVector(wo, n, eta, &wi)) {
-            // Total internal reflection fallback
+        // Inline Snell's law refraction
+        float cosThetaI = std::abs(cosThetaO);
+        float sin2ThetaI = vlr_max(0.0f, 1.0f - cosThetaI * cosThetaI);
+        float sin2ThetaT = eta * eta * sin2ThetaI;
+        
+        if (sin2ThetaT >= 1.0f) {
+            // Total internal reflection
             Vector3D wr = Vector3D(-wo.x, -wo.y, wo.z);
-            
             float absCosR = std::abs(wr.z);
             result->dirLocal = wr;
             result->pdf = 1.0f;
@@ -1518,15 +1522,30 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
             return;
         }
         
-        float Ft = 1.0f - Fr;
+        float cosThetaT = safeSqrt(1.0f - sin2ThetaT);
         
-        // Radiance transport correction (PBRT rule: eta^2 factor)
+        // Correct refracted direction
+        Vector3D wi;
+        wi.x = -eta * wo.x;
+        wi.y = -eta * wo.y;
+        wi.z = -cosThetaT;
+        
+        // Normalize to be safe
+        float len = safeSqrt(wi.x * wi.x + wi.y * wi.y + wi.z * wi.z);
+        if (len > 1e-7f) {
+            wi.x /= len;
+            wi.y /= len;
+            wi.z /= len;
+        }
+        
+        float Ft = 1.0f - Fr;
         float etaRatio2 = eta * eta;
         float absCosT = std::abs(wi.z);
         
-        // CRITICAL: BSDF value = T * (1-Fr) * eta^2 / |cosθ_t|
         result->dirLocal = wi;
-        result->pdf = Ft;
+        // Match reference VLR: both f and pdf include eta^2 (radiance transport),
+        // so eta^2 cancels in throughput *= f * |cos| / pdf
+        result->pdf = Ft * etaRatio2;
         result->f = transmittance * (Ft * etaRatio2 / absCosT);
         result->sampledBSDFType = BSDFType_SpecularTransmission;
         result->isDelta = true;

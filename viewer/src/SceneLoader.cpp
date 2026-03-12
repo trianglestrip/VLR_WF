@@ -142,11 +142,11 @@ bool SceneLoader::processScene(const aiScene* scene, const LoadOptions& options)
     m_meshes.reserve(existingMeshes + scene->mNumMeshes);
     m_materials.reserve(existingMaterials + scene->mNumMaterials);
 
-    // 计算场景边界
-    computeBounds(scene);
-
     // 递归处理节点树
     processNode(scene, scene->mRootNode, options);
+
+    // 在处理完网格后计算场景边界
+    computeBounds();
 
     std::cout << "[SceneLoader] 处理完成: " 
               << m_meshCount << " 网格, " 
@@ -360,21 +360,23 @@ VLRMaterial SceneLoader::createVLRMaterial(const MaterialData& data) {
     return vlrMaterial;
 }
 
-void SceneLoader::computeBounds(const aiScene* scene) {
+void SceneLoader::computeBounds() {
     // 重置边界
     constexpr float fmax = std::numeric_limits<float>::max();
     constexpr float fmin = std::numeric_limits<float>::lowest();
     m_boundsMin[0] = m_boundsMin[1] = m_boundsMin[2] = fmax;
     m_boundsMax[0] = m_boundsMax[1] = m_boundsMax[2] = fmin;
 
-    // C++20: 使用ranges遍历所有网格
-    auto meshes = std::span(scene->mMeshes, scene->mNumMeshes);
-    for (const auto* mesh : meshes) {
-        // C++20: 使用span避免索引访问
-        auto vertices = std::span(mesh->mVertices, mesh->mNumVertices);
-        for (const auto& pos : vertices) {
-            const float position[3] = {pos.x, pos.y, pos.z};
-            updateBounds(position);
+    // 遍历所有已加载的网格数据，计算累积边界
+    for (const auto& meshData : m_meshes) {
+        // 遍历网格的所有顶点位置
+        const size_t vertexCount = meshData.positions.size() / 3;
+        for (size_t i = 0; i < vertexCount; ++i) {
+            // Create a span from the float array for the updateBounds function
+            std::span<const float, 3> positionSpan(
+                &meshData.positions[i * 3], 3
+            );
+            updateBounds(positionSpan);
         }
     }
 
@@ -451,6 +453,9 @@ bool SceneLoader::loadSceneParallel(const aiScene* scene, const LoadOptions& opt
         parallelProcessMeshes(scene, options);
     }
     
+    // 在所有网格处理完成后计算场景边界
+    computeBounds();
+    
     return true;
 }
 
@@ -491,7 +496,12 @@ void SceneLoader::buildTaskGraph(const aiScene* scene, const LoadOptions& option
     for (uint32_t i = 0; i < scene->mNumMeshes; ++i) {
         auto task = m_taskflow->taskflow.emplace([this, scene, i, options]() {
             const aiMesh* mesh = scene->mMeshes[i];
-            processMesh(scene, mesh, options);
+            if (auto meshData = processMesh(scene, mesh, options)) {
+                // 线程安全地将meshData添加到m_meshes向量
+                std::lock_guard<std::mutex> lock(m_meshesMutex);
+                m_meshes.push_back(std::move(*meshData));
+                m_meshCount++;
+            }
         }).name(std::string("Mesh_") + std::to_string(i));
         
         // 网格任务依赖所有材质任务
@@ -526,10 +536,21 @@ void SceneLoader::parallelProcessMeshes(const aiScene* scene, const LoadOptions&
     
     tf::Taskflow taskflow;
     
+    // 仅在非追加模式下清空网格向量
+    if (!options.appendMode) {
+        m_meshes.clear();
+        m_meshCount = 0;
+    }
+    
     for (uint32_t i = 0; i < scene->mNumMeshes; ++i) {
         taskflow.emplace([this, scene, i, options]() {
             const aiMesh* mesh = scene->mMeshes[i];
-            processMesh(scene, mesh, options);
+            if (auto meshData = processMesh(scene, mesh, options)) {
+                // 线程安全地将meshData添加到m_meshes向量
+                std::lock_guard<std::mutex> lock(m_meshesMutex);
+                m_meshes.push_back(std::move(*meshData));
+                m_meshCount++;
+            }
         });
     }
     

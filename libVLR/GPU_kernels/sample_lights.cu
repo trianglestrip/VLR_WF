@@ -12,6 +12,16 @@
 
 #define VLR_DEBUG_LIGHT_SAMPLING 0
 
+#ifndef VLR_DEBUG_SPEC_TRANS_ONEPIX
+#define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
+#endif
+#ifndef VLR_DEBUG_SPEC_TRANS_PX
+#define VLR_DEBUG_SPEC_TRANS_PX 320
+#endif
+#ifndef VLR_DEBUG_SPEC_TRANS_PY
+#define VLR_DEBUG_SPEC_TRANS_PY 84
+#endif
+
 #include "../shared/kernel_common.h"
 #include "kernel_launch.h"
 #include "../shared/path_types.h"
@@ -137,6 +147,17 @@ extern "C" __global__ void sampleLights(
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
 
     // ??????delta ??????????NEE ??delta ????
+#if VLR_DEBUG_SPEC_TRANS_ONEPIX
+    if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX && pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
+        pathState.pathLength <= 4) {
+        BSDFType bt = getBSDFType(matDesc);
+        printf("[NEE_Dbg] px=(%u,%u) len=%u bsdfType=%u isDelta=%d surfPos=(%.3f,%.3f,%.3f) throughput=(%.4g,%.4g,%.4g)\n",
+            pathState.pixelX, pathState.pixelY, pathState.pathLength,
+            (uint32_t)bt, materialIsDelta(matDesc) ? 1 : 0,
+            surfPt.position.x, surfPt.position.y, surfPt.position.z,
+            pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
+    }
+#endif
     if (materialIsDelta(matDesc))
         return;
 
@@ -291,6 +312,18 @@ extern "C" __global__ void sampleLights(
         invLightPDF = 1.0f / lightAreaPDF;
 
     SampledSpectrum contrib = pathState.throughput * emissionResult.Le * fs * G * MISWeight * invLightPDF;
+
+#if VLR_DEBUG_SPEC_TRANS_ONEPIX
+    if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX && pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
+        pathState.pathLength <= 4) {
+        printf("[NEE_Dbg] CONTRIB len=%u Le=(%.4g,%.4g,%.4g) fs=(%.4g,%.4g,%.4g) G=%.6g MIS=%.4f invPDF=%.4g contrib=(%.6g,%.6g,%.6g)\n",
+            pathState.pathLength,
+            emissionResult.Le.values[0], emissionResult.Le.values[1], emissionResult.Le.values[2],
+            fs.values[0], fs.values[1], fs.values[2],
+            G, MISWeight, invLightPDF,
+            contrib.values[0], contrib.values[1], contrib.values[2]);
+    }
+#endif
 
     // ????VLR ?????????????????NaN/Inf ????
     if (contrib.allFinite() && contrib.hasNonZero()) {

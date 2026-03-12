@@ -33,10 +33,10 @@
 #define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 320
+#define VLR_DEBUG_SPEC_TRANS_PX 256
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 84
+#define VLR_DEBUG_SPEC_TRANS_PY 256
 #endif
 
 namespace {
@@ -169,23 +169,24 @@ extern "C" __global__ void sampleBSDF(
 #if VLR_DEBUG_SPEC_TRANS_ONEPIX
     {
         BSDFType bsdfType = getBSDFType(matDesc);
-        if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX &&
-            pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
-            pathState.pathLength <= 4 &&
-            (bsdfType == BSDFType_SpecularTransmission || bsdfType == BSDFType_Specular)) {
+        if (pathState.pixelX == 325 && pathState.pixelY == 150 &&
+            pathState.pathLength <= 6) {
             unsigned int idx = atomicAdd(&g_vlrDebugPrintCount, 1u);
-            if (idx < 64) {
-                printf("[SpecTransDbg] px=(%u,%u) len=%u bsdf=%u frontFace=%d wo=(%.3f,%.3f,%.3f) geomNLocal=(%.3f,%.3f,%.3f)\n",
-                    pathState.pixelX, pathState.pixelY,
-                    pathState.pathLength,
-                    (uint32_t)bsdfType,
+            if (idx < 30) {
+                Vector3D dirWorld = surfPt.shadingFrame.toWorld(result.dirLocal);
+                printf("[PATH325] len=%u bsdf=%u matIdx=%u frontFace=%d surfPt=(%.3f,%.3f,%.3f) sampled=%u\n",
+                    pathState.pathLength, (uint32_t)bsdfType, geomInst.materialIndex,
                     surfPt.isFrontFace ? 1 : 0,
+                    surfPt.position.x, surfPt.position.y, surfPt.position.z,
+                    (uint32_t)result.sampledBSDFType);
+                printf("[PATH325] wo=(%.3f,%.3f,%.3f) wiLocal=(%.3f,%.3f,%.3f) wiWorld=(%.3f,%.3f,%.3f)\n",
                     dirInLocal.x, dirInLocal.y, dirInLocal.z,
-                    geomNormalLocal.x, geomNormalLocal.y, geomNormalLocal.z);
-                printf("[SpecTransDbg] sampled=%u pdf=%.6g f=(%.6g,%.6g,%.6g) wi=(%.3f,%.3f,%.3f)\n",
-                    (uint32_t)result.sampledBSDFType, result.pdf,
+                    result.dirLocal.x, result.dirLocal.y, result.dirLocal.z,
+                    dirWorld.x, dirWorld.y, dirWorld.z);
+                printf("[PATH325] pdf=%.6g f=(%.6g,%.6g,%.6g) throughput=(%.6g,%.6g,%.6g)\n",
+                    result.pdf,
                     result.f.values[0], result.f.values[1], result.f.values[2],
-                    result.dirLocal.x, result.dirLocal.y, result.dirLocal.z);
+                    pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
             }
         }
     }
@@ -293,6 +294,26 @@ extern "C" __global__ void sampleBSDF(
 
     pathState.origin = offsetRayOriginForNextBounce(surfPt, cosFactor);
     pathState.direction = dirIn;
+
+#if VLR_DEBUG_SPEC_TRANS_ONEPIX
+    {
+        BSDFType bsdfType = getBSDFType(matDesc);
+        if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX &&
+            pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
+            pathState.pathLength <= 4 &&
+            (bsdfType == BSDFType_SpecularTransmission || bsdfType == BSDFType_Specular)) {
+            unsigned int idx2 = atomicAdd(&g_vlrDebugPrintCount, 1u);
+            if (idx2 < 64) {
+                printf("[SpecTransDbg2] len=%u cosFactor=%.4f cosAbs=%.4f throughput=(%.4g,%.4g,%.4g)\n",
+                    pathState.pathLength, cosFactor, cosAbs,
+                    pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
+                printf("[SpecTransDbg2] origin=(%.4f,%.4f,%.4f) dirWorld=(%.4f,%.4f,%.4f)\n",
+                    pathState.origin.x, pathState.origin.y, pathState.origin.z,
+                    dirIn.x, dirIn.y, dirIn.z);
+            }
+        }
+    }
+#endif
 
     // ========================================================================
     // 6. ?? PathState

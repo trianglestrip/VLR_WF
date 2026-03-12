@@ -114,6 +114,9 @@ protected:
     float m_boundsMax[3] = {0, 0, 0};
     Statistics m_stats;                       // 加载统计
     
+    // 线程安全保护
+    std::mutex m_meshesMutex;                 // 保护m_meshes向量的线程安全
+    
     // Taskflow 并行支持（仅在启用时使用）
     class TaskflowImpl;
     std::unique_ptr<TaskflowImpl> m_taskflow;
@@ -140,7 +143,7 @@ protected:
     
     // 辅助函数（使用span避免拷贝）
     void updateBounds(std::span<const float, 3> position) noexcept;
-    void computeBounds(const aiScene* scene);
+    void computeBounds();
 };
 
 } // namespace viewer
