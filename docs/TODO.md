@@ -1,90 +1,80 @@
 # VLR_WF 开发路线图
 
-**最后更新**: 2026-03-11 | **当前版本**: 1.5
+**最后更新**: 2026-03-12 | **当前版本**: 1.6
 
 ---
 
-## 紧急任务（Bug 修复）
+## 当前任务：LVC-BPT 双向路径追踪
 
-### 🔴 关键：SpecularTransmission 透射路径失效问题
-**状态**: 调试中 - 已识别关键问题  
-**优先级**: P0（阻塞玻璃材质正常工作）
+### 🟡 LVC-BPT 框架已搭建，光路追踪待完成
+**状态**: 框架已实现，需要完善光路追踪  
+**优先级**: P0
 
-#### 问题描述
-- Cornell Box 场景中的玻璃球渲染为黑色
-- 镜面反射路径正常（`BSDFType_Specular` 工作正常）
-- 透射路径完全失效（`BSDFType_SpecularTransmission` 黑色）
+#### 背景
+- 单向路径追踪（Unidirectional PT）无法高效采样 caustics（光线穿过 delta 表面聚焦到 diffuse 表面的效果）
+- 玻璃球的 "暗球" 问题本质是算法限制，而非 BSDF 实现错误
+- 参考 `libVLR_reference` 的 Light Vertex Cache BPT (LVC-BPT) 方案
 
-#### 最新进展 (2026-03-11)
+#### 已完成 (2026-03-11 ~ 2026-03-12)
+1. ✅ **数据结构定义**
+   - `LightPathVertex`: 存储光路顶点的位置、法线、flux、方向、材质等信息
+   - `LightPathState`: 光路追踪状态（flux、方向、RNG、波长等）
+   - 扩展 `WavefrontLaunchParameters`（字段追加在末尾，保持已有偏移不变）
 
-**已识别的关键问题**：
-1. ✅ **transmittance 参数错误**: 玻璃材质使用 `getEffectiveLambertAlbedo` 获取 transmittance，但应该固定为 (1,1,1)
-   - 已修正：在 `sampleBSDFWithU2` 的 `BSDFType_SpecularTransmission` case 中强制 `transmittance = (1,1,1)`
-   
-2. ✅ **BSDF 公式缺少 `/|cos|` 项**: 对于 delta BSDF，`result.f` 必须包含 `1/|cos(θ)|` 项
-   - PBRT 规则：`throughput *= f / pdf`（不额外乘 cos）
-   - 反射 BSDF: `f = R * transmittance / |cos(θ_i)|`
-   - 折射 BSDF: `f = T * transmittance * η² / |cos(θ_t)|`
-   - 已修正：在 `sampleDielectricBSDF_PBRT` 中添加了 `/absCosI` 和 `/absCosT` 项
+2. ✅ **光路生成 kernel** (`light_path.cu`)
+   - `generateLightPaths`: 从场景灯光采样位置和发射方向，生成 pathLength=0 的光顶点
+   - `processLightHits`: 处理光路第一次命中，生成 pathLength=1 的光顶点
+   - flux 正确归一化：`alpha = Le / (numLightPaths * lightAreaPDF)`
 
-3. ✅ **实际调用函数识别**: 发现 `BSDFType_SpecularTransmission` 调用的是 `sampleDielectricBSDF_PBRT`，而不是 `sampleSpecularTransmissionBSDF`
+3. ✅ **Eye Path Vertex Connection** (`process_hits.cu`)
+   - 在 eye path 命中非 delta 表面时，随机连接一个光路顶点
+   - 计算几何项 G、BSDF 评估、EDF 方向因子（Lambertian: 1/π）
+   - 贡献公式：`contrib = throughput * fsE * G * lv.flux * edfFactor / vertexProb`
 
-**问题依然存在**：
-- ⚠️ 即使修正了上述问题，玻璃球仍然黑色
-- 可能原因：
-  - `refractVector` 函数实现有误（方向计算、符号问题）
-  - Local/World 坐标转换问题
-  - Ray offset 导致 self-intersection
-  - Fresnel 系数计算异常
-  - 其他未发现的逻辑错误
+4. ✅ **Host 端整合** (`context.cpp` / `context.h`)
+   - 分配 LVC-BPT 缓冲区（lightVertexCache、lightPathState 等，共约 136 MB）
+   - 渲染循环：先生成光路 → 同步 → 再执行 eye path 渲染
 
-#### 已完成的诊断
-1. ✅ 修复了材质分类错误（`BSDFType_SpecularTransmission` → `MaterialCategory_Transmissive`）
-2. ✅ 添加了 `cosAbs` 安全检查防止除零
-3. ✅ 移除了错误的双重几何修正（`cosGeometric/cosShading`）
-4. ✅ 启用了反射/透射随机选择（修复 `if(false&&u0<F)` bug）
-5. ✅ Lambert 测试证明球体几何和碰撞检测正常
+5. ✅ **编译测试通过**
+   - 场景正确渲染（红墙、蓝墙、棋盘地板、光源正常）
+   - 光顶点生成：259071 个（来自 262144 条光路）
+   - 无 overexposure 或全黑问题
 
-#### 下一步调试计划
-1. **深入检查 `refractVector` 函数**
-   - 验证 Snell 定律的实现是否正确
-   - 检查方向约定（`wo` vs `-wo`）
-   - 验证 `cosThetaI` 的符号处理
-   - 测试已知输入的输出是否符合预期
+#### 待完成
+1. 🔴 **光路 OptiX 追踪** — 当前光路只生成 pathLength=0 的顶点（在光源表面），没有实际追踪光线
+   - 需要让光路也通过 OptiX 进行光线追踪（hit/miss）
+   - 方案 A：在 `trace_rays.cu` 中增加光路模式分支
+   - 方案 B：为光路创建独立的 OptiX trace pipeline
+   - **这是 caustics 出现的关键**：只有光路穿过玻璃球折射到达 diffuse 表面，才会产生 caustic 光顶点
 
-2. **使用参考实现**
-   - 考虑使用完整的、经过验证的 Glass BSDF 实现（来自 PBRT/Mitsuba）
-   - 或临时使用 `BSDFType_MicrofacetScattering` (roughness=0.01) 作为玻璃材质
+2. 🔴 **Shadow Ray（可见性测试）** — vertex connection 目前没有做遮挡检测
+   - eye path 顶点与 light vertex 之间可能被其他几何体遮挡
+   - 需要在 connection 之前用 shadow ray 测试可见性
 
-3. **添加详细的 GPU 调试输出**
-   - 在 `sampleDielectricBSDF_PBRT` 中添加 printf
-   - 打印 `entering`, `eta`, `Fr`, `wi`, `result.f`, `result.pdf`
-   - 在 `sample_bsdf.cu` 中打印 throughput 更新前后的值
+3. 🟡 **多 bounce 光路** — 当前只支持单次 bounce（pathLength ≤ 1）
+   - 参考实现支持多次 bounce（光线在场景中多次反射/折射后存入缓存）
+   - 需要在 `processLightHits` 中采样 BSDF、继续追踪
 
-4. **验证光线传播**
-   - 检查透射光线的起点偏移
-   - 验证透射光线是否正确击中后续表面
-   - 检查 throughput 是否被 Russian Roulette 过早终止
+4. 🟡 **MIS 权重** — 当前没有在 vertex connection 和直接光照之间做 MIS
+   - 需要 Power Heuristic 平衡 unidirectional 贡献和 BDPT connection 贡献
 
-#### 相关文件
-- `libVLR/shared/bsdf_common.h`: 
-  - `sampleDielectricBSDF_PBRT` (行 1457-1529): 实际被调用的 Glass BSDF 实现 ✅ 已修正
-  - `refractVector` (行 1380-1407): Snell 定律折射计算 ⚠️ 待验证
-  - `FresnelDielectric` (行 320-335): 菲涅尔系数计算
-  - `sampleBSDFWithU2` BSDFType_SpecularTransmission case (行 2631-2650): BSDF 调度 ✅ 已修正
-- `libVLR/GPU_kernels/sample_bsdf.cu`: BSDF 采样和 throughput 更新 (行 237-265)
-- `test/cornell_box_improved_test.cpp`: 测试场景（玻璃：IOR=1.5, Color=(0.999,0.999,0.999)）
+---
 
-#### 测试结果记录
-- ✅ `mirror_test.png`: 临时使用镜面材质 (`matGlass = matGold`) - 球体正常渲染，证明几何和材质绑定正确
-- ❌ `glass_black_v1.png`: 初始版本 - 玻璃球完全黑色
-- ❌ `glass_black_v2.png`: 修正 transmittance=(1,1,1) + 添加 `/|cos|` 项 - 玻璃球仍然黑色
-- ⚠️ `glass_force_transmission.png`: 强制 100% 透射测试 - 渲染卡死（无进度输出）
+## 已知问题：SpecularTransmission（玻璃 BSDF）
 
-#### 关键发现
-1. **镜面反射工作正常** (`BSDFType_Specular`): 说明 integrator pipeline、throughput 更新、ray offset 都是正确的
-2. **问题集中在折射逻辑**: `refractVector` 或相关的方向/坐标处理可能有根本性错误
-3. **强制透射导致卡死**: 可能是 `refractVector` 返回了无效方向，导致光线陷入无限循环或立即终止
+### 状态：搁置 — 等待 BDPT 光路追踪完成后重新评估
+**原因**: 单向 PT 下的 "暗球" 主要是算法限制，BDPT 实现后可重新评估
+
+#### 已修正的 BSDF 问题
+- ✅ transmittance 参数：强制 (1,1,1) 而非 albedo
+- ✅ BSDF 公式：包含 `/|cos|` 项，匹配 PBRT delta BSDF 规则
+- ✅ PDF 中的 `eta^2` 修正：`result.pdf = Ft * etaRatio2`
+- ✅ 函数调用链确认：`BSDFType_SpecularTransmission` → `sampleDielectricBSDF_PBRT`
+
+#### 仍需验证（BDPT 完成后）
+- `refractVector` 函数的方向约定和实现
+- 折射光线的 ray origin offset 是否导致 self-intersection
+- Local/World 坐标系转换的正确性
 
 ---
 
@@ -92,13 +82,14 @@
 
 | 模块 | 原版 VLR | VLR_WF | 状态 |
 |------|---------|--------|------|
-| 基础渲染 | ✓ | ✓ | - |
-| Wavefront 架构 | ✗ | ✓ | - |
-| 材质系统 | 8种 | 14种 | ⚠️ SpecularTransmission 有 bug |
+| 基础渲染 | ✓ | ✓ | ✅ |
+| Wavefront 架构 | ✗ | ✓ | ✅ |
+| 材质系统 | 8种 | 14种 | ⚠️ SpecularTransmission 待验证 |
 | 光源系统 | 4种 | 3种 | ✅ 完成 |
 | 纹理系统 | 完整 | 基础 | 🟡 中 |
 | 调试模式 | 12种 | 17种 | ✅ 完成 |
 | 降噪 | OptiX | API已实现 | 🟡 中 |
+| **双向路径追踪** | **✗** | **框架已搭建** | **🟡 光路追踪待完成** |
 
 ---
 
@@ -106,18 +97,20 @@
 
 ### 高优先级
 1. ~~**光源系统**~~ ✅ **已完成** (2026-03-08)
-2. **SpecularTransmission Bug 修复** 🔴 **进行中** (2026-03-10 ~ 2026-03-11)
-   - ✅ 修正 transmittance 参数（应为 1,1,1 而非 albedo）
-   - ✅ 修正 BSDF 公式（添加 `/|cos|` 项）
-   - ⚠️ 问题依然存在，需要深入调试 `refractVector` 或使用参考实现
+2. ~~**SpecularTransmission Bug 修复**~~ 🟡 **搁置** — 等待 BDPT 完善
+3. **LVC-BPT 光路追踪** 🔴 **进行中** (2026-03-12 ~)
+   - ✅ 框架搭建（数据结构、光路生成、vertex connection）
+   - 🔴 光路 OptiX 追踪（让光线穿过玻璃球产生 caustic 光顶点）
+   - 🔴 Shadow ray 可见性测试
+   - 🟡 多 bounce 光路
+   - 🟡 MIS 权重
 
 ### 中优先级
-3. **降噪与后处理**: OptiX Denoiser, AOV 系统
-4. **调试增强**: ProbePixel 完整实现
-5. **Shared Memory 缓存**
+4. **降噪与后处理**: OptiX Denoiser, AOV 系统
+5. **调试增强**: ProbePixel 完整实现
+6. **Shared Memory 缓存**
 
 ### 低优先级
-6. 多渲染器 (Light Tracing, BPT)
 7. 相机增强 (Equirectangular, 运动模糊)
 8. 交互式查看器
 
@@ -142,4 +135,5 @@
 - ✅ 纹理系统 (Image2D 加载、材质绑定、UV 变换、法线贴图)
 - ✅ 光源系统完善 (方向光、环境光重要性采样、多光源优化)
 - ✅ 性能优化阶段 1-5 (3.07x 加速)
+- ✅ LVC-BPT 双向路径追踪框架 (2026-03-12): 数据结构、光路生成、vertex connection
 
