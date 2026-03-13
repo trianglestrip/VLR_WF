@@ -167,6 +167,12 @@ private:
             OptixProgramGroup hitGroupProgram;
             OptixProgramGroup shadowMissProgram;
             OptixProgramGroup shadowHitGroupProgram;
+            // LVC-BPT light path programs
+            OptixProgramGroup lightRaygenProgram;
+            OptixProgramGroup lightHitGroupProgram;
+            OptixProgramGroup lightMissProgram;
+            // Shadow ray batch program
+            OptixProgramGroup shadowRaygenProgram;
             
             // 着色器绑定表
             OptixShaderBindingTable sbt;
@@ -177,6 +183,12 @@ private:
             void* hitgroupRecord;
             void* shadowMissRecord;
             void* shadowHitgroupRecord;
+            // LVC-BPT light path SBT records
+            void* lightRaygenRecord;
+            void* lightMissRecord;
+            void* lightHitgroupRecord;
+            // Shadow ray batch SBT record
+            void* shadowRaygenRecord;
             
             // 路径状态缓冲区
             std::unique_ptr<cudau::Buffer<shared::WavefrontPathState>> pathStateBuffer;
@@ -246,6 +258,13 @@ private:
             std::unique_ptr<cudau::Buffer<shared::LightPathState>> lightPathStateBuffer;
             std::unique_ptr<cudau::Buffer<shared::WavefrontHitInfo>> lightHitInfoBuffer;
             std::unique_ptr<cudau::Buffer<shared::SurfacePoint>> lightSurfacePointBuffer;
+            // Shadow ray batch buffers
+            std::unique_ptr<cudau::Buffer<shared::ShadowRayRequest>> shadowRayQueueBuffer;
+            std::unique_ptr<cudau::Buffer<float>> shadowRayResultsBuffer;
+            // Light path SBT
+            OptixShaderBindingTable lightSbt;
+            // Shadow ray SBT
+            OptixShaderBindingTable shadowSbt;
             bool useBDPT;
             
             // 配置
@@ -271,11 +290,19 @@ private:
                 , hitGroupProgram(nullptr)
                 , shadowMissProgram(nullptr)
                 , shadowHitGroupProgram(nullptr)
+                , lightRaygenProgram(nullptr)
+                , lightHitGroupProgram(nullptr)
+                , lightMissProgram(nullptr)
+                , shadowRaygenProgram(nullptr)
                 , raygenRecord(nullptr)
                 , missRecord(nullptr)
                 , hitgroupRecord(nullptr)
                 , shadowMissRecord(nullptr)
                 , shadowHitgroupRecord(nullptr)
+                , lightRaygenRecord(nullptr)
+                , lightMissRecord(nullptr)
+                , lightHitgroupRecord(nullptr)
+                , shadowRaygenRecord(nullptr)
                 , launchParamsBuffer(nullptr)
                 , startEvent(nullptr)
                 , endEvent(nullptr)
@@ -402,6 +429,8 @@ private:
     void executeWavefrontRenderDebug(uint32_t debugMode);
     void launchGenerateRays(uint32_t numPaths);
     void launchTraceRays(uint32_t numActivePaths);
+    void launchTraceLightRays(uint32_t numLightPaths);
+    void launchTraceShadowRays(uint32_t numShadowRays);
     void launchProcessHits(uint32_t numActivePaths);
     void launchSampleLights(uint32_t numActivePaths);
     void launchSampleBSDF(uint32_t numActivePaths);

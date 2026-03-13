@@ -252,6 +252,16 @@ struct WavefrontMaterialQueues {
 struct LightPathVertex;
 struct LightPathState;
 
+#ifndef VLR_SHADOW_RAY_REQUEST_DEFINED
+#define VLR_SHADOW_RAY_REQUEST_DEFINED
+struct ShadowRayRequest {
+    Point3D origin;
+    Vector3D direction;
+    float tMax;
+    uint32_t pathIndex;
+};
+#endif
+
 /// 波前渲染启动参数
 /// 此结构体上传到 GPU 常量内存
 #ifndef VLR_WAVEFRONT_LAUNCH_PARAMETERS_MINIMAL_DEFINED
@@ -355,7 +365,13 @@ struct WavefrontLaunchParameters {
     uint32_t numLightPaths;
     uint32_t maxLightVertices;
     bool useBDPT;
-    
+
+    // === Shadow Ray Batch 数据 ===
+    ShadowRayRequest* shadowRayQueue;
+    float* shadowRayResults;
+    uint32_t numShadowRayRequests;
+    uint32_t maxShadowRayRequests;
+
 #if !defined(__CUDACC__)
     void print() {
         printf("=== Wavefront Launch Parameters ===\n");

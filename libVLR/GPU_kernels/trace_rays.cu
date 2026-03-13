@@ -382,3 +382,181 @@ extern "C" __global__ void RT_AH_NAME(shadowAnyHitWithAlpha)() {
     optixTerminateRay();
 }
 #endif
+
+// ============================================================================
+// 8. Light Path Ray Generation Program (LVC-BPT)
+// ============================================================================
+
+#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
+extern "C" __global__ void RT_RG_NAME(traceLightRays)() {
+    using namespace vlr::shared;
+
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    if (!sbtData || !sbtData->params) return;
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
+
+    uint32_t pathIndex = optixGetLaunchIndex().x;
+    if (pathIndex >= wlp.numLightPaths) return;
+    if (!wlp.lightPathStateBuffer) return;
+
+    const LightPathState& state = wlp.lightPathStateBuffer[pathIndex];
+    if (!state.isActive()) return;
+
+    WFTracePayload payload;
+    payload.pathIndex = pathIndex;
+    payload.wls = state.wls;
+
+    unsigned int pd[7];
+    packWFTracePayload(payload, pd);
+
+    float3 rayOrigin = make_float3(state.origin.x, state.origin.y, state.origin.z);
+    float3 rayDirection = make_float3(state.direction.x, state.direction.y, state.direction.z);
+
+    optixTrace(
+        wlp.topGroup,
+        rayOrigin,
+        rayDirection,
+        0.001f,
+        FLT_MAX,
+        0.0f,
+        0xFF,
+        OPTIX_RAY_FLAG_NONE,
+        0,
+        2,
+        0,
+        pd[0], pd[1], pd[2], pd[3], pd[4], pd[5], pd[6]
+    );
+}
+#endif
+
+// ============================================================================
+// 9. Light Path Closest Hit - writes to lightHitInfoBuffer
+// ============================================================================
+
+#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
+extern "C" __global__ void RT_CH_NAME(lightClosestHit)() {
+    using namespace vlr::shared;
+
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
+
+    unsigned int pd[7];
+    pd[0] = optixGetPayload_0();
+    pd[1] = optixGetPayload_1();
+    pd[2] = optixGetPayload_2();
+    pd[3] = optixGetPayload_3();
+    pd[4] = optixGetPayload_4();
+    pd[5] = optixGetPayload_5();
+    pd[6] = optixGetPayload_6();
+
+    WFTracePayload payload;
+    unpackWFTracePayload(pd, &payload);
+    uint32_t pathIndex = payload.pathIndex;
+
+    if (!wlp.lightHitInfoBuffer) return;
+    WavefrontHitInfo& hitInfo = wlp.lightHitInfoBuffer[pathIndex];
+
+    uint32_t instIndex = optixGetInstanceId();
+    uint32_t primIndex = optixGetPrimitiveIndex();
+    float2 barycentrics = optixGetTriangleBarycentrics();
+
+    uint32_t geomInstIndex = instIndex;
+    if (wlp.instBuffer != nullptr && wlp.instBuffer[instIndex].numGeomInsts > 0) {
+        geomInstIndex = wlp.instBuffer[instIndex].geomInstIndices[0];
+    }
+
+    float t = optixGetRayTmax();
+
+    hitInfo.instIndex = instIndex;
+    hitInfo.geomInstIndex = geomInstIndex;
+    hitInfo.primIndex = primIndex;
+    hitInfo.u = barycentrics.x;
+    hitInfo.v = barycentrics.y;
+    hitInfo.t = t;
+    hitInfo.setHasHit(true);
+    hitInfo.setHitInfinity(false);
+}
+#endif
+
+// ============================================================================
+// 10. Light Path Miss - writes to lightHitInfoBuffer
+// ============================================================================
+
+#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
+extern "C" __global__ void RT_MS_NAME(lightMiss)() {
+    using namespace vlr::shared;
+
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
+
+    unsigned int pd[7];
+    pd[0] = optixGetPayload_0();
+    pd[1] = optixGetPayload_1();
+    pd[2] = optixGetPayload_2();
+    pd[3] = optixGetPayload_3();
+    pd[4] = optixGetPayload_4();
+    pd[5] = optixGetPayload_5();
+    pd[6] = optixGetPayload_6();
+
+    WFTracePayload payload;
+    unpackWFTracePayload(pd, &payload);
+    uint32_t pathIndex = payload.pathIndex;
+
+    if (!wlp.lightHitInfoBuffer) return;
+    WavefrontHitInfo& hitInfo = wlp.lightHitInfoBuffer[pathIndex];
+    hitInfo.reset();
+    hitInfo.setHasHit(true);
+    hitInfo.setHitInfinity(true);
+}
+#endif
+
+// ============================================================================
+// 11. Shadow Ray Batch RayGen (for vertex connection visibility test)
+// ============================================================================
+
+#if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
+extern "C" __global__ void RT_RG_NAME(traceShadowRays)() {
+    using namespace vlr::shared;
+
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer()
+    );
+    if (!sbtData || !sbtData->params) return;
+    const WavefrontLaunchParameters& wlp = *sbtData->params;
+
+    uint32_t workIndex = optixGetLaunchIndex().x;
+    if (!wlp.shadowRayQueue || workIndex >= wlp.numShadowRayRequests) return;
+
+    const ShadowRayRequest& req = wlp.shadowRayQueue[workIndex];
+
+    float3 origin = make_float3(req.origin.x, req.origin.y, req.origin.z);
+    float3 direction = make_float3(req.direction.x, req.direction.y, req.direction.z);
+
+    float visibility = 0.0f;
+    unsigned int vis_u = *reinterpret_cast<unsigned int*>(&visibility);
+
+    optixTrace(
+        wlp.topGroup,
+        origin,
+        direction,
+        0.001f,
+        req.tMax - 0.001f,
+        0.0f,
+        0xFF,
+        OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
+        1,
+        2,
+        1,
+        vis_u
+    );
+
+    visibility = *reinterpret_cast<float*>(&vis_u);
+    wlp.shadowRayResults[workIndex] = visibility;
+}
+#endif

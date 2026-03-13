@@ -403,6 +403,16 @@ struct alignas(16) LightPathState {
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool singleWlSelected() const { return flags & 0x4; }
     CUDA_DEVICE_FUNCTION CUDA_INLINE void setSingleWlSelected() { flags |= 0x4; }
 };
+
+#ifndef VLR_SHADOW_RAY_REQUEST_DEFINED
+#define VLR_SHADOW_RAY_REQUEST_DEFINED
+struct ShadowRayRequest {
+    Point3D origin;
+    Vector3D direction;
+    float tMax;
+    uint32_t pathIndex;
+};
+#endif
 #endif
 
 // ============================================================================
@@ -489,6 +499,12 @@ struct WavefrontLaunchParameters {
     uint32_t numLightPaths;
     uint32_t maxLightVertices;
     bool useBDPT;
+
+    // === Shadow Ray Batch 数据 ===
+    ShadowRayRequest* shadowRayQueue;
+    float* shadowRayResults;
+    uint32_t numShadowRayRequests;
+    uint32_t maxShadowRayRequests;
 };
 #endif
 

@@ -277,7 +277,11 @@ void Context::initializeWavefrontPipeline() {
         wf.missProgram,
         wf.hitGroupProgram,
         wf.shadowMissProgram,
-        wf.shadowHitGroupProgram
+        wf.shadowHitGroupProgram,
+        wf.lightRaygenProgram,
+        wf.lightHitGroupProgram,
+        wf.lightMissProgram,
+        wf.shadowRaygenProgram
     };
     const uint32_t numProgramGroups = sizeof(programGroups) / sizeof(programGroups[0]);
     
@@ -459,7 +463,55 @@ void Context::createWavefrontPrograms() {
         wf.shadowHitGroupProgram = createProgramGroup(desc);
     }
     
-    VLR_DEBUG_PRINTF("[VLR] Program groups created (RayGen, Miss, HitGroup, ShadowMiss, ShadowHitGroup)\n");
+    // ========================================================================
+    // 6. Light Path RayGen Program - traceLightRays (LVC-BPT)
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
+        desc.raygen.module = wf.module;
+        desc.raygen.entryFunctionName = "__raygen__traceLightRays";
+        wf.lightRaygenProgram = createProgramGroup(desc);
+    }
+
+    // ========================================================================
+    // 7. Light Path ClosestHit - writes to lightHitInfoBuffer
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
+        desc.hitgroup.moduleCH = wf.module;
+        desc.hitgroup.entryFunctionNameCH = "__closesthit__lightClosestHit";
+        desc.hitgroup.moduleAH = nullptr;
+        desc.hitgroup.entryFunctionNameAH = nullptr;
+        desc.hitgroup.moduleIS = nullptr;
+        desc.hitgroup.entryFunctionNameIS = nullptr;
+        wf.lightHitGroupProgram = createProgramGroup(desc);
+    }
+
+    // ========================================================================
+    // 8. Light Path Miss - writes to lightHitInfoBuffer
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
+        desc.miss.module = wf.module;
+        desc.miss.entryFunctionName = "__miss__lightMiss";
+        wf.lightMissProgram = createProgramGroup(desc);
+    }
+
+    // ========================================================================
+    // 9. Shadow Ray Batch RayGen - traceShadowRays
+    // ========================================================================
+    {
+        OptixProgramGroupDesc desc = {};
+        desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
+        desc.raygen.module = wf.module;
+        desc.raygen.entryFunctionName = "__raygen__traceShadowRays";
+        wf.shadowRaygenProgram = createProgramGroup(desc);
+    }
+
+    VLR_DEBUG_PRINTF("[VLR] Program groups created (RayGen, Miss, HitGroup, ShadowMiss, ShadowHitGroup, LightRayGen, LightHitGroup, LightMiss, ShadowRayGen)\n");
 }
 
 
@@ -592,6 +644,76 @@ void Context::createWavefrontSBT() {
     }
     
     VLR_DEBUG_PRINTF("[VLR] SBT created (RayGen, Miss x2, HitGroup x2)\n");
+
+    // ========================================================================
+    // Light Path SBT (reuses miss/hitgroup from eye path, different raygen)
+    // ========================================================================
+    {
+        memset(&wf.lightSbt, 0, sizeof(wf.lightSbt));
+
+        wf.lightRaygenRecord = optixu::createSBTRecord(wf.lightRaygenProgram, sbtData);
+        wf.lightSbt.raygenRecord = reinterpret_cast<CUdeviceptr>(wf.lightRaygenRecord);
+
+        // Light path uses its own miss/hitgroup that write to lightHitInfoBuffer
+        size_t lightMissRecordSize = (OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData) + 15) & ~15;
+        {
+            size_t totalSize = 2 * lightMissRecordSize;
+            void* buf = nullptr;
+            CUDA_CHECK(cudaMalloc(&buf, totalSize));
+            void* hostBuf = malloc(totalSize);
+            OPTIX_CHECK(optixSbtRecordPackHeader(wf.lightMissProgram, hostBuf));
+            memcpy(static_cast<char*>(hostBuf) + OPTIX_SBT_RECORD_HEADER_SIZE, &sbtData, sizeof(sbtData));
+            OPTIX_CHECK(optixSbtRecordPackHeader(wf.shadowMissProgram,
+                static_cast<char*>(hostBuf) + lightMissRecordSize));
+            memcpy(static_cast<char*>(hostBuf) + lightMissRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+                   &sbtData, sizeof(sbtData));
+            CUDA_CHECK(cudaMemcpy(buf, hostBuf, totalSize, cudaMemcpyHostToDevice));
+            free(hostBuf);
+            wf.lightMissRecord = buf;
+        }
+        wf.lightSbt.missRecordBase = reinterpret_cast<CUdeviceptr>(wf.lightMissRecord);
+        wf.lightSbt.missRecordStrideInBytes = static_cast<uint32_t>(lightMissRecordSize);
+        wf.lightSbt.missRecordCount = 2;
+
+        size_t lightHitRecordSize = (OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData) + 15) & ~15;
+        {
+            size_t totalSize = 2 * lightHitRecordSize;
+            void* buf = nullptr;
+            CUDA_CHECK(cudaMalloc(&buf, totalSize));
+            void* hostBuf = malloc(totalSize);
+            OPTIX_CHECK(optixSbtRecordPackHeader(wf.lightHitGroupProgram, hostBuf));
+            memcpy(static_cast<char*>(hostBuf) + OPTIX_SBT_RECORD_HEADER_SIZE, &sbtData, sizeof(sbtData));
+            OPTIX_CHECK(optixSbtRecordPackHeader(wf.shadowHitGroupProgram,
+                static_cast<char*>(hostBuf) + lightHitRecordSize));
+            memcpy(static_cast<char*>(hostBuf) + lightHitRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+                   &sbtData, sizeof(sbtData));
+            CUDA_CHECK(cudaMemcpy(buf, hostBuf, totalSize, cudaMemcpyHostToDevice));
+            free(hostBuf);
+            wf.lightHitgroupRecord = buf;
+        }
+        wf.lightSbt.hitgroupRecordBase = reinterpret_cast<CUdeviceptr>(wf.lightHitgroupRecord);
+        wf.lightSbt.hitgroupRecordStrideInBytes = static_cast<uint32_t>(lightHitRecordSize);
+        wf.lightSbt.hitgroupRecordCount = RAY_TYPE_COUNT;
+    }
+    VLR_DEBUG_PRINTF("[VLR] Light path SBT created\n");
+
+    // ========================================================================
+    // Shadow Ray Batch SBT
+    // ========================================================================
+    {
+        memset(&wf.shadowSbt, 0, sizeof(wf.shadowSbt));
+
+        wf.shadowRaygenRecord = optixu::createSBTRecord(wf.shadowRaygenProgram, sbtData);
+        wf.shadowSbt.raygenRecord = reinterpret_cast<CUdeviceptr>(wf.shadowRaygenRecord);
+
+        wf.shadowSbt.missRecordBase = wf.sbt.missRecordBase;
+        wf.shadowSbt.missRecordStrideInBytes = wf.sbt.missRecordStrideInBytes;
+        wf.shadowSbt.missRecordCount = wf.sbt.missRecordCount;
+        wf.shadowSbt.hitgroupRecordBase = wf.sbt.hitgroupRecordBase;
+        wf.shadowSbt.hitgroupRecordStrideInBytes = wf.sbt.hitgroupRecordStrideInBytes;
+        wf.shadowSbt.hitgroupRecordCount = wf.sbt.hitgroupRecordCount;
+    }
+    VLR_DEBUG_PRINTF("[VLR] Shadow ray batch SBT created\n");
 }
 
 
@@ -781,6 +903,18 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
         }
         wf.lightSurfacePointBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numLightPaths);
         
+        // Shadow ray batch buffers
+        uint32_t maxShadowRays = numPixels;
+        if (!wf.shadowRayQueueBuffer) {
+            wf.shadowRayQueueBuffer = std::make_unique<cudau::Buffer<shared::ShadowRayRequest>>();
+        }
+        wf.shadowRayQueueBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxShadowRays);
+
+        if (!wf.shadowRayResultsBuffer) {
+            wf.shadowRayResultsBuffer = std::make_unique<cudau::Buffer<float>>();
+        }
+        wf.shadowRayResultsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxShadowRays);
+
         printf("[VLR] LVC-BPT buffers allocated: %u light paths, %u max vertices (%.2f MB)\n",
                numLightPaths, maxLightVertices,
                (maxLightVertices * sizeof(shared::LightPathVertex) +
@@ -1015,6 +1149,17 @@ void Context::setupWavefrontLaunchParams() {
         lp.lightSurfacePointBuffer = wf.lightSurfacePointBuffer->getDevicePointer();
         lp.numLightPaths = numPixels;
         lp.maxLightVertices = numPixels * 4;
+        // Shadow ray batch
+        if (wf.shadowRayQueueBuffer) {
+            lp.shadowRayQueue = wf.shadowRayQueueBuffer->getDevicePointer();
+            lp.shadowRayResults = wf.shadowRayResultsBuffer->getDevicePointer();
+            lp.maxShadowRayRequests = numPixels;
+        } else {
+            lp.shadowRayQueue = nullptr;
+            lp.shadowRayResults = nullptr;
+            lp.maxShadowRayRequests = 0;
+        }
+        lp.numShadowRayRequests = 0;
     } else {
         lp.lightVertexCache = nullptr;
         lp.numLightVertices = nullptr;
@@ -1023,6 +1168,10 @@ void Context::setupWavefrontLaunchParams() {
         lp.lightSurfacePointBuffer = nullptr;
         lp.numLightPaths = 0;
         lp.maxLightVertices = 0;
+        lp.shadowRayQueue = nullptr;
+        lp.shadowRayResults = nullptr;
+        lp.numShadowRayRequests = 0;
+        lp.maxShadowRayRequests = 0;
     }
 
     // ??????
@@ -1114,6 +1263,37 @@ void Context::setupWavefrontLaunchParams() {
         sizeof(sbtData),
         cudaMemcpyHostToDevice
     ));
+
+    // Update light path SBT records
+    if (wf.lightRaygenRecord) {
+        CUDA_CHECK(cudaMemcpy(
+            static_cast<char*>(wf.lightRaygenRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+            &sbtData, sizeof(sbtData), cudaMemcpyHostToDevice));
+    }
+    if (wf.lightMissRecord) {
+        size_t lightMissRecordSize = (OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData) + 15) & ~15;
+        CUDA_CHECK(cudaMemcpy(
+            static_cast<char*>(wf.lightMissRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+            &sbtData, sizeof(sbtData), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(
+            static_cast<char*>(wf.lightMissRecord) + lightMissRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+            &sbtData, sizeof(sbtData), cudaMemcpyHostToDevice));
+    }
+    if (wf.lightHitgroupRecord) {
+        size_t lightHitRecordSize = (OPTIX_SBT_RECORD_HEADER_SIZE + sizeof(shared::WavefrontSBTData) + 15) & ~15;
+        CUDA_CHECK(cudaMemcpy(
+            static_cast<char*>(wf.lightHitgroupRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+            &sbtData, sizeof(sbtData), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(
+            static_cast<char*>(wf.lightHitgroupRecord) + lightHitRecordSize + OPTIX_SBT_RECORD_HEADER_SIZE,
+            &sbtData, sizeof(sbtData), cudaMemcpyHostToDevice));
+    }
+    // Update shadow ray batch SBT
+    if (wf.shadowRaygenRecord) {
+        CUDA_CHECK(cudaMemcpy(
+            static_cast<char*>(wf.shadowRaygenRecord) + OPTIX_SBT_RECORD_HEADER_SIZE,
+            &sbtData, sizeof(sbtData), cudaMemcpyHostToDevice));
+    }
 }
 
 
@@ -1145,6 +1325,22 @@ void Context::cleanupWavefrontResources() {
         wf.missProgram = nullptr;
     }
     
+    if (wf.shadowRaygenProgram) {
+        optixProgramGroupDestroy(wf.shadowRaygenProgram);
+        wf.shadowRaygenProgram = nullptr;
+    }
+    if (wf.lightMissProgram) {
+        optixProgramGroupDestroy(wf.lightMissProgram);
+        wf.lightMissProgram = nullptr;
+    }
+    if (wf.lightHitGroupProgram) {
+        optixProgramGroupDestroy(wf.lightHitGroupProgram);
+        wf.lightHitGroupProgram = nullptr;
+    }
+    if (wf.lightRaygenProgram) {
+        optixProgramGroupDestroy(wf.lightRaygenProgram);
+        wf.lightRaygenProgram = nullptr;
+    }
     if (wf.hitGroupProgram) {
         optixProgramGroupDestroy(wf.hitGroupProgram);
         wf.hitGroupProgram = nullptr;
@@ -1185,8 +1381,24 @@ void Context::cleanupWavefrontResources() {
         cudaFree(wf.shadowHitgroupRecord);
         wf.shadowHitgroupRecord = nullptr;
     }
-    
-    // ??????????????????reset ??????
+    if (wf.lightRaygenRecord) {
+        cudaFree(wf.lightRaygenRecord);
+        wf.lightRaygenRecord = nullptr;
+    }
+    if (wf.lightMissRecord) {
+        cudaFree(wf.lightMissRecord);
+        wf.lightMissRecord = nullptr;
+    }
+    if (wf.lightHitgroupRecord) {
+        cudaFree(wf.lightHitgroupRecord);
+        wf.lightHitgroupRecord = nullptr;
+    }
+    if (wf.shadowRaygenRecord) {
+        cudaFree(wf.shadowRaygenRecord);
+        wf.shadowRaygenRecord = nullptr;
+    }
+
+    // reset buffers
     wf.pathStateBuffer.reset();
     wf.hitInfoBuffer.reset();
     wf.surfacePointBuffer.reset();
@@ -1498,30 +1710,33 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         VLR_DEBUG_PRINTF("[VLR] executeWavefrontRender: Counter set complete\n");
     }
     
-    // LVC-BPT: Generate light paths before the main eye path loop
+    // LVC-BPT: Generate light paths, trace, and process hits
     if (wf.useBDPT && wf.numLightVerticesBuffer && wf.lightVertexCacheBuffer) {
         uint32_t zero = 0;
         CUDA_CHECK(cudaMemcpy(
             wf.numLightVerticesBuffer->getDevicePointer(),
-            &zero,
-            sizeof(uint32_t),
-            cudaMemcpyHostToDevice
-        ));
-        
+            &zero, sizeof(uint32_t), cudaMemcpyHostToDevice));
+
         shared::WavefrontLaunchParameters* d_params =
             static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+
+        // Step 1: Generate light path origins and directions
         launchGenerateLightPathsKernel(d_params, numPixels, m_stream);
         CUDA_CHECK(cudaStreamSynchronize(m_stream));
-        
+
+        // Step 2: Trace light rays through scene (OptiX)
+        launchTraceLightRays(numPixels);
+
+        // Step 3: Process light path hits (store vertices in cache)
+        launchProcessLightHitsKernel(d_params, numPixels, m_stream);
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+
         uint32_t numLV = 0;
         CUDA_CHECK(cudaMemcpy(
-            &numLV,
-            wf.numLightVerticesBuffer->getDevicePointer(),
-            sizeof(uint32_t),
-            cudaMemcpyDeviceToHost
-        ));
+            &numLV, wf.numLightVerticesBuffer->getDevicePointer(),
+            sizeof(uint32_t), cudaMemcpyDeviceToHost));
         if (wf.numAccumFrames <= 1) {
-            printf("[VLR-BDPT] Light vertices generated: %u\n", numLV);
+            printf("[VLR-BDPT] Light vertices generated: %u (pathLen 0+1)\n", numLV);
         }
     }
 
@@ -1799,12 +2014,47 @@ void Context::launchTraceRays(uint32_t numActivePaths) {
     }
 }
 
+void Context::launchTraceLightRays(uint32_t numLightPaths) {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.pipeline || !wf.launchParamsBuffer || numLightPaths == 0) return;
+
+    CUDA_CHECK(cudaMemcpy(
+        wf.launchParamsBuffer, &wf.launchParams,
+        sizeof(shared::WavefrontLaunchParameters), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+
+    OptixResult res = optixLaunch(
+        wf.pipeline, m_stream, 0, 0,
+        &wf.lightSbt, numLightPaths, 1, 1);
+    if (res != OPTIX_SUCCESS) {
+        fprintf(stderr, "[VLR] Error: optixLaunch (light rays) failed - %s\n", optixGetErrorName(res));
+    }
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+}
+
+void Context::launchTraceShadowRays(uint32_t numShadowRays) {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.pipeline || !wf.launchParamsBuffer || numShadowRays == 0) return;
+
+    CUDA_CHECK(cudaMemcpy(
+        wf.launchParamsBuffer, &wf.launchParams,
+        sizeof(shared::WavefrontLaunchParameters), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+
+    OptixResult res = optixLaunch(
+        wf.pipeline, m_stream, 0, 0,
+        &wf.shadowSbt, numShadowRays, 1, 1);
+    if (res != OPTIX_SUCCESS) {
+        fprintf(stderr, "[VLR] Error: optixLaunch (shadow rays) failed - %s\n", optixGetErrorName(res));
+    }
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+}
+
 void Context::launchProcessHits(uint32_t numActivePaths) {
     auto& wf = m_optix.wavefrontPathTracing;
     if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
 
-    // ?? processHits CUDA kernel
     shared::WavefrontLaunchParameters* d_params =
         static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
 
