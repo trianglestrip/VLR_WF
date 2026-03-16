@@ -6,6 +6,90 @@
 
 ---
 
+## [1.5.0] - 2026-03-16
+
+### 新增
+
+#### 场景加载系统
+
+- **PBRT v4 场景解析器** (`viewer/src/PbrtParser.cpp`)
+  - 支持 PBRT v4 格式场景文件
+  - 解析材质、光源、相机、几何体
+  - Include 文件递归解析
+  - PLY 网格加载
+  - ✅ 已完成（kitchen 场景验证通过）
+
+- **Assimp 模型加载** (`viewer/src/SceneLoader.cpp`)
+  - 支持 OBJ/PLY/FBX/glTF 等 40+ 格式
+  - 自动提取顶点、法线、UV、材质
+  - 集成 VLR 材质系统
+  - ✅ 已完成
+
+#### TaskFlow 并行场景准备
+
+- **DAG 编排** (`Scene::prepareSceneParallel()`)
+  - GAS 构建、Bounds 计算、数据聚合三阶段并行执行
+  - Upload 依赖 Bounds + Aggregate 完成
+  - IAS 依赖 GAS + Upload 完成
+  - 最大化 CPU/GPU 并行度
+  - ✅ 已完成
+
+- **并行化子任务**
+  - `buildGeometryAccelerationStructures()`: CPU 数据准备 parallel_for + 多 CUDA stream GAS 构建
+  - `computeSceneBounds()`: 每 Instance 独立计算局部 AABB，reduce 合并
+  - `aggregateMeshData()`: prefix sum + parallel_for 拷贝各 mesh 数据到全局数组
+  - `buildFromPbrt()`: PBRT 材质并行创建（加锁保护 VLR API）
+  - ✅ 已完成
+
+#### 性能统计系统
+
+- **统一计时宏** (`libVLR/vlr_profile.h`)
+  - `VLR_PROFILE_BEGIN(var)` — 记录起始时间点
+  - `VLR_PROFILE_END(var, outMs)` — 耗时赋值到已有变量
+  - `VLR_PROFILE_END_NEW(var, newMs)` — 声明新变量并赋值
+  - 未启用时零开销（宏展开为空操作）
+  - ✅ 已完成
+
+- **CMake 开关**: `cmake -DVLR_PROFILE_SCENE_PREPARE=ON`（默认开启）
+
+- **输出内容**
+  - Scene Prepare: 各阶段耗时 + Serial sum + Wall clock + Parallel speedup
+  - Total Pipeline: GPU 渲染耗时 + 端到端总时间
+
+#### 测试程序
+
+- `viewer/examples/kitchen_render_test.cpp` - Kitchen 场景渲染测试 ✅
+
+### 修改
+
+#### 代码重构（P1-P5）
+
+- P1: 提取 `path_types_core.h` 消除结构体重复定义
+- P2: 提取 `gpu_debug.h` 和 `sampling_common.h` 复用 kernel 代码
+- P3: 拆分 `context.cpp` 为 `context_optix`/`context_wavefront`/`context_texture`
+- P3: 提取 `uploadLaunchParamsToDevice` 和 `getDeviceLaunchParams` 辅助函数
+- P4: 引入 `MaterialDescriptorBuilder` 消除材质创建模板代码
+- P5: 提取测试工具到 `test/utils/`
+
+#### 渲染流程
+
+- `Context::renderWavefront()` 改用 `Scene::prepareSceneParallel()` 替代串行的 `buildAccelerationStructure()` + `updateToGPU()`
+- 添加端到端总时间统计
+
+### 修复
+
+- 修复 `context.cpp` / `scene.cpp` 中的乱码中文注释
+- 统一所有源文件为 CRLF 行尾
+- 修复 TaskFlow Windows `min`/`max` 宏冲突
+- 修复 TaskFlow `for_each.hpp` 需显式 include 的问题（`algorithm.hpp` 空文件）
+
+### 性能
+
+- Cornell Box 场景准备并行加速比: ~1.40x
+- 大型场景（kitchen 等）预期加速更明显
+
+---
+
 ## [1.4.0] - 2026-03-08
 
 ### 新增
@@ -336,10 +420,12 @@
 
 ### 版本里程碑
 
-- **1.0.x**: Wavefront 基础版
-- **1.1.x**: 材质系统增强版 ✅ 当前
-- **1.2.x**: 光源系统增强版 (计划中)
-- **1.3.x**: 纹理系统增强版 (计划中)
+- **1.0.x**: Wavefront 基础版 ✅
+- **1.1.x**: 材质系统增强版 ✅
+- **1.2.x**: 调试渲染模式 ✅
+- **1.3.x**: 纹理系统增强版 ✅
+- **1.4.x**: 光源系统增强版 ✅
+- **1.5.x**: 场景加载与并行化 ✅ 当前
 - **2.0.0**: 功能完整版 (目标)
 
 ---

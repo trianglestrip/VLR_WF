@@ -19,11 +19,14 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 - ✅ **OptiX 8.0 Integration**: Hardware-accelerated ray tracing
 - ✅ **Advanced Optimizations**: Multi-stage performance tuning (阶段 1-5)
 - ✅ **High Performance**: 3.51x faster than traditional implementation
-- ✅ **Rich Materials**: Lambert, GGX, Conductor, Glass, Rough Glass, Specular
-- ✅ **Multiple Lights**: Area Light, Environment Light (IBL)
+- ✅ **Rich Materials**: Lambert, GGX, Conductor, Glass, Rough Glass, Specular, Disney BRDF
+- ✅ **Multiple Lights**: Area Light, Directional Light, Environment Light (IBL)
 - ✅ **Image-Based Lighting**: HDR environment maps (.exr, .hdr) with importance sampling
+- ✅ **PBRT v4 Scene Parser**: Load PBRT format scenes with materials, lights, cameras
+- ✅ **Assimp Model Loading**: OBJ/PLY/FBX/glTF and other 3D model formats
+- ✅ **TaskFlow Parallel Pipeline**: DAG-based parallel scene preparation (GAS ∥ Bounds ∥ Aggregate → Upload → IAS)
+- ✅ **Built-in Profiling**: `VLR_PROFILE_SCENE_PREPARE` macro for end-to-end timing
 - ✅ **Scalable**: Supports resolutions from 512x512 to 4K
-- ✅ **Production Ready**: Fully tested and validated
 - ✅ **Configurable**: Fine-grained performance control via `PerformanceConfig`
 
 ---
@@ -85,6 +88,8 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 - **OptiX SDK**: 8.0.0
 - **Visual Studio**: 2022 (MSVC 19.41+)
 - **GPU**: NVIDIA RTX series (Compute Capability 7.5+)
+- **TaskFlow**: Header-only (included in `external/taskflow/`)
+- **Assimp**: Included in `external/assimp/`
 
 ### Building
 
@@ -433,24 +438,36 @@ VLR_WF/
 │   │   ├── sample_lights.cu     # Light sampling (NEE)
 │   │   ├── sample_bsdf.cu       # BSDF sampling
 │   │   ├── compact.cu           # Path compaction & sorting
-│   │   └── accumulate.cu        # Result accumulation
+│   │   ├── accumulate.cu        # Result accumulation
+│   │   └── debug_rendering.cu   # Debug visualization modes
 │   ├── shared/                  # Shared data structures
 │   │   ├── path_types.h         # Path state definitions
+│   │   ├── performance_config.h # Runtime performance tuning
 │   │   └── renderer_common.h    # Launch parameters
 │   ├── context.cpp              # Main rendering loop
-│   ├── scene.cpp                # Scene management
+│   ├── scene.cpp                # Scene management (TaskFlow parallel)
+│   ├── vlr_profile.h            # Profiling macros (BEGIN/END/END_NEW)
 │   └── include/vlr/vlr.h        # Public C API
+├── viewer/                      # Scene loading frontend
+│   ├── include/SceneLoader.h    # Scene loader interface
+│   ├── src/
+│   │   ├── SceneLoader.cpp      # Assimp + PBRT loading (TaskFlow parallel)
+│   │   └── PbrtParser.cpp       # PBRT v4 format parser
+│   └── examples/
+│       └── kitchen_render_test.cpp  # Kitchen scene render test
+├── external/                    # Third-party libraries
+│   ├── taskflow/                # TaskFlow (header-only, DAG parallel)
+│   ├── assimp/                  # Assimp model importer
+│   ├── tinyexr/                 # EXR image loader
+│   └── stb/                     # STB image libraries
 ├── test/                        # Test scenes
 │   ├── cornell_box_test.cpp     # Cornell Box scene
 │   ├── glass_spheres_test.cpp   # Glass spheres scene
-│   ├── multi_material_test.cpp  # Multi-material scene
-│   ├── benchmark.py             # Performance benchmarks
-│   └── boundary_tests.py        # Edge case tests
+│   └── multi_material_test.cpp  # Multi-material scene
 ├── docs/                        # Documentation
 │   ├── WAVEFRONT_API.md         # API reference
 │   ├── WAVEFRONT_IMPLEMENTATION.md  # Implementation details
 │   ├── PERFORMANCE_REPORT.md    # Performance analysis
-│   ├── STAGE6_TEST_REPORT.md    # Test results
 │   └── todo.md                  # Project roadmap
 └── bin/                         # Build output
     ├── VLR.dll                  # Renderer library
@@ -471,10 +488,11 @@ VLR_WF/
 - ✅ **Stage 4**: Feature Completion (2026-03-07)
 - ✅ **Stage 5**: Performance Optimization (2026-03-07)
 - ✅ **Stage 6**: Testing & Validation (2026-03-07)
+- ✅ **Stage 7**: Scene Loading & Parallelization (2026-03-16)
 
 ### Current Progress
 
-**Overall**: 78% (7/9 stages complete)
+**Overall**: 89% (8/9 stages complete)
 
 ```
 Stage 0: Planning        ████████████████████ 100% ✅
@@ -484,7 +502,7 @@ Stage 3: Integration     ██████████████████�
 Stage 4: Features        ████████████████████ 100% ✅
 Stage 5: Optimization    ████████████████████ 100% ✅
 Stage 6: Testing         ████████████████████ 100% ✅
-Stage 7: Debug Tools     ░░░░░░░░░░░░░░░░░░░░   0% (optional)
+Stage 7: Scene & Parallel████████████████████ 100% ✅
 Stage 8: Documentation   ████████████████░░░░  80% (in progress)
 ```
 
@@ -676,10 +694,10 @@ python ../test/boundary_tests.py
 
 ## Known Limitations
 
-1. **Materials**: Currently only Matte and Emissive materials implemented
-2. **Textures**: Texture mapping not yet implemented
-3. **Volumes**: Volumetric rendering not supported
-4. **Cameras**: Only perspective camera implemented
+1. **Volumes**: Volumetric rendering not supported
+2. **Cameras**: Only perspective camera implemented
+3. **Interactive Rendering**: No real-time preview / progressive display yet
+4. **Multi-GPU**: Single GPU only
 
 These limitations are planned for future releases.
 
@@ -773,6 +791,6 @@ If you use this renderer in your research, please cite:
 
 ---
 
-**Version**: 1.0  
-**Release Date**: 2026-03-07  
+**Version**: 1.5  
+**Release Date**: 2026-03-16  
 **Status**: Production Ready ✅
