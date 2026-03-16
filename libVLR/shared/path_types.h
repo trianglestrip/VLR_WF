@@ -14,6 +14,7 @@
 #include "material_types.h"
 #include "texture_types.h"
 #include "env_importance.h"
+#include "path_types_core.h"
 #include <cmath>
 #include <cstdio>
 
@@ -41,227 +42,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float powerHeuristicMIS(float pdf1, float pdf2)
 }
 #endif
 
-// ============================================================================
-// 1. 核心数据结构
-// ============================================================================
-
-/// 路径状态：存储单条光线路径的完整信息
-/// 这是波前架构的核心数据结构
-/// 大小：144 字节（针对内存对齐和缓存效率优化）
-#ifndef VLR_WAVEFRONT_PATH_STATE_MINIMAL_DEFINED
-#define VLR_WAVEFRONT_PATH_STATE_MINIMAL_DEFINED
-struct alignas(16) WavefrontPathState {
-    // === 光线信息（32 字节）===
-    Point3D origin;                    // 光线起点（12 字节）
-    Vector3D direction;                // 光线方向（12 字节）
-    float _padding1[2];                // 对齐填充（8 字节）
-    
-    // === 光谱和吞吐量（64 字节）===
-    SampledSpectrum throughput;        // 路径吞吐量/权重（16 字节）
-    SampledSpectrum contribution;      // 累积辐射贡献（16 字节）
-    WavelengthSamples wls;             // 波长采样（24 字节）
-    float initImportance;              // 初始重要性（用于俄罗斯轮盘赌）（4 字节）
-    float selectWLPDF;                 // 波长选择概率密度（4 字节）
-    
-    // === 随机数生成器（16 字节）===
-    KernelRNG rng;                     // RNG 状态（PCG32：16 字节）
-    
-    // === 路径历史（16 字节）===
-    float prevDirPDF;                  // 前一次反弹方向概率密度（4 字节）
-    DirectionType prevSampledType;     // 前一次反弹采样类型（4 字节）
-    uint32_t pathLength;               // 当前路径长度（4 字节）
-    uint32_t _padding2;                // 对齐填充（4 字节）
-    
-    // === 像素坐标（8 字节）===
-    uint32_t pixelX;                   // 像素 X 坐标（4 字节）
-    uint32_t pixelY;                   // 像素 Y 坐标（4 字节）
-    
-    // === 状态标志（8 字节）===
-    uint32_t flags;                    // 状态标志位（4 字节）
-    uint32_t materialCategory;         // 材质分类（4 字节）
-    
-    // === 总大小：144 字节 ===
-    
-    // 标志位定义：
-    // bit 0: isActive - 路径是否活跃
-    // bit 1: isTerminated - 路径是否终止
-    // bit 2: maxLengthReached - 是否达到最大长度
-    // bit 3: singleWlSelected - 是否已选择单一波长
-    // bit 4: hitEmissive - 是否击中发光表面
-    // bit 5-7: 保留
-    
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool isActive() const {
-        return flags & 0x1;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool isTerminated() const {
-        return flags & 0x2;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setActive(bool active) {
-        if (active) flags |= 0x1;
-        else flags &= ~0x1;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setTerminated() {
-        flags |= 0x2;
-        flags &= ~0x1;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool maxLengthReached() const {
-        return flags & 0x4;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setMaxLengthReached() {
-        flags |= 0x4;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool singleWlSelected() const {
-        return flags & 0x8;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setSingleWlSelected() {
-        flags |= 0x8;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE bool hitEmissive() const {
-        return flags & 0x10;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_HOST_FUNCTION CUDA_INLINE void setHitEmissive() {
-        flags |= 0x10;
-    }
-};
-
-#if !defined(__CUDACC__)
-static_assert(sizeof(WavefrontPathState) == 144, "PathState size must be 144 bytes");
-#endif
-#endif
-
-/// 击中信息：存储光线相交结果
-/// 大小：32 字节（针对内存带宽优化）
-#ifndef VLR_WAVEFRONT_HIT_INFO_MINIMAL_DEFINED
-#define VLR_WAVEFRONT_HIT_INFO_MINIMAL_DEFINED
-struct alignas(16) WavefrontHitInfo {
-    uint32_t instIndex;
-    uint32_t geomInstIndex;
-    uint32_t primIndex;
-    uint32_t hitFlags;
-    float u, v;
-    float t;
-    float _padding;
-
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasHit() const {
-        return hitFlags & 0x1;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitInfinity() const {
-        return hitFlags & 0x2;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitEmissive() const {
-        return hitFlags & 0x4;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hitTransmissive() const {
-        return hitFlags & 0x8;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setHasHit(bool hit) {
-        if (hit) hitFlags |= 0x1;
-        else hitFlags &= ~0x1;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setHitInfinity(bool inf) {
-        if (inf) hitFlags |= 0x2;
-        else hitFlags &= ~0x2;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setHitEmissive(bool emissive) {
-        if (emissive) hitFlags |= 0x4;
-        else hitFlags &= ~0x4;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void reset() {
-        instIndex = 0xFFFFFFFF;
-        geomInstIndex = 0xFFFFFFFF;
-        primIndex = 0xFFFFFFFF;
-        hitFlags = 0;
-        u = v = t = 0.0f;
-    }
-};
-
-#if !defined(__CUDACC__)
-static_assert(sizeof(WavefrontHitInfo) == 32, "HitInfo size must be 32 bytes");
-#endif
-#endif
-
-// ============================================================================
-// 2. 工作队列管理
-// ============================================================================
-
-/// 工作队列：管理活跃路径的索引
-#ifndef VLR_WAVEFRONT_WORK_QUEUE_MINIMAL_DEFINED
-#define VLR_WAVEFRONT_WORK_QUEUE_MINIMAL_DEFINED
-struct WavefrontWorkQueue {
-    uint32_t* pathIndices;
-    uint32_t* counter;
-    uint32_t capacity;
-
-    CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t size() {
-        return *counter;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t enqueue(uint32_t pathIndex) {
-        uint32_t slot = atomicAdd(counter, 1u);
-        if (slot < capacity) {
-            pathIndices[slot] = pathIndex;
-            return slot;
-        }
-        return 0xFFFFFFFF;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t dequeue() {
-#ifdef __CUDACC__
-        // CUDA 11+: atomicSub(unsigned*) 返回 void，改用 atomicAdd(counter, -1) 获取旧值
-        uint32_t slot = atomicAdd(counter, 0xFFFFFFFFu);
-#else
-        uint32_t oldVal = *counter;
-        *counter = (oldVal > 0) ? (oldVal - 1) : 0;
-        uint32_t slot = oldVal;
-#endif
-        if (slot > 0 && slot <= capacity) {
-            return pathIndices[slot - 1];
-        }
-        return 0xFFFFFFFF;
-    }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void reset() {
-        *counter = 0;
-    }
-};
-#endif
-
-
-/// 材质队列集：按材质类型分类的工作队列
-#ifndef VLR_WAVEFRONT_MATERIAL_QUEUES_MINIMAL_DEFINED
-#define VLR_WAVEFRONT_MATERIAL_QUEUES_MINIMAL_DEFINED
-struct WavefrontMaterialQueues {
-    WavefrontWorkQueue queues[::vlr::shared::NumMaterialCategories];
-
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void enqueueByCategory(
-        uint32_t pathIndex, ::vlr::shared::MaterialCategory category) {
-        queues[category].enqueue(pathIndex);
-    }
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void resetAll() {
-            for (int i = 0; i < ::vlr::shared::NumMaterialCategories; ++i) {
-            queues[i].reset();
-        }
-    }
-};
-#endif
+// WavefrontPathState, WavefrontHitInfo, WavefrontWorkQueue,
+// WavefrontMaterialQueues are defined in path_types_core.h
 
 
 // ============================================================================
 // 3. 启动参数
 // ============================================================================
 
-// 前向声明：LVC-BPT 类型（完整定义见 Section 5.5）
-struct LightPathVertex;
-struct LightPathState;
-
-#ifndef VLR_SHADOW_RAY_REQUEST_DEFINED
-#define VLR_SHADOW_RAY_REQUEST_DEFINED
-struct ShadowRayRequest {
-    Point3D origin;
-    Vector3D direction;
-    float tMax;
-    uint32_t pathIndex;
-    SampledSpectrum contribution;
-};
-#endif
+// LightPathVertex, LightPathState, ShadowRayRequest are defined in path_types_core.h
 
 /// 波前渲染启动参数
 /// 此结构体上传到 GPU 常量内存
@@ -392,16 +181,7 @@ struct WavefrontLaunchParameters {
 // 4. 载荷定义
 // ============================================================================
 
-/// 波前光线追踪载荷
-/// 设计原则：最小化载荷大小，仅传递必要信息
-#ifndef VLR_WF_TRACE_PAYLOAD_MINIMAL_DEFINED
-#define VLR_WF_TRACE_PAYLOAD_MINIMAL_DEFINED
-struct WFTracePayload {
-    uint32_t pathIndex;                // 路径索引（4 字节）
-    WavelengthSamples wls;             // 波长采样（24 字节）
-    // 总计：28 字节（7 个双字）
-};
-#endif
+// WFTracePayload is defined in path_types_core.h
 
 using WFTracePayloadSignature = ::vlr::optixu::PayloadSignature<WFTracePayload>;
 
@@ -421,55 +201,7 @@ enum WFRayType {
 };
 
 
-// ============================================================================
-// 5.5 LVC-BPT 数据结构（Light Vertex Cache Bidirectional Path Tracing）
-// ============================================================================
-
-#ifndef VLR_LIGHT_PATH_VERTEX_DEFINED
-#define VLR_LIGHT_PATH_VERTEX_DEFINED
-/// 光路顶点：存储光源子路径上的表面信息，用于与视线路径做 vertex connection
-struct alignas(16) LightPathVertex {
-    // 几何信息（用于重建 SurfacePoint）
-    Point3D position;           // 世界空间位置
-    Normal3D geometricNormal;   // 几何法线
-    ReferenceFrame shadingFrame;// 着色参考帧
-    
-    // 光路信息
-    SampledSpectrum flux;       // 到达此顶点的 flux（= alpha * Le）
-    Vector3D dirInLocal;        // 入射方向（local space）
-    
-    // 材质信息
-    uint32_t materialIndex;     // 材质描述符索引
-    
-    // 标志
-    uint32_t flags;             // bit0: deltaSampled, bit1: prevDeltaSampled, bit2: wlSelected, bit3: isPoint
-    uint32_t pathLength;        // 光路长度（从光源出发的步数）
-    float _padding;
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDeltaSampled() const { return flags & 0x1; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isPrevDeltaSampled() const { return flags & 0x2; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isWlSelected() const { return flags & 0x4; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isPoint() const { return flags & 0x8; }
-};
-
-/// 光路追踪状态（wavefront 架构的光路状态）
-struct alignas(16) LightPathState {
-    Point3D origin;
-    Vector3D direction;
-    SampledSpectrum flux;       // 累积 flux
-    WavelengthSamples wls;     // 波长采样（BSDF/EDF 评估所需）
-    KernelRNG rng;
-    uint32_t pathLength;
-    uint32_t flags;             // bit0: active, bit1: terminated, bit2: singleWlSelected
-    
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isActive() const { return flags & 0x1; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setActive(bool a) { if(a) flags|=0x1; else flags&=~0x1; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setTerminated() { flags |= 0x2; flags &= ~0x1; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isTerminated() const { return flags & 0x2; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE bool singleWlSelected() const { return flags & 0x4; }
-    CUDA_DEVICE_FUNCTION CUDA_INLINE void setSingleWlSelected() { flags |= 0x4; }
-};
-#endif
+// LVC-BPT data structures (LightPathVertex, LightPathState) are defined in path_types_core.h
 
 
 // ============================================================================
@@ -740,12 +472,7 @@ struct MaterialCategoryComparator {
 
 /// SBT 记录数据：存储 launch parameters 指针
 /// OptiX shaders 通过 optixGetSbtDataPointer() 访问此数据
-#ifndef VLR_WAVEFRONT_SBT_DATA_MINIMAL_DEFINED
-#define VLR_WAVEFRONT_SBT_DATA_MINIMAL_DEFINED
-struct WavefrontSBTData {
-    const WavefrontLaunchParameters* params;
-};
-#endif
+// WavefrontSBTData is defined in path_types_core.h
 
 // ============================================================================
 // 13. 版本信息

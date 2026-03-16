@@ -11,6 +11,7 @@
 #pragma once
 
 #include "vlr/basic_types.h"
+#include "path_types_core.h"
 #include <cstdint>
 
 namespace vlr {
@@ -165,18 +166,16 @@ struct Texture2DDescriptor;
 struct PathTexturedMaterialParams;
 struct MaterialTextureParams;
 
-// 材质类别数量（与 kernel_common.h 保持一致，用于 WavefrontMaterialQueues 布局）
-#ifndef VLR_NUM_MATERIAL_CATEGORIES_DEFINED
-#define VLR_NUM_MATERIAL_CATEGORIES_DEFINED
-constexpr uint32_t NumMaterialCategories = 6;
-#endif
+// NumMaterialCategories is defined in path_types_core.h
 
 // ============================================================================
-// 1. WavefrontPathState（TraceRays 仅需 origin、direction、wls、isActive）
-// 布局必须与 path_types.h 完全一致（144 字节），因 pathStateBuffer 共享
+// Core data structures (WavefrontPathState, WavefrontHitInfo, WavefrontWorkQueue,
+// WavefrontMaterialQueues, WFTracePayload, LightPathVertex, LightPathState,
+// ShadowRayRequest, WavefrontSBTData) are defined in path_types_core.h.
+// Guarded blocks below are retained for backward compatibility but are no-ops.
 // ============================================================================
+
 #ifndef VLR_WAVEFRONT_PATH_STATE_MINIMAL_DEFINED
-#define VLR_WAVEFRONT_PATH_STATE_MINIMAL_DEFINED
 struct alignas(16) WavefrontPathState {
     Point3D origin;
     Vector3D direction;
