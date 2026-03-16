@@ -10,23 +10,7 @@
 
 #pragma once
 
-// ============================================================================
-// 调试开关
-// ============================================================================
-// 全局调试开关：取消注释以启用所有GPU内核调试输出
-// #define VLR_ENABLE_GPU_DEBUG 1
-
-#ifdef VLR_ENABLE_GPU_DEBUG
-    #define VLR_DEBUG_PRINTF(...) printf(__VA_ARGS__)
-#else
-    #define VLR_DEBUG_PRINTF(...) ((void)0)
-#endif
-
-// 取消注释以启用材质系统调试输出（Task 1-5）
-// #define VLR_DEBUG_MATERIAL
-
-// 取消注释以启用详细的 BSDF 调试输出
-// #define VLR_DEBUG_BSDF_VERBOSE
+#include "gpu_debug.h"
 
 // 包含基本类型
 #include "../include/vlr/basic_types.h"

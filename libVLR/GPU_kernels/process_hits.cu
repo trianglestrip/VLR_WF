@@ -11,15 +11,7 @@
 
 #define VLR_DEBUG_PROCESS_HITS 0
 
-// ??????
-// #define VLR_ENABLE_GPU_DEBUG 1
-
-#ifdef VLR_ENABLE_GPU_DEBUG
-    #define VLR_DEBUG_PRINTF(...) printf(__VA_ARGS__)
-#else
-    #define VLR_DEBUG_PRINTF(...) ((void)0)
-#endif
-
+#include "../shared/gpu_debug.h"
 #include "../shared/path_types.h"
 #include "../shared/geometry_common.h"
 #include "../shared/env_importance.h"
