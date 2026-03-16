@@ -36,6 +36,109 @@
 #define OPTIX_CHECK(call) ::vlr::optixu::checkError(call, #call, __FILE__, __LINE__)
 #define CUDA_CHECK(call) ::vlr::cudau::checkError(call, #call, __FILE__, __LINE__)
 
+namespace {
+using namespace vlr::shared;
+
+class MaterialDescriptorBuilder {
+    SurfaceMaterialDescriptor m_mat;
+
+    void setFloat(int slot, float v) {
+        m_mat.data[slot] = *reinterpret_cast<uint32_t*>(&v);
+    }
+    void setUint(int slot, uint32_t v) {
+        m_mat.data[slot] = v;
+    }
+
+public:
+    MaterialDescriptorBuilder(uint32_t bsdfType) {
+        memset(&m_mat, 0, sizeof(m_mat));
+        m_mat.bsdfProcedureSetIndex = bsdfType;
+        m_mat.edfProcedureSetIndex = 0xFFFFFFFF;
+        setUint(MaterialDataLayout::BSDFType, bsdfType);
+    }
+
+    MaterialDescriptorBuilder& setAlbedo(float r, float g, float b) {
+        setFloat(MaterialDataLayout::AlbedoR, r);
+        setFloat(MaterialDataLayout::AlbedoG, g);
+        setFloat(MaterialDataLayout::AlbedoB, b);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setRoughness(float v) {
+        setFloat(MaterialDataLayout::Roughness, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setMetallic(float v) {
+        setFloat(MaterialDataLayout::Metallic, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setIOR(float v) {
+        setFloat(MaterialDataLayout::IOR, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setEmission(float r, float g, float b) {
+        setFloat(MaterialDataLayout::EmissionR, r);
+        setFloat(MaterialDataLayout::EmissionG, g);
+        setFloat(MaterialDataLayout::EmissionB, b);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setEta(float r, float g, float b) {
+        setFloat(MaterialDataLayout::EtaR, r);
+        setFloat(MaterialDataLayout::EtaG, g);
+        setFloat(MaterialDataLayout::EtaB, b);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setKappa(float r, float g, float b) {
+        setFloat(MaterialDataLayout::KappaR, r);
+        setFloat(MaterialDataLayout::KappaG, g);
+        setFloat(MaterialDataLayout::KappaB, b);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setAnisotropy(float v) {
+        setFloat(MaterialDataLayout::Anisotropy, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setDispersion(float v) {
+        setFloat(MaterialDataLayout::DispersionStrength, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setCheckerboard(float c1r, float c1g, float c1b, float gridSize, float extent) {
+        setFloat(MaterialDataLayout::CheckerboardColor1R, c1r);
+        setFloat(MaterialDataLayout::CheckerboardColor1G, c1g);
+        setFloat(MaterialDataLayout::CheckerboardColor1B, c1b);
+        setFloat(MaterialDataLayout::CheckerboardGridSize, gridSize);
+        setFloat(MaterialDataLayout::CheckerboardExtent, extent);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setDataFloat(int slot, float v) {
+        setFloat(slot, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setDataUint(int slot, uint32_t v) {
+        setUint(slot, v);
+        return *this;
+    }
+
+    MaterialDescriptorBuilder& setEmissive(bool hasEmission) {
+        if (hasEmission) m_mat.edfProcedureSetIndex = 0;
+        return *this;
+    }
+
+    const SurfaceMaterialDescriptor& build() const { return m_mat; }
+};
+
+} // anonymous namespace
+
 namespace vlr {
 
 using namespace shared;
@@ -160,30 +263,12 @@ uint32_t Scene::createMaterial(
     float roughness,
     float emissionR, float emissionG, float emissionB)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&albedoR);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&albedoG);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&albedoB);
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&emissionR);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&emissionG);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&emissionB);
-    // Specular ?????? VLR SpecularReflectionSurfaceMaterial ????? eta=1, k=0
+    MaterialDescriptorBuilder b(bsdfType);
+    b.setAlbedo(albedoR, albedoG, albedoB).setRoughness(roughness).setEmission(emissionR, emissionG, emissionB);
     if (bsdfType == static_cast<uint32_t>(BSDFType_Specular)) {
-        float one = 1.0f;
-        float zero = 0.0f;
-        mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&one);
-        mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&one);
-        mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&one);
-        mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&zero);
-        mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&zero);
-        mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&zero);
+        b.setEta(1.0f, 1.0f, 1.0f).setKappa(0.0f, 0.0f, 0.0f);
     }
-    m_materials.push_back(mat);
+    m_materials.push_back(b.build());
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
@@ -195,48 +280,31 @@ uint32_t Scene::createMaterialEx(
     float ior,
     float emissionR, float emissionG, float emissionB)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&albedoR);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&albedoG);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&albedoB);
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    mat.data[MaterialDataLayout::Metallic] = *reinterpret_cast<uint32_t*>(&metallic);
-    mat.data[MaterialDataLayout::IOR] = *reinterpret_cast<uint32_t*>(&ior);
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&emissionR);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&emissionG);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&emissionB);
+    MaterialDescriptorBuilder b(bsdfType);
+    b.setAlbedo(albedoR, albedoG, albedoB).setRoughness(roughness).setMetallic(metallic)
+     .setIOR(ior).setEmission(emissionR, emissionG, emissionB);
     if (bsdfType == static_cast<uint32_t>(BSDFType_Specular)) {
-        float one = 1.0f;
-        float zero = 0.0f;
-        mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&one);
-        mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&one);
-        mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&one);
-        mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&zero);
-        mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&zero);
-        mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&zero);
+        b.setEta(1.0f, 1.0f, 1.0f).setKappa(0.0f, 0.0f, 0.0f);
     }
-    
+
     uint32_t matIndex = static_cast<uint32_t>(m_materials.size());
-    m_materials.push_back(mat);
-    
+    m_materials.push_back(b.build());
+
 #ifdef VLR_DEBUG_MATERIAL
+    const SurfaceMaterialDescriptor& mat = m_materials.back();
     VLR_DEBUG_PRINTF("[Material Debug] createMaterialEx: index=%u, bsdfType=%u\n", matIndex, bsdfType);
     VLR_DEBUG_PRINTF("  Albedo: (%.3f, %.3f, %.3f)\n", albedoR, albedoG, albedoB);
     VLR_DEBUG_PRINTF("  Roughness: %.3f, Metallic: %.3f, IOR: %.3f\n", roughness, metallic, ior);
     VLR_DEBUG_PRINTF("  Emission: (%.3f, %.3f, %.3f)\n", emissionR, emissionG, emissionB);
     VLR_DEBUG_PRINTF("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
-    
+
     const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
-    VLR_DEBUG_PRINTF("  Verify data[AlbedoR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[AlbedoR]: %.3f (expected %.3f)\n",
         dataAsFloat[MaterialDataLayout::AlbedoR], albedoR);
-    VLR_DEBUG_PRINTF("  Verify data[IOR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[IOR]: %.3f (expected %.3f)\n",
         dataAsFloat[MaterialDataLayout::IOR], ior);
 #endif
-    
+
     return matIndex;
 }
 
@@ -245,51 +313,31 @@ uint32_t Scene::createMaterialConductor(
     float kappaR, float kappaG, float kappaB,
     float roughness)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_MicrofacetReflection);
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&etaR);
-    mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&etaG);
-    mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&etaB);
-    mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&kappaR);
-    mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&kappaG);
-    mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&kappaB);
-    
-    // ?? Albedo ??(1,1,1)??????????Fresnel ??
-    float one = 1.0f;
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&one);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&one);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&one);
-    
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-    
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_MicrofacetReflection));
+    b.setEta(etaR, etaG, etaB).setKappa(kappaR, kappaG, kappaB)
+     .setRoughness(roughness).setAlbedo(1.0f, 1.0f, 1.0f).setEmission(0.0f, 0.0f, 0.0f);
+
     uint32_t matIndex = static_cast<uint32_t>(m_materials.size());
-    m_materials.push_back(mat);
-    
+    m_materials.push_back(b.build());
+
 #ifdef VLR_DEBUG_MATERIAL
-    VLR_DEBUG_PRINTF("[Material Debug] createMaterialConductor: index=%u, bsdfType=%u (MicrofacetReflection)\n", 
-        matIndex, bsdfType);
+    const SurfaceMaterialDescriptor& mat = m_materials.back();
+    VLR_DEBUG_PRINTF("[Material Debug] createMaterialConductor: index=%u, bsdfType=%u (MicrofacetReflection)\n",
+        matIndex, static_cast<uint32_t>(BSDFType_MicrofacetReflection));
     VLR_DEBUG_PRINTF("  Eta: (%.3f, %.3f, %.3f)\n", etaR, etaG, etaB);
     VLR_DEBUG_PRINTF("  Kappa: (%.3f, %.3f, %.3f)\n", kappaR, kappaG, kappaB);
     VLR_DEBUG_PRINTF("  Roughness: %.3f\n", roughness);
     VLR_DEBUG_PRINTF("  bsdfProcedureSetIndex: %u\n", mat.bsdfProcedureSetIndex);
-    
+
     const float* dataAsFloat = reinterpret_cast<const float*>(mat.data);
-    VLR_DEBUG_PRINTF("  Verify data[EtaR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[EtaR]: %.3f (expected %.3f)\n",
         dataAsFloat[MaterialDataLayout::EtaR], etaR);
-    VLR_DEBUG_PRINTF("  Verify data[KappaR]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[KappaR]: %.3f (expected %.3f)\n",
         dataAsFloat[MaterialDataLayout::KappaR], kappaR);
-    VLR_DEBUG_PRINTF("  Verify data[Roughness]: %.3f (expected %.3f)\n", 
+    VLR_DEBUG_PRINTF("  Verify data[Roughness]: %.3f (expected %.3f)\n",
         dataAsFloat[MaterialDataLayout::Roughness], roughness);
 #endif
-    
+
     return matIndex;
 }
 
@@ -299,78 +347,30 @@ uint32_t Scene::createMaterialConductorAniso(
     float roughness,
     float anisotropy)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_MicrofacetReflection);
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    mat.data[MaterialDataLayout::Anisotropy] = *reinterpret_cast<uint32_t*>(&anisotropy);
-    mat.data[MaterialDataLayout::EtaR] = *reinterpret_cast<uint32_t*>(&etaR);
-    mat.data[MaterialDataLayout::EtaG] = *reinterpret_cast<uint32_t*>(&etaG);
-    mat.data[MaterialDataLayout::EtaB] = *reinterpret_cast<uint32_t*>(&etaB);
-    mat.data[MaterialDataLayout::KappaR] = *reinterpret_cast<uint32_t*>(&kappaR);
-    mat.data[MaterialDataLayout::KappaG] = *reinterpret_cast<uint32_t*>(&kappaG);
-    mat.data[MaterialDataLayout::KappaB] = *reinterpret_cast<uint32_t*>(&kappaB);
-
-    float one = 1.0f;
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&one);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&one);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&one);
-
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-
-    uint32_t matIndex = static_cast<uint32_t>(m_materials.size());
-    m_materials.push_back(mat);
-    return matIndex;
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_MicrofacetReflection));
+    b.setEta(etaR, etaG, etaB).setKappa(kappaR, kappaG, kappaB)
+     .setRoughness(roughness).setAnisotropy(anisotropy)
+     .setAlbedo(1.0f, 1.0f, 1.0f).setEmission(0.0f, 0.0f, 0.0f);
+    m_materials.push_back(b.build());
+    return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
 uint32_t Scene::createMaterialMicrofacetScattering(
     float ior,
     float roughness)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_MicrofacetScattering);
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::IOR] = *reinterpret_cast<uint32_t*>(&ior);
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    // ???????????????????????
-    float defaultAlbedo = 0.999f;
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&defaultAlbedo);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&defaultAlbedo);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&defaultAlbedo);
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-    m_materials.push_back(mat);
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_MicrofacetScattering));
+    b.setIOR(ior).setRoughness(roughness).setAlbedo(0.999f, 0.999f, 0.999f).setEmission(0.0f, 0.0f, 0.0f);
+    m_materials.push_back(b.build());
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
 uint32_t Scene::createMaterialLambertianScattering(
     float albedoR, float albedoG, float albedoB)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_LambertianScattering);
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&albedoR);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&albedoG);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&albedoB);
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-    m_materials.push_back(mat);
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_LambertianScattering));
+    b.setAlbedo(albedoR, albedoG, albedoB).setEmission(0.0f, 0.0f, 0.0f);
+    m_materials.push_back(b.build());
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
@@ -380,30 +380,19 @@ uint32_t Scene::createMaterialDisney(
     float specularTint, float anisotropic, float sheen, float sheenTint,
     float clearcoat, float clearcoatGloss)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_DisneyBRDF);
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<const uint32_t*>(&bsdfType);
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<const uint32_t*>(&baseColor[0]);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<const uint32_t*>(&baseColor[1]);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<const uint32_t*>(&baseColor[2]);
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    mat.data[MaterialDataLayout::Disney_Metallic] = *reinterpret_cast<uint32_t*>(&metallic);
-    mat.data[MaterialDataLayout::Disney_Subsurface] = *reinterpret_cast<uint32_t*>(&subsurface);
-    mat.data[MaterialDataLayout::Disney_Specular] = *reinterpret_cast<uint32_t*>(&specular);
-    mat.data[MaterialDataLayout::Disney_SpecularTint] = *reinterpret_cast<uint32_t*>(&specularTint);
-    mat.data[MaterialDataLayout::Disney_Anisotropic] = *reinterpret_cast<uint32_t*>(&anisotropic);
-    mat.data[MaterialDataLayout::Disney_Sheen] = *reinterpret_cast<uint32_t*>(&sheen);
-    mat.data[MaterialDataLayout::Disney_SheenTint] = *reinterpret_cast<uint32_t*>(&sheenTint);
-    mat.data[MaterialDataLayout::Disney_Clearcoat] = *reinterpret_cast<uint32_t*>(&clearcoat);
-    mat.data[MaterialDataLayout::Disney_ClearcoatGloss] = *reinterpret_cast<uint32_t*>(&clearcoatGloss);
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-    m_materials.push_back(mat);
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_DisneyBRDF));
+    b.setAlbedo(baseColor[0], baseColor[1], baseColor[2]).setRoughness(roughness)
+     .setDataFloat(MaterialDataLayout::Disney_Metallic, metallic)
+     .setDataFloat(MaterialDataLayout::Disney_Subsurface, subsurface)
+     .setDataFloat(MaterialDataLayout::Disney_Specular, specular)
+     .setDataFloat(MaterialDataLayout::Disney_SpecularTint, specularTint)
+     .setDataFloat(MaterialDataLayout::Disney_Anisotropic, anisotropic)
+     .setDataFloat(MaterialDataLayout::Disney_Sheen, sheen)
+     .setDataFloat(MaterialDataLayout::Disney_SheenTint, sheenTint)
+     .setDataFloat(MaterialDataLayout::Disney_Clearcoat, clearcoat)
+     .setDataFloat(MaterialDataLayout::Disney_ClearcoatGloss, clearcoatGloss)
+     .setEmission(0.0f, 0.0f, 0.0f);
+    m_materials.push_back(b.build());
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
@@ -413,27 +402,12 @@ uint32_t Scene::createMaterialCheckerboard(
     uint32_t gridSize,
     float extent)
 {
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    mat.bsdfProcedureSetIndex = static_cast<uint32_t>(BSDFType_LambertCheckerboard);
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = static_cast<uint32_t>(BSDFType_LambertCheckerboard);
-    mat.data[MaterialDataLayout::AlbedoR] = *reinterpret_cast<uint32_t*>(&color0R);
-    mat.data[MaterialDataLayout::AlbedoG] = *reinterpret_cast<uint32_t*>(&color0G);
-    mat.data[MaterialDataLayout::AlbedoB] = *reinterpret_cast<uint32_t*>(&color0B);
-    mat.data[MaterialDataLayout::CheckerboardColor1R] = *reinterpret_cast<uint32_t*>(&color1R);
-    mat.data[MaterialDataLayout::CheckerboardColor1G] = *reinterpret_cast<uint32_t*>(&color1G);
-    mat.data[MaterialDataLayout::CheckerboardColor1B] = *reinterpret_cast<uint32_t*>(&color1B);
     float gridSizeF = static_cast<float>(gridSize > 0 ? gridSize : 8);
-    mat.data[MaterialDataLayout::CheckerboardGridSize] = *reinterpret_cast<uint32_t*>(&gridSizeF);
-    mat.data[MaterialDataLayout::CheckerboardExtent] = *reinterpret_cast<uint32_t*>(&extent);
-    float roughness = 0.5f;
-    mat.data[MaterialDataLayout::Roughness] = *reinterpret_cast<uint32_t*>(&roughness);
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-    m_materials.push_back(mat);
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_LambertCheckerboard));
+    b.setAlbedo(color0R, color0G, color0B)
+     .setCheckerboard(color1R, color1G, color1B, gridSizeF, extent)
+     .setRoughness(0.5f).setEmission(0.0f, 0.0f, 0.0f);
+    m_materials.push_back(b.build());
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
@@ -447,55 +421,42 @@ uint32_t Scene::createMaterialMultiSurface(
     if (numLayers < 2 || numLayers > 4 || !subBSDFTypes || !subAlbedos || !subRoughness || !weights)
         return 0xFFFFFFFF;
 
-    SurfaceMaterialDescriptor mat;
-    memset(&mat, 0, sizeof(mat));
-    uint32_t bsdfType = static_cast<uint32_t>(BSDFType_MultiSurface);
-    mat.bsdfProcedureSetIndex = bsdfType;
-    mat.edfProcedureSetIndex = 0xFFFFFFFF;
-    mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<uint32_t*>(&bsdfType);
-
-    float numLayersF = static_cast<float>(numLayers);
-    mat.data[MaterialDataLayout::MultiSurface_NumLayers] = *reinterpret_cast<uint32_t*>(&numLayersF);
-
-    auto storeSub = [&](int i, int baseType, int baseR, int baseG, int baseB, int baseRough) {
+    auto storeSub = [&](MaterialDescriptorBuilder& builder, int i, int baseType, int baseR, int baseG, int baseB, int baseRough) {
         uint32_t t = (i < numLayers) ? subBSDFTypes[i] : 0;
         float r = (i < numLayers && subAlbedos[i]) ? subAlbedos[i][0] : 0.5f;
         float g = (i < numLayers && subAlbedos[i]) ? subAlbedos[i][1] : 0.5f;
         float b = (i < numLayers && subAlbedos[i]) ? subAlbedos[i][2] : 0.5f;
         float rough = (i < numLayers && subRoughness) ? subRoughness[i] : 0.5f;
-        mat.data[baseType] = *reinterpret_cast<uint32_t*>(&t);
-        mat.data[baseR] = *reinterpret_cast<uint32_t*>(&r);
-        mat.data[baseG] = *reinterpret_cast<uint32_t*>(&g);
-        mat.data[baseB] = *reinterpret_cast<uint32_t*>(&b);
-        mat.data[baseRough] = *reinterpret_cast<uint32_t*>(&rough);
+        builder.setDataUint(baseType, t)
+               .setDataFloat(baseR, r).setDataFloat(baseG, g).setDataFloat(baseB, b)
+               .setDataFloat(baseRough, rough);
     };
-    storeSub(0, MaterialDataLayout::SubMaterial0_BSDFType,
+
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_MultiSurface));
+    b.setDataFloat(MaterialDataLayout::MultiSurface_NumLayers, static_cast<float>(numLayers));
+    storeSub(b, 0, MaterialDataLayout::SubMaterial0_BSDFType,
              MaterialDataLayout::SubMaterial0_AlbedoR, MaterialDataLayout::SubMaterial0_AlbedoG,
              MaterialDataLayout::SubMaterial0_AlbedoB, MaterialDataLayout::SubMaterial0_Roughness);
-    storeSub(1, MaterialDataLayout::SubMaterial1_BSDFType,
+    storeSub(b, 1, MaterialDataLayout::SubMaterial1_BSDFType,
              MaterialDataLayout::SubMaterial1_AlbedoR, MaterialDataLayout::SubMaterial1_AlbedoG,
              MaterialDataLayout::SubMaterial1_AlbedoB, MaterialDataLayout::SubMaterial1_Roughness);
-    storeSub(2, MaterialDataLayout::SubMaterial2_BSDFType,
+    storeSub(b, 2, MaterialDataLayout::SubMaterial2_BSDFType,
              MaterialDataLayout::SubMaterial2_AlbedoR, MaterialDataLayout::SubMaterial2_AlbedoG,
              MaterialDataLayout::SubMaterial2_AlbedoB, MaterialDataLayout::SubMaterial2_Roughness);
-    storeSub(3, MaterialDataLayout::SubMaterial3_BSDFType,
+    storeSub(b, 3, MaterialDataLayout::SubMaterial3_BSDFType,
              MaterialDataLayout::SubMaterial3_AlbedoR, MaterialDataLayout::SubMaterial3_AlbedoG,
              MaterialDataLayout::SubMaterial3_AlbedoB, MaterialDataLayout::SubMaterial3_Roughness);
 
     float w[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     for (int i = 0; i < numLayers; ++i)
         w[i] = ::vlr::vlr_max(0.0f, weights[i]);
-    mat.data[MaterialDataLayout::MultiSurface_Weight0] = *reinterpret_cast<uint32_t*>(&w[0]);
-    mat.data[MaterialDataLayout::MultiSurface_Weight1] = *reinterpret_cast<uint32_t*>(&w[1]);
-    mat.data[MaterialDataLayout::MultiSurface_Weight2] = *reinterpret_cast<uint32_t*>(&w[2]);
-    mat.data[MaterialDataLayout::MultiSurface_Weight3] = *reinterpret_cast<uint32_t*>(&w[3]);
+    b.setDataFloat(MaterialDataLayout::MultiSurface_Weight0, w[0])
+     .setDataFloat(MaterialDataLayout::MultiSurface_Weight1, w[1])
+     .setDataFloat(MaterialDataLayout::MultiSurface_Weight2, w[2])
+     .setDataFloat(MaterialDataLayout::MultiSurface_Weight3, w[3])
+     .setEmission(0.0f, 0.0f, 0.0f);
 
-    float zero = 0.0f;
-    mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<uint32_t*>(&zero);
-    mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<uint32_t*>(&zero);
-
-    m_materials.push_back(mat);
+    m_materials.push_back(b.build());
     return static_cast<uint32_t>(m_materials.size() - 1);
 }
 
