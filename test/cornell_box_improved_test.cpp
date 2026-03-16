@@ -31,7 +31,14 @@
 #include <sstream>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_INCLUDED
 #include "stb_image_write.h"
+
+#include "utils/test_geometry.h"
+#include "utils/test_image.h"
+#include "utils/test_scene.h"
+
+using namespace vlr_test;
 
 // ----------------------------------------------------------------------------
 // Tuning knobs (keep defaults here, override via INI/CLI where available)
@@ -88,39 +95,7 @@ static const float kIdentityOrigin[] = { 0.0f, 0.0f, 0.0f };
 static const float kIdentityScale[] = { 1.0f, 1.0f, 1.0f };
 static const float kIdentityAxis[] = { 0.0f, 1.0f, 0.0f };
 
-// Material creation helpers
-static inline VLRResult createMatteMaterial(
-    VLRScene scene, const float* color, const float* emission, 
-    VLRMaterial* outMat, const char* name) {
-    VLRResult res = vlrCreateMaterial(scene, 0 /* Matte */, color, emission, outMat);
-    if (res != VLRResult_Success) {
-        fprintf(stderr, "[Error] %s material creation failed\n", name);
-    }
-    return res;
-}
-
-// Mesh creation helper
-static inline VLRResult createQuadMesh(
-    VLRScene scene, const float* vertices, const uint32_t* indices,
-    VLRMaterial material, VLRTriangleMesh* outMesh, const char* name) {
-    VLRResult res = vlrCreateTriangleMesh(scene, vertices, 4, indices, 2, material, outMesh);
-    if (res != VLRResult_Success) {
-        fprintf(stderr, "[Error] %s mesh creation failed\n", name);
-    }
-    return res;
-}
-
-// Instance creation helper
-static inline VLRResult createSimpleInstance(
-    VLRScene scene, VLRTriangleMesh mesh, 
-    const float* origin, const float* scale, const float* axis, float angle,
-    VLRInstance* outInstance, const char* name) {
-    VLRResult res = vlrCreateInstance(scene, mesh, origin, scale, axis, angle, outInstance);
-    if (res != VLRResult_Success) {
-        fprintf(stderr, "[Error] %s instance creation failed\n", name);
-    }
-    return res;
-}
+// Material/Mesh/Instance helpers are in utils/test_scene.h
 
 // ============================================================================
 // Usage
@@ -143,227 +118,19 @@ static void printUsage(const char* prog) {
     printf("\n");
 }
 
-// ============================================================================
-// Helper: Save PNG Image
-// ============================================================================
-
-static void savePNG(const char* filename, uint32_t width, uint32_t height,
-                    const float* rgb, uint32_t numSamples, float exposure) {
-    std::vector<unsigned char> pixels(width * height * 3);
-    float invSamples = (numSamples > 0) ? (1.0f / (float)numSamples) : 1.0f;
-    auto saturate = [](float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); };
-    auto toneMapACES = [&](float x) {
-        const float a = 2.51f;
-        const float b = 0.03f;
-        const float c = 2.43f;
-        const float d = 0.59f;
-        const float e = 0.14f;
-        return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
-    };
-    auto toneMapReinhard = [](float x) { return x / (1.0f + x); };
-
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            uint32_t srcIdx = (y * width + x) * 3;
-            uint32_t dstIdx = (y * width + x) * 3;
-
-            float r = fmaxf(0.0f, rgb[srcIdx + 0] * invSamples * exposure);
-            float g = fmaxf(0.0f, rgb[srcIdx + 1] * invSamples * exposure);
-            float b = fmaxf(0.0f, rgb[srcIdx + 2] * invSamples * exposure);
+// savePNG is in utils/test_image.h
 #if VLR_CB_TONEMAP_ACES == 2
-            r = toneMapReinhard(r);
-            g = toneMapReinhard(g);
-            b = toneMapReinhard(b);
+static const ToneMapMode kToneMapMode = ToneMapMode::Reinhard;
 #elif VLR_CB_TONEMAP_ACES == 1
-            r = toneMapACES(r);
-            g = toneMapACES(g);
-            b = toneMapACES(b);
+static const ToneMapMode kToneMapMode = ToneMapMode::ACES;
 #else
-            r = saturate(r);
-            g = saturate(g);
-            b = saturate(b);
+static const ToneMapMode kToneMapMode = ToneMapMode::None;
 #endif
 
-            r = powf(r, 1.0f / 2.2f);
-            g = powf(g, 1.0f / 2.2f);
-            b = powf(b, 1.0f / 2.2f);
+// Geometry helpers (createSphere, createRotatedBox, loadOBJ) are in utils/test_geometry.h
 
-            pixels[dstIdx + 0] = (unsigned char)(r * 255.99f);
-            pixels[dstIdx + 1] = (unsigned char)(g * 255.99f);
-            pixels[dstIdx + 2] = (unsigned char)(b * 255.99f);
-        }
-    }
 
-    if (stbi_write_png(filename, width, height, 3, pixels.data(), width * 3)) {
-        printf("[Done] Image saved: %s (%u x %u)\n", filename, width, height);
-    } else {
-        fprintf(stderr, "[Error] Failed to save PNG: %s\n", filename);
-    }
-}
 
-// ============================================================================
-// Geometry Helpers
-// ============================================================================
-
-static const float PI = 3.14159265358979323846f;
-static const float TWO_PI = 6.28318530717958647692f;
-
-/// Load OBJ file (simple version, only vertices and faces)
-static bool loadOBJ(const char* filename, std::vector<float>& vertices, std::vector<uint32_t>& indices,
-                   float scale = 1.0f, float tx = 0.0f, float ty = 0.0f, float tz = 0.0f) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        fprintf(stderr, "[Error] Cannot open OBJ file: %s\n", filename);
-        return false;
-    }
-    
-    vertices.clear();
-    indices.clear();
-    
-    std::vector<float> tempVerts;
-    std::string line;
-    
-    while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        
-        std::istringstream iss(line);
-        std::string prefix;
-        iss >> prefix;
-        
-        if (prefix == "v") {
-            float x, y, z;
-            iss >> x >> y >> z;
-            tempVerts.push_back(x * scale + tx);
-            tempVerts.push_back(y * scale + ty);
-            tempVerts.push_back(z * scale + tz);
-        }
-        else if (prefix == "f") {
-            std::string v1, v2, v3;
-            iss >> v1 >> v2 >> v3;
-            
-            // Parse vertex indices (format: v or v/vt or v/vt/vn)
-            auto parseIndex = [](const std::string& s) -> uint32_t {
-                size_t slash = s.find('/');
-                std::string indexStr = (slash != std::string::npos) ? s.substr(0, slash) : s;
-                return (uint32_t)(std::stoi(indexStr) - 1);  // OBJ indices are 1-based
-            };
-            
-            indices.push_back(parseIndex(v1));
-            indices.push_back(parseIndex(v2));
-            indices.push_back(parseIndex(v3));
-        }
-    }
-    
-    vertices = tempVerts;
-    file.close();
-    
-    printf("[Info] Loaded OBJ: %s (%zu vertices, %zu triangles)\n", 
-           filename, vertices.size() / 3, indices.size() / 3);
-    return true;
-}
-
-/// UV sphere: center (cx,cy,cz), radius, segments (longitude), rings (latitude)
-/// Also outputs per-vertex normals for smooth shading.
-static void createSphere(std::vector<float>& vertices, std::vector<uint32_t>& indices,
-                        float cx, float cy, float cz, float radius,
-                        int segments = 64, int rings = 48,
-                        std::vector<float>* outNormals = nullptr) {
-    vertices.clear();
-    indices.clear();
-    if (outNormals) outNormals->clear();
-
-    for (int lat = 0; lat <= rings; ++lat) {
-        float phi = PI * float(lat) / float(rings);
-        float sinPhi = std::sin(phi);
-        float cosPhi = std::cos(phi);
-
-        for (int lon = 0; lon <= segments; ++lon) {
-            float theta = TWO_PI * float(lon) / float(segments);
-            float sinTheta = std::sin(theta);
-            float cosTheta = std::cos(theta);
-
-            float nx = sinPhi * cosTheta;
-            float ny = cosPhi;
-            float nz = sinPhi * sinTheta;
-
-            vertices.push_back(cx + radius * nx);
-            vertices.push_back(cy + radius * ny);
-            vertices.push_back(cz + radius * nz);
-
-            if (outNormals) {
-                outNormals->push_back(nx);
-                outNormals->push_back(ny);
-                outNormals->push_back(nz);
-            }
-        }
-    }
-
-    for (int lat = 0; lat < rings; ++lat) {
-        for (int lon = 0; lon < segments; ++lon) {
-            uint32_t first = lat * (segments + 1) + lon;
-            uint32_t second = first + segments + 1;
-
-            // 反转卷绕顺序，使法线指向外部（对玻璃球至关重要）
-            if (lat != 0) {
-                indices.push_back(first);
-                indices.push_back(first + 1);     // 反转
-                indices.push_back(second);
-            }
-            if (lat != rings - 1) {
-                indices.push_back(first + 1);
-                indices.push_back(second + 1);    // 反转
-                indices.push_back(second);
-            }
-        }
-    }
-}
-
-/// Axis-aligned box at origin (matching OfflineRenderer createBox), then rotate and translate
-static void createRotatedBox(std::vector<float>& vertices, std::vector<uint32_t>& indices,
-                             float cx, float cy, float cz, float size, float rotationY) {
-    float halfSize = size * 0.5f;
-    float cosY = std::cos(rotationY);
-    float sinY = std::sin(rotationY);
-
-    // createBox at origin: 24 vertices (4 per face)
-    float verts[] = {
-        -halfSize, -halfSize, halfSize,   halfSize, -halfSize, halfSize,
-        halfSize, halfSize, halfSize,     -halfSize, halfSize, halfSize,
-        halfSize, -halfSize, -halfSize,   -halfSize, -halfSize, -halfSize,
-        -halfSize, halfSize, -halfSize,    halfSize, halfSize, -halfSize,
-        -halfSize, -halfSize, -halfSize,   -halfSize, -halfSize, halfSize,
-        -halfSize, halfSize, halfSize,    -halfSize, halfSize, -halfSize,
-        halfSize, -halfSize, halfSize,     halfSize, -halfSize, -halfSize,
-        halfSize, halfSize, -halfSize,    halfSize, halfSize, halfSize,
-        -halfSize, halfSize, halfSize,    halfSize, halfSize, halfSize,
-        halfSize, halfSize, -halfSize,    -halfSize, halfSize, -halfSize,
-        -halfSize, -halfSize, -halfSize,   halfSize, -halfSize, -halfSize,
-        halfSize, -halfSize, halfSize,    -halfSize, -halfSize, halfSize
-    };
-
-    uint32_t faceInds[] = {
-        0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7,
-        8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15,
-        16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23
-    };
-
-    vertices.clear();
-    indices.clear();
-
-    for (int i = 0; i < 24; ++i) {
-        float x = verts[i * 3 + 0];
-        float y = verts[i * 3 + 1];
-        float z = verts[i * 3 + 2];
-        float newX = cosY * x - sinY * z + cx;
-        float newZ = sinY * x + cosY * z + cz;
-        vertices.push_back(newX);
-        vertices.push_back(y + cy);
-        vertices.push_back(newZ);
-    }
-
-    for (int i = 0; i < 36; ++i)
-        indices.push_back(faceInds[i]);
-}
 
 // ============================================================================
 // Cornell Box 3×3×3 Geometry
@@ -732,7 +499,7 @@ int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    savePNG(outputFile.c_str(), width, height, outputBuffer, numSamples, exposure);
+    savePNG(outputFile.c_str(), width, height, outputBuffer, numSamples, exposure, kToneMapMode);
     free(outputBuffer);
 
     printf("=== Test complete ===\n");
