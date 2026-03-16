@@ -78,6 +78,9 @@ endif()
 set(LIBVLR_CPP_SOURCES
     vlr.cpp
     context.cpp
+    context_optix.cpp
+    context_texture.cpp
+    context_wavefront.cpp
     scene.cpp
     image_loader.cpp
     env_importance.cpp

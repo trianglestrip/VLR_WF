@@ -7,6 +7,15 @@
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context_optix.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context_texture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context_wavefront.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\scene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -34,6 +43,9 @@
       <Filter>Source Files</Filter>
     </CudaCompile>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_bsdf.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\light_path.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\compact.cu">

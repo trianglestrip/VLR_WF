@@ -417,6 +417,9 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   <ItemGroup>
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\vlr.cpp" />
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context.cpp" />
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context_optix.cpp" />
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context_texture.cpp" />
+    <ClCompile Include="D:\gitProject\VLR_WF\libVLR\context_wavefront.cpp" />
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\scene.cpp" />
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\image_loader.cpp" />
     <ClCompile Include="D:\gitProject\VLR_WF\libVLR\env_importance.cpp" />
@@ -426,6 +429,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\process_hits.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_lights.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\sample_bsdf.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\light_path.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\compact.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\accumulate.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\debug_rendering.cu" />

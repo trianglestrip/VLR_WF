@@ -44,6 +44,9 @@ namespace optixu {
     class Program;
 }
 
+/// OptiX log callback (defined in context_optix.cpp)
+void optixLogCallback(unsigned int level, const char* tag, const char* message, void* cbdata);
+
 // ============================================================================
 // Context 类
 // ============================================================================
