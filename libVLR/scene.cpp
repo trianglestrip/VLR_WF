@@ -882,7 +882,8 @@ void Scene::setCamera(const CameraParams& params) {
     float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
     if (len > 1e-6f) { dir.x /= len; dir.y /= len; dir.z /= len; }
     else { dir = Vector3D(0, 0, 1); }
-    Vector3D tangent = Vector3D(params.up.y * dir.z - params.up.z * dir.y, params.up.z * dir.x - params.up.x * dir.z, params.up.x * dir.y - params.up.y * dir.x);
+    // cross(dir, up) for correct right-handed camera frame (no horizontal mirror)
+    Vector3D tangent = Vector3D(dir.y * params.up.z - dir.z * params.up.y, dir.z * params.up.x - dir.x * params.up.z, dir.x * params.up.y - dir.y * params.up.x);
     len = std::sqrt(tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z);
     if (len > 1e-6f) { tangent.x /= len; tangent.y /= len; tangent.z /= len; }
     else { tangent = Vector3D(1, 0, 0); }

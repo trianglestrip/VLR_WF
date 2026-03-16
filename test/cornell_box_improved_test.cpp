@@ -7,7 +7,7 @@
 // - 3×3×3 box (L=-1.5, R=1.5; B=0, T=3; N=-1.5, F=1.5)
 // - sRGB to linear color conversion for walls
 // - Stronger light (80, 80, 80), 1.0×1.0 at y=2.9
-// - Glass sphere: center (-0.6, 0.5, 0.0), radius 0.5, IOR 2.4 (diamond) [left]
+// - Glass sphere: center (0.0, 0.8, 0.5), radius 0.5, IOR 1.5 (glass) [center]
 // - Metal box: center (0.6, 0.5, 0.0), size 1.0, rotated 20° around Y [right]
 // - Camera: position (0, 1.5, 6.0), target (0, 1.5, 0), fovY 40°
 // - Checkerboard floor: 5×5 grid (position-based)
@@ -40,7 +40,7 @@
 #define VLR_CB_DEFAULT_HEIGHT 512u
 #define VLR_CB_DEFAULT_SPP 256u
 #define VLR_CB_DEFAULT_MAX_DEPTH 16u
-#define VLR_CB_DEFAULT_EXPOSURE 1.0f
+#define VLR_CB_DEFAULT_EXPOSURE 1.5f
 
 #define VLR_CB_DEFAULT_ENV_ENABLED 1
 #define VLR_CB_DEFAULT_ENV_INTENSITY 0.3f
@@ -55,7 +55,7 @@
 #define VLR_CB_GLASS_IOR 1.5f
 #define VLR_CB_GLASS_ROUGHNESS 0.001f
 
-#define VLR_CB_TONEMAP_ACES 1
+#define VLR_CB_TONEMAP_ACES 2
 
 // ============================================================================
 // Helper Macros & Functions
@@ -160,17 +160,21 @@ static void savePNG(const char* filename, uint32_t width, uint32_t height,
         const float e = 0.14f;
         return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
     };
+    auto toneMapReinhard = [](float x) { return x / (1.0f + x); };
 
     for (uint32_t y = 0; y < height; ++y) {
-        uint32_t srcY = height - 1 - y;
         for (uint32_t x = 0; x < width; ++x) {
-            uint32_t srcIdx = (srcY * width + x) * 3;
+            uint32_t srcIdx = (y * width + x) * 3;
             uint32_t dstIdx = (y * width + x) * 3;
 
             float r = fmaxf(0.0f, rgb[srcIdx + 0] * invSamples * exposure);
             float g = fmaxf(0.0f, rgb[srcIdx + 1] * invSamples * exposure);
             float b = fmaxf(0.0f, rgb[srcIdx + 2] * invSamples * exposure);
-#if VLR_CB_TONEMAP_ACES
+#if VLR_CB_TONEMAP_ACES == 2
+            r = toneMapReinhard(r);
+            g = toneMapReinhard(g);
+            b = toneMapReinhard(b);
+#elif VLR_CB_TONEMAP_ACES == 1
             r = toneMapACES(r);
             g = toneMapACES(g);
             b = toneMapACES(b);
@@ -259,11 +263,14 @@ static bool loadOBJ(const char* filename, std::vector<float>& vertices, std::vec
 }
 
 /// UV sphere: center (cx,cy,cz), radius, segments (longitude), rings (latitude)
+/// Also outputs per-vertex normals for smooth shading.
 static void createSphere(std::vector<float>& vertices, std::vector<uint32_t>& indices,
                         float cx, float cy, float cz, float radius,
-                        int segments = 64, int rings = 48) {
+                        int segments = 64, int rings = 48,
+                        std::vector<float>* outNormals = nullptr) {
     vertices.clear();
     indices.clear();
+    if (outNormals) outNormals->clear();
 
     for (int lat = 0; lat <= rings; ++lat) {
         float phi = PI * float(lat) / float(rings);
@@ -275,13 +282,19 @@ static void createSphere(std::vector<float>& vertices, std::vector<uint32_t>& in
             float sinTheta = std::sin(theta);
             float cosTheta = std::cos(theta);
 
-            float x = cx + radius * sinPhi * cosTheta;
-            float y = cy + radius * cosPhi;
-            float z = cz + radius * sinPhi * sinTheta;
+            float nx = sinPhi * cosTheta;
+            float ny = cosPhi;
+            float nz = sinPhi * sinTheta;
 
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
+            vertices.push_back(cx + radius * nx);
+            vertices.push_back(cy + radius * ny);
+            vertices.push_back(cz + radius * nz);
+
+            if (outNormals) {
+                outNormals->push_back(nx);
+                outNormals->push_back(ny);
+                outNormals->push_back(nz);
+            }
         }
     }
 
@@ -518,7 +531,7 @@ int main(int argc, char** argv) {
     VLRScene scene = nullptr;
     VLRResult res = VLRResult_Success;
     VLRCameraParams camera = {};
-    std::vector<float> sphereVerts, boxVerts;
+    std::vector<float> sphereVerts, boxVerts, sphereNormals;
     std::vector<uint32_t> sphereInds, boxInds;
     
     // Materials (sRGB to linear: white=0.522, red/blue=0.522/0.0508, black=0.0508)
@@ -617,21 +630,14 @@ int main(int argc, char** argv) {
     VLR_CHECK(createQuadMesh(scene, kFrontWallVertices, kFrontWallIndices, matWhite, &meshFrontWall, "FrontWall"), "FrontWall mesh");
     VLR_CHECK(createQuadMesh(scene, kLightVertices, kLightIndices, matLight, &meshLight, "Light"), "Light mesh");
 
-    // Load glass sphere from OBJ file
-    // For debugging: can switch material to see reflections better
-    if (!loadOBJ("bin/resources/sphere/sphere.obj", sphereVerts, sphereInds, 
-                 0.5f, -0.6f, 0.5f, 0.0f)) {
-        fprintf(stderr, "[Warning] Failed to load sphere.obj, using procedural sphere\n");
-        createSphere(sphereVerts, sphereInds, -0.6f, 0.5f, 0.0f, 0.5f, 64, 48);
-    }
-    
-    // Alternative: Use mirror material to test reflections
-    // Uncomment to see pure reflections instead of glass
-    // matGlass = matGold;  // Use mirror material for debugging
+    // Glass sphere on the left, gold box on the right (standard Cornell box layout)
+    // Positions chosen to avoid geometric overlap after box rotation
+    createSphere(sphereVerts, sphereInds, -0.6f, 0.5f, 0.0f, 0.5f, 64, 48, &sphereNormals);
     
     createRotatedBox(boxVerts, boxInds, 0.6f, 0.5f, 0.0f, 1.0f, 20.0f * PI / 180.0f);
 
-    VLR_CHECK(vlrCreateTriangleMesh(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
+    VLR_CHECK(vlrCreateTriangleMeshWithNormals(scene, sphereVerts.data(), (uint32_t)(sphereVerts.size() / 3),
+                                    sphereNormals.data(), (uint32_t)(sphereNormals.size() / 3),
                                     sphereInds.data(), (uint32_t)(sphereInds.size() / 3), matGlass, &meshSphere),
               "Sphere mesh");
     VLR_CHECK(vlrCreateTriangleMesh(scene, boxVerts.data(), (uint32_t)(boxVerts.size() / 3),

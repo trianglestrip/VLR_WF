@@ -315,9 +315,9 @@ extern "C" __global__ void processHits(
             surfPt.isFrontFace = (ndotd <= 0.0f);
             if (ndotd > 0.0f) {
                 surfPt.geometricNormal = -surfPt.geometricNormal;
-                // Flip the shading normal consistently with the geometric normal.
-                // Keep the original tangent as much as possible to preserve texture orientation.
-                surfPt.shadingFrame = ReferenceFrame(surfPt.shadingFrame.x, -surfPt.shadingFrame.z);
+                // Do NOT flip the shading frame. The BSDF code uses isFrontFace
+                // to determine IOR direction. Keeping the original frame avoids
+                // handedness issues that corrupt the refracted world direction.
             }
         }
 
@@ -466,6 +466,7 @@ extern "C" __global__ void processHits(
 
     // ========================================================================
     // 4.5 LVC-BPT: Vertex Connection with Light Vertex Cache
+    //     Enqueue shadow ray for visibility test instead of direct accumulation
     // ========================================================================
     if (wlp.useBDPT && wlp.lightVertexCache != nullptr && wlp.numLightVertices != nullptr) {
         uint32_t numLV = *wlp.numLightVertices;
@@ -494,12 +495,20 @@ extern "C" __global__ void processHits(
 
                     if (fsE.hasNonZero()) {
                         float vertexProb = 1.0f / static_cast<float>(numLV);
-                        // EDF directional factor for Lambertian area light: 1/π
                         float edfFactor = (lv.pathLength == 0) ? VLR_M_INV_PI : 1.0f;
                         SampledSpectrum contrib = pathState.throughput * fsE * G * lv.flux * edfFactor / vertexProb;
 
-                        if (contrib.allFinite() && contrib.hasNonZero()) {
-                            pathState.contribution += contrib;
+                        if (contrib.allFinite() && contrib.hasNonZero() &&
+                            wlp.shadowRayQueue != nullptr && wlp.numShadowRayRequests != nullptr) {
+                            uint32_t slot = atomicAdd(wlp.numShadowRayRequests, 1u);
+                            if (slot < wlp.maxShadowRayRequests) {
+                                ShadowRayRequest& req = wlp.shadowRayQueue[slot];
+                                req.origin = surfPt.position + conDir * 1e-4f;
+                                req.direction = conDir;
+                                req.tMax = dist;
+                                req.pathIndex = pathIndex;
+                                req.contribution = contrib;
+                            }
                         }
                     }
                 }

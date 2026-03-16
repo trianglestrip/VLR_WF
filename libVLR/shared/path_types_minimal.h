@@ -411,6 +411,7 @@ struct ShadowRayRequest {
     Vector3D direction;
     float tMax;
     uint32_t pathIndex;
+    SampledSpectrum contribution;
 };
 #endif
 #endif
@@ -503,7 +504,7 @@ struct WavefrontLaunchParameters {
     // === Shadow Ray Batch 数据 ===
     ShadowRayRequest* shadowRayQueue;
     float* shadowRayResults;
-    uint32_t numShadowRayRequests;
+    uint32_t* numShadowRayRequests;
     uint32_t maxShadowRayRequests;
 };
 #endif

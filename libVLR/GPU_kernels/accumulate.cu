@@ -17,10 +17,10 @@
 #define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 320
+#define VLR_DEBUG_SPEC_TRANS_PX 256
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 84
+#define VLR_DEBUG_SPEC_TRANS_PY 166
 #endif
 
 #include "../shared/path_types.h"
@@ -126,6 +126,7 @@ extern "C" __global__ void accumulateResults(
     accum[pixelIdx].r += contrib.r;
     accum[pixelIdx].g += contrib.g;
     accum[pixelIdx].b += contrib.b;
+
 
     // ?????? NaN/Inf?????????? contribution ??? allFinite ?????
     // ????0 ????????????

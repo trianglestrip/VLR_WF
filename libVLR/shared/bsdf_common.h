@@ -1383,26 +1383,29 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool refractVector(
     float eta,
     Vector3D* wt)
 {
-    // PBRT-style refraction
-    // wo: outgoing direction (pointing away from surface, toward the observer)
-    // n: surface normal (pointing outward from surface)
-    // eta: etaI / etaT (ratio of indices of refraction)
-    // wt: output transmitted direction
-    // 
-    // Standard Snell's law refraction formula
+    // PBRT-style refraction with proper sign handling
+    // wo: outgoing direction (from surface toward observer)
+    // n: surface normal (outward)
+    // eta: etaI / etaT
     
-    float cosThetaI = dot(n, wo);
-    float sin2ThetaI = ::vlr::vlr_max(0.0f, 1.0f - cosThetaI * cosThetaI);
-    float sin2ThetaT = eta * eta * sin2ThetaI;
-
+    float cosThetaO = dot(n, wo);
+    float sin2ThetaO = std::max(0.0f, 1.0f - cosThetaO * cosThetaO);
+    float sin2ThetaT = eta * eta * sin2ThetaO;
+    
     if (sin2ThetaT >= 1.0f)
         return false; // Total internal reflection
-
+    
     float cosThetaT = safeSqrt(1.0f - sin2ThetaT);
     
-    // Standard refraction formula
-    *wt = eta * (-wo) + (eta * cosThetaI - cosThetaT) * Vector3D(n.x, n.y, n.z);
-
+    // Determine sign of cosThetaT based on which side we're on
+    // If cosThetaO > 0, we're leaving from outside, so cosThetaT should be negative (into medium)
+    // If cosThetaO < 0, we're leaving from inside, so cosThetaT should be positive (out of medium)
+    if (cosThetaO > 0.0f)
+        cosThetaT = -cosThetaT;
+    
+    // Refraction formula: wt = eta * wo + (eta * cosThetaO + cosThetaT) * n
+    *wt = eta * wo + (eta * cosThetaO + cosThetaT) * Vector3D(n.x, n.y, n.z);
+    
     return true;
 }
 
@@ -1465,58 +1468,43 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
     BSDFSampleResult* result)
 {
     (void)geomNormalLocal;
+    (void)frontFace;
 
     Vector3D wo = dirInLocal;
     float cosThetaO = wo.z;
 
-    // CRITICAL: Use frontFace to determine entering/exiting, NOT cosThetaO sign.
-    // process_hits.cu always flips the shading frame to face the ray, so cosThetaO
-    // is always positive regardless of whether the ray is inside or outside.
-    // frontFace correctly tracks whether the original geometric normal faced the ray.
-    bool entering = frontFace;
+    // Determine entering/exiting from the sign of cosThetaO:
+    // cosThetaO > 0: ray is on the same side as the surface normal → entering
+    // cosThetaO < 0: ray is on the opposite side → exiting (inside the medium)
+    bool entering = (cosThetaO > 0.0f);
 
     float etaI = entering ? etaExt : etaInt;
     float etaT = entering ? etaInt : etaExt;
     float eta = etaI / etaT;
 
-    Normal3D n = Normal3D(0.0f, 0.0f, 1.0f);
+    float absCosTheta = std::abs(cosThetaO);
 
-    // Compute Fresnel reflectance
-    float Fr = FresnelDielectric(std::abs(cosThetaO), etaI, etaT);
+    float Fr = FresnelDielectric(absCosTheta, etaI, etaT);
 
-    (void)u0; // suppress unused warning when debug off
-    
-    // Sample reflection or refraction based on Fresnel
     if (u0 < Fr) {
-        // -------------------------
-        // Specular reflection
-        // -------------------------
+        // Specular reflection: flip tangential, keep normal component sign
         Vector3D wi = Vector3D(-wo.x, -wo.y, wo.z);
         
-        float absCosI = std::abs(wi.z);
-        // CRITICAL: BSDF value MUST include 1/|cos| term for delta distributions
         result->dirLocal = wi;
         result->pdf = Fr;
-        result->f = transmittance * (Fr / absCosI);
+        result->f = transmittance * Fr;
         result->sampledBSDFType = BSDFType_Specular;
         result->isDelta = true;
     } else {
-        // -------------------------
-        // Specular transmission
-        // -------------------------
-        
-        // Inline Snell's law refraction
-        float cosThetaI = std::abs(cosThetaO);
-        float sin2ThetaI = vlr_max(0.0f, 1.0f - cosThetaI * cosThetaI);
+        // Specular transmission (Snell's law)
+        float sin2ThetaI = vlr_max(0.0f, 1.0f - absCosTheta * absCosTheta);
         float sin2ThetaT = eta * eta * sin2ThetaI;
         
         if (sin2ThetaT >= 1.0f) {
-            // Total internal reflection
             Vector3D wr = Vector3D(-wo.x, -wo.y, wo.z);
-            float absCosR = std::abs(wr.z);
             result->dirLocal = wr;
             result->pdf = 1.0f;
-            result->f = transmittance / absCosR;
+            result->f = transmittance;
             result->sampledBSDFType = BSDFType_Specular;
             result->isDelta = true;
             return;
@@ -1524,13 +1512,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
         
         float cosThetaT = safeSqrt(1.0f - sin2ThetaT);
         
-        // Correct refracted direction
+        // Refracted direction: tangential components scale by eta,
+        // normal component flips to the other side of the surface.
         Vector3D wi;
         wi.x = -eta * wo.x;
         wi.y = -eta * wo.y;
-        wi.z = -cosThetaT;
+        // If entering (cosThetaO > 0), refracted ray goes to -z side: wi.z = -cosThetaT
+        // If exiting (cosThetaO < 0), refracted ray goes to +z side: wi.z = +cosThetaT
+        wi.z = entering ? -cosThetaT : cosThetaT;
         
-        // Normalize to be safe
         float len = safeSqrt(wi.x * wi.x + wi.y * wi.y + wi.z * wi.z);
         if (len > 1e-7f) {
             wi.x /= len;
@@ -1539,14 +1529,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
         }
         
         float Ft = 1.0f - Fr;
-        float etaRatio2 = eta * eta;
-        float absCosT = std::abs(wi.z);
         
         result->dirLocal = wi;
-        // Match reference VLR: both f and pdf include eta^2 (radiance transport),
-        // so eta^2 cancels in throughput *= f * |cos| / pdf
-        result->pdf = Ft * etaRatio2;
-        result->f = transmittance * (Ft * etaRatio2 / absCosT);
+        result->pdf = Ft;
+        result->f = transmittance * Ft;
         result->sampledBSDFType = BSDFType_SpecularTransmission;
         result->isDelta = true;
     }

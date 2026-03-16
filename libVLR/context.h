@@ -261,6 +261,7 @@ private:
             // Shadow ray batch buffers
             std::unique_ptr<cudau::Buffer<shared::ShadowRayRequest>> shadowRayQueueBuffer;
             std::unique_ptr<cudau::Buffer<float>> shadowRayResultsBuffer;
+            std::unique_ptr<cudau::Buffer<uint32_t>> numShadowRayRequestsBuffer;
             // Light path SBT
             OptixShaderBindingTable lightSbt;
             // Shadow ray SBT

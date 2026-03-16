@@ -138,6 +138,17 @@ VLR_API VLRResult vlrCreateTriangleMesh(
     VLRMaterial material,
     VLRTriangleMesh* outMesh);
 
+VLR_API VLRResult vlrCreateTriangleMeshWithNormals(
+    VLRScene scene,
+    const float* vertices,
+    uint32_t numVertices,
+    const float* normals,
+    uint32_t numNormals,
+    const uint32_t* indices,
+    uint32_t numTriangles,
+    VLRMaterial material,
+    VLRTriangleMesh* outMesh);
+
 /// 销毁三角形网格
 /// @param mesh 网格句柄（可为 NULL，无操作）
 VLR_API void vlrDestroyTriangleMesh(VLRTriangleMesh mesh);

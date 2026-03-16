@@ -16,10 +16,10 @@
 #define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 320
+#define VLR_DEBUG_SPEC_TRANS_PX 256
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 84
+#define VLR_DEBUG_SPEC_TRANS_PY 166
 #endif
 
 #include "../shared/kernel_common.h"
@@ -48,44 +48,6 @@
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
     #include <optix_device.h>
 #endif
-
-namespace {
-
-using namespace vlr;
-using namespace vlr::shared;
-
-// ============================================================================
-// ????????????????????????????
-// ============================================================================
-
-/// ?????????????
-/// ??????dirToLight ????????????????????
-///
-/// @param shadingSurfPt    ?????????
-/// @param lightSurfPt      ??????
-/// @param dirToLight       ?????????????????
-/// @param distance        ?????????
-/// @param topGroup        OptiX ??????
-/// @return fractionalVisibility: 1.0=????, 0.0=????
-CUDA_DEVICE_FUNCTION CUDA_INLINE float testVisibility(
-    const SurfacePoint& shadingSurfPt,
-    const SurfacePoint& lightSurfPt,
-    const Vector3D& dirToLight,
-    float distance,
-    uint64_t topGroup) {
-
-    // ???optixTrace ????OptiX RayGen/Hit/Miss ??????????CUDA kernel ????
-    // SampleLights ??CUDA kernel???????????????????
-    // ??????????????? OptiX ?????????????
-    (void)shadingSurfPt;
-    (void)lightSurfPt;
-    (void)dirToLight;
-    (void)distance;
-    (void)topGroup;
-    return 1.0f;
-}
-
-}  // anonymous namespace
 
 // ============================================================================
 // SampleLights Kernel
@@ -213,14 +175,7 @@ extern "C" __global__ void sampleLights(
     if (!emissionResult.Le.hasNonZero())
         return;
 
-    // ========================================================================
-    // 4. ??????????????
-    // ========================================================================
-    float fractionalVisibility = testVisibility(
-        surfPt, sampleResult.lightSurfPt, dirToLight, distance, wlp.topGroup);
-
-    if (fractionalVisibility <= 0.0f)
-        return;
+    // Visibility will be tested later via shadow ray pass; skip stub here.
 
     // ========================================================================
     // 5. BSDF ????????????f ???? MIS??
@@ -296,7 +251,6 @@ extern "C" __global__ void sampleLights(
     // ?? VLR: G = fractionalVisibility * absDot(...) * cosLight * recSquaredDistance
     // ========================================================================
     float G = computeGeometryTerm(surfPt, sampleResult.lightSurfPt, dirToLight, squaredDistance);
-    G *= fractionalVisibility;
 
     if (G <= 0.0f)
         return;
@@ -313,6 +267,7 @@ extern "C" __global__ void sampleLights(
 
     SampledSpectrum contrib = pathState.throughput * emissionResult.Le * fs * G * MISWeight * invLightPDF;
 
+
 #if VLR_DEBUG_SPEC_TRANS_ONEPIX
     if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX && pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
         pathState.pathLength <= 4) {
@@ -325,24 +280,24 @@ extern "C" __global__ void sampleLights(
     }
 #endif
 
-    // ????VLR ?????????????????NaN/Inf ????
-    if (contrib.allFinite() && contrib.hasNonZero()) {
-        pathState.contribution += contrib;
-    }
-#ifdef VLR_DEBUG_NAN_TRACKING
-    else if (!contrib.allFinite()) {
-        unsigned int idx = atomicAdd(&g_vlrNanPrintCount, 1);
-        if (idx < 5) {
-            VLR_DEBUG_PRINTF("[NaN] sample_lights: px=(%u,%u) pathLen=%u contrib=(%.4f,%.4f,%.4f) op=throughput*Le*fs*G*MIS/invPDF\n",
-                   pathState.pixelX, pathState.pixelY, pathState.pathLength,
-                   contrib.values[0], contrib.values[1], contrib.values[2]);
-        }
-    }
-#endif
+    if (!contrib.allFinite() || !contrib.hasNonZero())
+        return;
 
-    // ???????????
-    if (wlp.numShadowRays != nullptr) {
-        atomicAdd(wlp.numShadowRays, 1u);
+    // Enqueue NEE shadow ray for deferred visibility test (no direct accumulation)
+    if (wlp.shadowRayQueue != nullptr && wlp.numShadowRayRequests != nullptr &&
+        wlp.maxShadowRayRequests > 0) {
+        uint32_t slot = atomicAdd(wlp.numShadowRayRequests, 1u);
+        if (slot < wlp.maxShadowRayRequests) {
+            ShadowRayRequest& req = wlp.shadowRayQueue[slot];
+            // Offset along normal facing the light to avoid self-intersection
+            Normal3D offsetN = selectOffsetNormal(dot(dirToLight, surfPt.geometricNormal),
+                                                  surfPt.geometricNormal);
+            req.origin = offsetRayOrigin(surfPt.position, offsetN);
+            req.direction = dirToLight;
+            req.tMax = distance * 0.999f;
+            req.pathIndex = pathIndex;
+            req.contribution = contrib;
+        }
     }
 #endif
 }

@@ -55,7 +55,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void samplePerspectiveCamera(
     float vh = 2.0f * tanf(camera.fovY * 0.5f);
     float vw = camera.aspect * vh;
     
-    // ???????? NDC [-0.5, 0.5]
+    // Pixel to NDC [-0.5, 0.5]
     float ndcX = (pixelCoordX / static_cast<float>(imageWidth)) - 0.5f;
     float ndcY = (pixelCoordY / static_cast<float>(imageHeight)) - 0.5f;
     

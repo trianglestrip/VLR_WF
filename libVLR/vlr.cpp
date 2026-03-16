@@ -220,6 +220,43 @@ VLRResult vlrCreateTriangleMesh(
     }
 }
 
+VLRResult vlrCreateTriangleMeshWithNormals(
+    VLRScene scene,
+    const float* vertices,
+    uint32_t numVertices,
+    const float* normals,
+    uint32_t numNormals,
+    const uint32_t* indices,
+    uint32_t numTriangles,
+    VLRMaterial material,
+    VLRTriangleMesh* outMesh)
+{
+    if (!scene || !outMesh || !material) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    if (!vertices && numVertices > 0) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    if (!indices && numTriangles > 0) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMesh = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        VLRMaterialImpl* matImpl = TO_MAT(material);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        if (!matImpl || matImpl->sceneImpl != sceneImpl) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t numIndices = numTriangles * 3;
+        uint32_t meshId = sceneImpl->scene->createTriangleMesh(
+            vertices, numVertices,
+            normals, numNormals,
+            nullptr, 0,
+            indices, numIndices);
+        VLRTriangleMeshImpl* meshImpl = new VLRTriangleMeshImpl();
+        meshImpl->sceneImpl = sceneImpl;
+        meshImpl->meshId = meshId;
+        meshImpl->materialIndex = matImpl->materialIndex;
+        *outMesh = FROM_MESH(meshImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 void vlrDestroyTriangleMesh(VLRTriangleMesh mesh) {
     if (!mesh) return;
     delete TO_MESH(mesh);

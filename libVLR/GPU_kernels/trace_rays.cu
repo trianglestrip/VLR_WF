@@ -362,6 +362,29 @@ extern "C" __global__ void RT_MS_NAME(shadowMiss)() {
 #if defined(__CUDACC__) && defined(VLR_USE_OPTIX)
 extern "C" __global__ void RT_AH_NAME(shadowAnyHit)() {
     using namespace vlr::shared;
+
+    // Let shadow rays pass through delta (specular/glass) materials
+    const WavefrontSBTData* sbtData = reinterpret_cast<const WavefrontSBTData*>(
+        optixGetSbtDataPointer());
+    if (sbtData && sbtData->params) {
+        const WavefrontLaunchParameters& wlp = *sbtData->params;
+        uint32_t instIndex = optixGetInstanceId();
+        if (wlp.instBuffer && wlp.geomInstBuffer && wlp.materialDescriptorBuffer) {
+            uint32_t geomInstIdx = instIndex;
+            if (wlp.instBuffer[instIndex].numGeomInsts > 0)
+                geomInstIdx = wlp.instBuffer[instIndex].geomInstIndices[0];
+            const GeometryInstance& gi = wlp.geomInstBuffer[geomInstIdx];
+            uint32_t bsdfType = gi.materialIndex < 256
+                ? wlp.materialDescriptorBuffer[gi.materialIndex].bsdfProcedureSetIndex
+                : 0u;
+            // BSDFType_Specular=5, BSDFType_SpecularTransmission=6
+            if (bsdfType == 5 || bsdfType == 6) {
+                optixIgnoreIntersection();
+                return;
+            }
+        }
+    }
+
     setShadowPayloadOccluded();
     optixTerminateRay();
 }
@@ -531,7 +554,7 @@ extern "C" __global__ void RT_RG_NAME(traceShadowRays)() {
     const WavefrontLaunchParameters& wlp = *sbtData->params;
 
     uint32_t workIndex = optixGetLaunchIndex().x;
-    if (!wlp.shadowRayQueue || workIndex >= wlp.numShadowRayRequests) return;
+    if (!wlp.shadowRayQueue || !wlp.numShadowRayRequests || workIndex >= *wlp.numShadowRayRequests) return;
 
     const ShadowRayRequest& req = wlp.shadowRayQueue[workIndex];
 

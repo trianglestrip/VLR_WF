@@ -30,13 +30,13 @@
 #include <cmath>
 
 #ifndef VLR_DEBUG_SPEC_TRANS_ONEPIX
-#define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
+#define VLR_DEBUG_SPEC_TRANS_ONEPIX 1
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 256
+#define VLR_DEBUG_SPEC_TRANS_PX 187
 #endif
 #ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 256
+#define VLR_DEBUG_SPEC_TRANS_PY 141
 #endif
 
 namespace {
@@ -155,6 +155,7 @@ extern "C" __global__ void sampleBSDF(
     BSDFContext bsdfCtx(matDesc, surfPt, pathState.wls, pathState.singleWlSelected(), texturedParams);
     bsdfCtx.geomNormalLocal = geomNormalLocal;
 
+
     // ========================================================================
     // 2. BSDF ??????sampleBSDFWithU2????BSDF ???????
     // ========================================================================
@@ -169,23 +170,20 @@ extern "C" __global__ void sampleBSDF(
 #if VLR_DEBUG_SPEC_TRANS_ONEPIX
     {
         BSDFType bsdfType = getBSDFType(matDesc);
-        if (pathState.pixelX == 325 && pathState.pixelY == 150 &&
-            pathState.pathLength <= 6) {
+        if (wlp.numAccumFrames <= 2 &&
+            pathState.pixelX >= 200 && pathState.pixelX <= 240 &&
+            pathState.pixelY >= 350 && pathState.pixelY <= 395 &&
+            pathState.pathLength <= 8 &&
+            bsdfType == BSDFType_SpecularTransmission) {
             unsigned int idx = atomicAdd(&g_vlrDebugPrintCount, 1u);
-            if (idx < 30) {
-                Vector3D dirWorld = surfPt.shadingFrame.toWorld(result.dirLocal);
-                printf("[PATH325] len=%u bsdf=%u matIdx=%u frontFace=%d surfPt=(%.3f,%.3f,%.3f) sampled=%u\n",
-                    pathState.pathLength, (uint32_t)bsdfType, geomInst.materialIndex,
+            if (idx < 40) {
+                printf("[GP] px=(%u,%u) len=%u front=%d sampled=%u wiZ=%.4f pdf=%.4f thr=(%.4f,%.4f,%.4f)\n",
+                    pathState.pixelX, pathState.pixelY,
+                    pathState.pathLength,
                     surfPt.isFrontFace ? 1 : 0,
-                    surfPt.position.x, surfPt.position.y, surfPt.position.z,
-                    (uint32_t)result.sampledBSDFType);
-                printf("[PATH325] wo=(%.3f,%.3f,%.3f) wiLocal=(%.3f,%.3f,%.3f) wiWorld=(%.3f,%.3f,%.3f)\n",
-                    dirInLocal.x, dirInLocal.y, dirInLocal.z,
-                    result.dirLocal.x, result.dirLocal.y, result.dirLocal.z,
-                    dirWorld.x, dirWorld.y, dirWorld.z);
-                printf("[PATH325] pdf=%.6g f=(%.6g,%.6g,%.6g) throughput=(%.6g,%.6g,%.6g)\n",
+                    (uint32_t)result.sampledBSDFType,
+                    result.dirLocal.z,
                     result.pdf,
-                    result.f.values[0], result.f.values[1], result.f.values[2],
                     pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
             }
         }
@@ -249,8 +247,11 @@ extern "C" __global__ void sampleBSDF(
         return;
     }
 
-    pathState.throughput *= result.f * (cosAbs / result.pdf);
-
+    if (result.isDelta) {
+        pathState.throughput *= result.f / result.pdf;
+    } else {
+        pathState.throughput *= result.f * (cosAbs / result.pdf);
+    }
 
 #ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
     // ????????????SpecularTransmission ????cmake -DVLR_DEBUG_SPECULAR_TRANSMISSION=ON??
@@ -292,8 +293,26 @@ extern "C" __global__ void sampleBSDF(
     // ========================================================================
     Vector3D dirIn = surfPt.shadingFrame.toWorld(result.dirLocal);
 
+    // DEBUG: Find glass sphere pixels - no pixel filter, just BSDF type filter
+    {
+        if (pathState.pixelX == 192 && pathState.pixelY == 316 &&
+            pathState.pathLength <= 6) {
+            printf("[GT] len=%u front=%d delta=%d "
+                   "dirL=(%.4f,%.4f,%.4f) dirW=(%.4f,%.4f,%.4f) "
+                   "cos=%.4f pos=(%.3f,%.3f,%.3f) thr=(%.3g,%.3g,%.3g)\n",
+                   pathState.pathLength, surfPt.isFrontFace ? 1 : 0, result.isDelta ? 1 : 0,
+                   result.dirLocal.x, result.dirLocal.y, result.dirLocal.z,
+                   dirIn.x, dirIn.y, dirIn.z,
+                   cosFactor,
+                   surfPt.position.x, surfPt.position.y, surfPt.position.z,
+                   pathState.throughput.values[0], pathState.throughput.values[1],
+                   pathState.throughput.values[2]);
+        }
+    }
+
     pathState.origin = offsetRayOriginForNextBounce(surfPt, cosFactor);
     pathState.direction = dirIn;
+
 
 #if VLR_DEBUG_SPEC_TRANS_ONEPIX
     {

@@ -2,7 +2,7 @@
 // VLR Wavefront - Light Path Kernels (LVC-BPT)
 //
 // Implements light path tracing for Bidirectional Path Tracing.
-// Single-bounce version: pathLength 0 (on light) and 1 (first hit).
+// Multi-bounce: continues through delta surfaces (glass/mirror).
 //
 // ============================================================================
 
@@ -230,25 +230,105 @@ extern "C" __global__ void processLightHits(
 
     const GeometryInstance& geomInst = wlp.geomInstBuffer[hitInfo.geomInstIndex];
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
+    bool isDelta = materialIsDelta(matDesc);
 
-    uint32_t vertexSlot = atomicAdd(wlp.numLightVertices, 1u);
-    if (vertexSlot < wlp.maxLightVertices) {
-        Vector3D dirInLocal = surfPt.shadingFrame.toLocal(Vector3D(-state.direction.x, -state.direction.y, -state.direction.z));
+    Vector3D dirInLocal = surfPt.shadingFrame.toLocal(
+        Vector3D(-state.direction.x, -state.direction.y, -state.direction.z));
 
-        LightPathVertex hitVertex;
-        hitVertex.position = surfPt.position;
-        hitVertex.geometricNormal = surfPt.geometricNormal;
-        hitVertex.shadingFrame = surfPt.shadingFrame;
-        hitVertex.flux = state.flux;
-        hitVertex.dirInLocal = dirInLocal;
-        hitVertex.materialIndex = geomInst.materialIndex;
-        hitVertex.flags = materialIsDelta(matDesc) ? 0x1u : 0u;
-        hitVertex.pathLength = 1;
-        hitVertex._padding = 0.0f;
-
-        wlp.lightVertexCache[vertexSlot] = hitVertex;
+    // Store vertex in cache (for non-delta surfaces only; delta vertices
+    // cannot be connected to since their BSDF is a Dirac delta)
+    if (!isDelta) {
+        uint32_t vertexSlot = atomicAdd(wlp.numLightVertices, 1u);
+        if (vertexSlot < wlp.maxLightVertices) {
+            LightPathVertex hitVertex;
+            hitVertex.position = surfPt.position;
+            hitVertex.geometricNormal = surfPt.geometricNormal;
+            hitVertex.shadingFrame = surfPt.shadingFrame;
+            hitVertex.flux = state.flux;
+            hitVertex.dirInLocal = dirInLocal;
+            hitVertex.materialIndex = geomInst.materialIndex;
+            hitVertex.flags = 0u;
+            hitVertex.pathLength = state.pathLength;
+            hitVertex._padding = 0.0f;
+            wlp.lightVertexCache[vertexSlot] = hitVertex;
+        }
     }
 
-    state.setTerminated();
+    // For delta surfaces (glass/mirror), sample BSDF and continue tracing
+    if (isDelta && state.pathLength < 8) {
+        PathTexturedMaterialParams dummyTexParams;
+        dummyTexParams.flags = 0;
+        BSDFContext bsdfCtx(matDesc, surfPt, state.wls);
+        bsdfCtx.texturedParams = &dummyTexParams;
+
+        float u0 = state.rng.getFloat0cTo1o();
+        float u1 = state.rng.getFloat0cTo1o();
+        float u2 = state.rng.getFloat0cTo1o();
+        BSDFSampleResult bsdfResult;
+        bsdfResult.pdf = 0.0f;
+        sampleBSDFWithU2(bsdfCtx, dirInLocal, u0, u1, u2, &bsdfResult);
+
+        if (bsdfResult.pdf > 1e-10f && bsdfResult.f.hasNonZero()) {
+            Vector3D newDirWorld = surfPt.shadingFrame.toWorld(bsdfResult.dirLocal);
+            float cosAbs = std::abs(dot(bsdfResult.dirLocal,
+                                        surfPt.shadingFrame.toLocal(surfPt.geometricNormal)));
+
+            SampledSpectrum weight;
+            if (bsdfResult.isDelta)
+                weight = bsdfResult.f * (cosAbs / bsdfResult.pdf);
+            else
+                weight = bsdfResult.f * (cosAbs / bsdfResult.pdf);
+
+            state.flux = state.flux * weight;
+
+            if (!state.flux.allFinite() || !state.flux.hasNonZero()) {
+                state.setTerminated();
+            } else {
+                float cosFactor = dot(Vector3D(surfPt.geometricNormal), newDirWorld);
+                state.origin = offsetRayOriginForNextBounce(surfPt, cosFactor);
+                state.direction = newDirWorld;
+                state.pathLength++;
+                wlp.lightHitInfoBuffer[pathIndex].reset();
+            }
+        } else {
+            state.setTerminated();
+        }
+    } else {
+        state.setTerminated();
+    }
+#endif
+}
+
+// ============================================================================
+// applyShadowRayResults Kernel
+// After traceShadowRays, apply visible vertex connection contributions.
+// ============================================================================
+
+extern "C" __global__ void applyShadowRayResults(
+    vlr::shared::WavefrontLaunchParameters* params) {
+    using namespace vlr::shared;
+    WavefrontLaunchParameters& wlp = *params;
+
+#ifdef __CUDACC__
+    if (wlp.shadowRayQueue == nullptr || wlp.shadowRayResults == nullptr ||
+        wlp.numShadowRayRequests == nullptr)
+        return;
+
+    uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t numRequests = *wlp.numShadowRayRequests;
+    if (workIndex >= numRequests)
+        return;
+
+    float visibility = wlp.shadowRayResults[workIndex];
+    if (visibility < 0.5f)
+        return;
+
+    const ShadowRayRequest& req = wlp.shadowRayQueue[workIndex];
+    uint32_t pathIndex = req.pathIndex;
+    if (pathIndex >= wlp.maxNumPaths)
+        return;
+
+    WavefrontPathState& pathState = wlp.pathStateBuffer[pathIndex];
+    pathState.contribution += req.contribution;
 #endif
 }

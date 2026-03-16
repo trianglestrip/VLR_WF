@@ -872,6 +872,24 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
         }
     }
     
+    // Shadow ray batch buffers (for NEE and LVC-BPT vertex connection)
+    // Allocated unconditionally so NEE shadow visibility works even when BDPT is disabled
+    {
+        uint32_t maxShadowRays = numPixels;
+        if (!wf.shadowRayQueueBuffer) {
+            wf.shadowRayQueueBuffer = std::make_unique<cudau::Buffer<shared::ShadowRayRequest>>();
+        }
+        wf.shadowRayQueueBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxShadowRays);
+        if (!wf.shadowRayResultsBuffer) {
+            wf.shadowRayResultsBuffer = std::make_unique<cudau::Buffer<float>>();
+        }
+        wf.shadowRayResultsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxShadowRays);
+        if (!wf.numShadowRayRequestsBuffer) {
+            wf.numShadowRayRequestsBuffer = std::make_unique<cudau::Buffer<uint32_t>>();
+        }
+        wf.numShadowRayRequestsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, 1);
+    }
+
     // LVC-BPT buffers
     if (wf.useBDPT) {
         uint32_t numLightPaths = numPixels;
@@ -902,18 +920,6 @@ void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
             wf.lightSurfacePointBuffer = std::make_unique<cudau::Buffer<shared::SurfacePoint>>();
         }
         wf.lightSurfacePointBuffer->initialize(m_cudaContext, cudau::BufferType::Device, numLightPaths);
-        
-        // Shadow ray batch buffers
-        uint32_t maxShadowRays = numPixels;
-        if (!wf.shadowRayQueueBuffer) {
-            wf.shadowRayQueueBuffer = std::make_unique<cudau::Buffer<shared::ShadowRayRequest>>();
-        }
-        wf.shadowRayQueueBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxShadowRays);
-
-        if (!wf.shadowRayResultsBuffer) {
-            wf.shadowRayResultsBuffer = std::make_unique<cudau::Buffer<float>>();
-        }
-        wf.shadowRayResultsBuffer->initialize(m_cudaContext, cudau::BufferType::Device, maxShadowRays);
 
         printf("[VLR] LVC-BPT buffers allocated: %u light paths, %u max vertices (%.2f MB)\n",
                numLightPaths, maxLightVertices,
@@ -1150,16 +1156,17 @@ void Context::setupWavefrontLaunchParams() {
         lp.numLightPaths = numPixels;
         lp.maxLightVertices = numPixels * 4;
         // Shadow ray batch
-        if (wf.shadowRayQueueBuffer) {
+        if (wf.shadowRayQueueBuffer && wf.numShadowRayRequestsBuffer) {
             lp.shadowRayQueue = wf.shadowRayQueueBuffer->getDevicePointer();
             lp.shadowRayResults = wf.shadowRayResultsBuffer->getDevicePointer();
+            lp.numShadowRayRequests = wf.numShadowRayRequestsBuffer->getDevicePointer();
             lp.maxShadowRayRequests = numPixels;
         } else {
             lp.shadowRayQueue = nullptr;
             lp.shadowRayResults = nullptr;
+            lp.numShadowRayRequests = nullptr;
             lp.maxShadowRayRequests = 0;
         }
-        lp.numShadowRayRequests = 0;
     } else {
         lp.lightVertexCache = nullptr;
         lp.numLightVertices = nullptr;
@@ -1168,9 +1175,18 @@ void Context::setupWavefrontLaunchParams() {
         lp.lightSurfacePointBuffer = nullptr;
         lp.numLightPaths = 0;
         lp.maxLightVertices = 0;
+    }
+
+    // Shadow ray batch (for NEE and LVC-BPT) - set whenever buffers exist
+    if (wf.shadowRayQueueBuffer && wf.numShadowRayRequestsBuffer) {
+        lp.shadowRayQueue = wf.shadowRayQueueBuffer->getDevicePointer();
+        lp.shadowRayResults = wf.shadowRayResultsBuffer->getDevicePointer();
+        lp.numShadowRayRequests = wf.numShadowRayRequestsBuffer->getDevicePointer();
+        lp.maxShadowRayRequests = numPixels;
+    } else {
         lp.shadowRayQueue = nullptr;
         lp.shadowRayResults = nullptr;
-        lp.numShadowRayRequests = 0;
+        lp.numShadowRayRequests = nullptr;
         lp.maxShadowRayRequests = 0;
     }
 
@@ -1710,7 +1726,7 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         VLR_DEBUG_PRINTF("[VLR] executeWavefrontRender: Counter set complete\n");
     }
     
-    // LVC-BPT: Generate light paths, trace, and process hits
+    // LVC-BPT: Generate light paths, trace, and process hits (multi-bounce)
     if (wf.useBDPT && wf.numLightVerticesBuffer && wf.lightVertexCacheBuffer) {
         uint32_t zero = 0;
         CUDA_CHECK(cudaMemcpy(
@@ -1724,19 +1740,21 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         launchGenerateLightPathsKernel(d_params, numPixels, m_stream);
         CUDA_CHECK(cudaStreamSynchronize(m_stream));
 
-        // Step 2: Trace light rays through scene (OptiX)
-        launchTraceLightRays(numPixels);
-
-        // Step 3: Process light path hits (store vertices in cache)
-        launchProcessLightHitsKernel(d_params, numPixels, m_stream);
-        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+        // Step 2-3: Multi-bounce light path tracing
+        // Light paths continue through delta surfaces (glass/mirror)
+        constexpr uint32_t maxLightBounces = 8;
+        for (uint32_t bounce = 0; bounce < maxLightBounces; ++bounce) {
+            launchTraceLightRays(numPixels);
+            launchProcessLightHitsKernel(d_params, numPixels, m_stream);
+            CUDA_CHECK(cudaStreamSynchronize(m_stream));
+        }
 
         uint32_t numLV = 0;
         CUDA_CHECK(cudaMemcpy(
             &numLV, wf.numLightVerticesBuffer->getDevicePointer(),
             sizeof(uint32_t), cudaMemcpyDeviceToHost));
         if (wf.numAccumFrames <= 1) {
-            printf("[VLR-BDPT] Light vertices generated: %u (pathLen 0+1)\n", numLV);
+            printf("[VLR-BDPT] Light vertices generated: %u (multi-bounce)\n", numLV);
         }
     }
 
@@ -1772,10 +1790,60 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
         launchTraceRays(numActivePaths);
         
         // ?? 3: ????
+        // Clear shadow ray counter before processHits enqueues new requests
+        if (wf.useBDPT && wf.numShadowRayRequestsBuffer) {
+            uint32_t zero = 0;
+            CUDA_CHECK(cudaMemcpyAsync(
+                wf.numShadowRayRequestsBuffer->getDevicePointer(),
+                &zero, sizeof(uint32_t), cudaMemcpyHostToDevice, m_stream));
+        }
         launchProcessHits(numActivePaths);
         
-        // ?? 4: ???? (NEE)
-        launchSampleLights(numActivePaths);
+        // ?? 3.5: LVC-BPT shadow ray visibility test
+        if (wf.useBDPT && wf.numShadowRayRequestsBuffer && wf.shadowRayQueueBuffer) {
+            CUDA_CHECK(cudaStreamSynchronize(m_stream));
+            uint32_t numShadowReqs = 0;
+            CUDA_CHECK(cudaMemcpy(&numShadowReqs,
+                wf.numShadowRayRequestsBuffer->getDevicePointer(),
+                sizeof(uint32_t), cudaMemcpyDeviceToHost));
+            if (numShadowReqs > 0) {
+                numShadowReqs = std::min(numShadowReqs, wf.launchParams.maxShadowRayRequests);
+                launchTraceShadowRays(numShadowReqs);
+                shared::WavefrontLaunchParameters* d_params =
+                    static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+                launchApplyShadowRayResultsKernel(d_params, numShadowReqs, m_stream);
+                CUDA_CHECK(cudaStreamSynchronize(m_stream));
+            }
+        }
+        
+        // ?? 4: ???? (NEE) + Shadow Ray Visibility
+        {
+            // Clear shadow ray counter before sampleLights enqueues NEE requests
+            if (wf.numShadowRayRequestsBuffer) {
+                uint32_t zero = 0;
+                CUDA_CHECK(cudaMemcpyAsync(
+                    wf.numShadowRayRequestsBuffer->getDevicePointer(),
+                    &zero, sizeof(uint32_t), cudaMemcpyHostToDevice, m_stream));
+            }
+            launchSampleLights(numActivePaths);
+
+            // Trace shadow rays for NEE visibility testing
+            if (wf.numShadowRayRequestsBuffer && wf.shadowRayQueueBuffer) {
+                CUDA_CHECK(cudaStreamSynchronize(m_stream));
+                uint32_t numShadowReqs = 0;
+                CUDA_CHECK(cudaMemcpy(&numShadowReqs,
+                    wf.numShadowRayRequestsBuffer->getDevicePointer(),
+                    sizeof(uint32_t), cudaMemcpyDeviceToHost));
+                if (numShadowReqs > 0) {
+                    numShadowReqs = std::min(numShadowReqs, wf.launchParams.maxShadowRayRequests);
+                    launchTraceShadowRays(numShadowReqs);
+                    shared::WavefrontLaunchParameters* d_params =
+                        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+                    launchApplyShadowRayResultsKernel(d_params, numShadowReqs, m_stream);
+                    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+                }
+            }
+        }
         
         // ?? 5: ?? BSDF
         launchSampleBSDF(numActivePaths);
@@ -1845,6 +1913,8 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
 
                 // ????????
                 std::swap(wf.activePathIndices, wf.nextActivePathIndices);
+                wf.launchParams.activePathQueue.pathIndices = wf.activePathIndices->getDevicePointer();
+                wf.launchParams.nextActivePathQueue.pathIndices = wf.nextActivePathIndices->getDevicePointer();
                 CUDA_CHECK(cudaMemcpyAsync(
                     wf.queueCounters->getDevicePointerAt(0),
                     wf.queueCounters->getDevicePointerAt(1),
@@ -1857,6 +1927,14 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                     wf.queueCounters->getDevicePointerAt(1),
                     &zero,
                     sizeof(uint32_t),
+                    cudaMemcpyHostToDevice,
+                    m_stream
+                ));
+                // Re-upload launchParams to device
+                CUDA_CHECK(cudaMemcpyAsync(
+                    wf.launchParamsBuffer,
+                    &wf.launchParams,
+                    sizeof(shared::WavefrontLaunchParameters),
                     cudaMemcpyHostToDevice,
                     m_stream
                 ));
@@ -1894,6 +1972,10 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
             // ???????????
             std::swap(wf.activePathIndices, wf.nextActivePathIndices);
             
+            // Update launchParams queue pointers after swap
+            wf.launchParams.activePathQueue.pathIndices = wf.activePathIndices->getDevicePointer();
+            wf.launchParams.nextActivePathQueue.pathIndices = wf.nextActivePathIndices->getDevicePointer();
+            
             // ????????counters[0] = counters[1], counters[1] = 0
             CUDA_CHECK(cudaMemcpyAsync(
                 wf.queueCounters->getDevicePointerAt(0),
@@ -1907,6 +1989,15 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 wf.queueCounters->getDevicePointerAt(1),
                 &zero,
                 sizeof(uint32_t),
+                cudaMemcpyHostToDevice,
+                m_stream
+            ));
+            
+            // Re-upload launchParams to device so GPU sees updated queue pointers
+            CUDA_CHECK(cudaMemcpyAsync(
+                wf.launchParamsBuffer,
+                &wf.launchParams,
+                sizeof(shared::WavefrontLaunchParameters),
                 cudaMemcpyHostToDevice,
                 m_stream
             ));

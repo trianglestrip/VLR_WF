@@ -91,6 +91,12 @@ void launchProcessLightHitsKernel(
     uint32_t numLightPaths,
     cudaStream_t stream);
 
+/// 启动 ApplyShadowRayResults kernel
+void launchApplyShadowRayResultsKernel(
+    shared::WavefrontLaunchParameters* d_params,
+    uint32_t maxRequests,
+    cudaStream_t stream);
+
 /// 初始化 RNG 缓冲区（每个像素一个独立的 RNG 状态）
 /// @param rngBuffer 设备端 RNG 缓冲区指针
 /// @param numPixels 像素数量

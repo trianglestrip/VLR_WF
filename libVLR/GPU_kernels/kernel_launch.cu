@@ -61,6 +61,9 @@ extern "C" __global__ void generateLightPaths(
 extern "C" __global__ void processLightHits(
     shared::WavefrontLaunchParameters* params);
 
+extern "C" __global__ void applyShadowRayResults(
+    shared::WavefrontLaunchParameters* params);
+
 // ============================================================================
 // ??????????
 // ============================================================================
@@ -174,6 +177,18 @@ void launchProcessLightHitsKernel(
     uint32_t gridSize = (numLightPaths + blockSize - 1) / blockSize;
     if (gridSize == 0) return;
     processLightHits<<<gridSize, blockSize, 0, stream>>>(d_params);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+void launchApplyShadowRayResultsKernel(
+    shared::WavefrontLaunchParameters* d_params,
+    uint32_t maxRequests,
+    cudaStream_t stream)
+{
+    constexpr uint32_t blockSize = 256;
+    uint32_t gridSize = (maxRequests + blockSize - 1) / blockSize;
+    if (gridSize == 0) return;
+    applyShadowRayResults<<<gridSize, blockSize, 0, stream>>>(d_params);
     CUDA_CHECK(cudaGetLastError());
 }
 
