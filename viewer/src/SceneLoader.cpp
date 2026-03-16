@@ -5,6 +5,8 @@
 #include "SceneLoader.h"
 #include "MeshData.h"
 #include "ZeroCopyMesh.h"
+#include "PbrtParser.h"
+#include "PbrtSceneData.h"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -17,6 +19,7 @@
 #include <chrono>
 #include <fstream>
 #include <memory>
+#include <filesystem>
 
 // 编译期验证Assimp内存布局
 // 注意：aiVector3D在assimp/vector3.h中定义为包含x,y,z的结构体
@@ -85,11 +88,7 @@ bool SceneLoader::loadScene(const std::string& filepath, const LoadOptions& opti
         flags |= aiProcess_OptimizeGraph;
     }
 
-    // 其他常用标志
-    flags |= aiProcess_JoinIdenticalVertices;
-    flags |= aiProcess_ImproveCacheLocality;
-    flags |= aiProcess_RemoveRedundantMaterials;
-    flags |= aiProcess_SortByPType;
+    // 仅添加基础解析所需的标志，不做任何优化处理
 
     // 导入场景
     const aiScene* scene = importer.ReadFile(filepath, flags);
@@ -591,6 +590,272 @@ void SceneLoader::exportTaskGraph(const std::string& filename) const {
         m_taskflow->taskflow.dump(ofs);
         std::cout << "[SceneLoader] 任务图已导出: " << filename << std::endl;
     }
+}
+
+// ============================================================================
+// PBRT v4 加载路径
+// ============================================================================
+
+bool SceneLoader::loadPbrtScene(const std::string& filepath, const LoadOptions& options) {
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    // 初始化 Taskflow（供 buildFromPbrt 阶段使用）
+    if (options.enableParallel && !m_taskflow) {
+        m_taskflow = std::make_unique<TaskflowImpl>(options.numThreads);
+        std::cout << "[SceneLoader] 并行模式已启用，线程数: "
+                  << m_taskflow->executor.num_workers() << std::endl;
+    }
+
+    PbrtParser::ParseOptions parseOpts;
+    parseOpts.loadPlyFiles = true;
+    parseOpts.verbose      = false;
+    parseOpts.numThreads   = options.numThreads;
+
+    auto pbrtOpt = PbrtParser::parseFile(filepath, parseOpts);
+    if (!pbrtOpt) {
+        std::cerr << "[SceneLoader] PBRT 解析失败: " << filepath << std::endl;
+        return false;
+    }
+
+    bool result = buildFromPbrt(*pbrtOpt, options);
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    m_stats.loadTime = std::chrono::duration<double>(endTime - startTime).count();
+    m_stats.threadsUsed = m_taskflow ? m_taskflow->executor.num_workers() : 1u;
+
+    std::cout << "[SceneLoader] PBRT 场景加载耗时: "
+              << m_stats.loadTime << "s，"
+              << m_meshCount << " 网格，"
+              << m_materialCount << " 材质\n";
+
+    return result;
+}
+
+// ----------------------------------------------------------------------------
+// 将 PbrtMaterial 转换为 VLRMaterial
+// ----------------------------------------------------------------------------
+VLRMaterial SceneLoader::createVLRMaterialFromPbrt(
+    const PbrtMaterial& mat,
+    const std::unordered_map<std::string, PbrtTexture>& textures,
+    const std::string& baseDir
+) {
+    MaterialData data;
+
+    // 映射材质类型
+    switch (mat.type) {
+    case PbrtMaterialType::Conductor:
+        data.materialType = 1; // Metal
+        data.metallic     = 1.0f;
+        if (mat.conductorEta)     { /* 已包含物理 eta，暂映射为高反射率颜色 */ }
+        if (mat.conductorK)       { /* k 可用于近似颜色 */ }
+        // 用 k 的幅度近似颜色（简化）
+        if (mat.conductorK) {
+            const auto& k = *mat.conductorK;
+            float scale = 1.0f / std::max({k[0], k[1], k[2], 1.f});
+            data.baseColor[0] = k[0] * scale;
+            data.baseColor[1] = k[1] * scale;
+            data.baseColor[2] = k[2] * scale;
+        } else {
+            data.baseColor[0] = data.baseColor[1] = data.baseColor[2] = 0.8f;
+        }
+        break;
+    case PbrtMaterialType::Dielectric:
+        data.materialType = 2; // Glass
+        data.ior = mat.dielectricEta.value_or(1.5f);
+        data.baseColor[0] = data.baseColor[1] = data.baseColor[2] = 1.0f;
+        break;
+    case PbrtMaterialType::DiffuseTransmission:
+        data.materialType = 2;
+        if (mat.reflectance) {
+            data.baseColor[0] = (*mat.reflectance)[0];
+            data.baseColor[1] = (*mat.reflectance)[1];
+            data.baseColor[2] = (*mat.reflectance)[2];
+        }
+        break;
+    default:
+        // Diffuse / CoatedDiffuse
+        data.materialType = 0;
+        if (!mat.reflectanceTexture.empty()) {
+            // 纹理引用：暂时使用中灰色占位（VLR 纹理绑定需要额外实现）
+            data.baseColor[0] = data.baseColor[1] = data.baseColor[2] = 0.5f;
+        } else if (mat.reflectance) {
+            data.baseColor[0] = (*mat.reflectance)[0];
+            data.baseColor[1] = (*mat.reflectance)[1];
+            data.baseColor[2] = (*mat.reflectance)[2];
+        } else {
+            data.baseColor[0] = data.baseColor[1] = data.baseColor[2] = 0.8f;
+        }
+        break;
+    }
+
+    // 粗糙度
+    if (mat.roughness) {
+        data.roughness = *mat.roughness;
+    } else if (mat.uRoughness && mat.vRoughness) {
+        data.roughness = (*mat.uRoughness + *mat.vRoughness) * 0.5f;
+    } else {
+        data.roughness = 0.5f;
+    }
+
+    return createVLRMaterial(data);
+}
+
+// ----------------------------------------------------------------------------
+// 将完整的 PbrtSceneData 构建为 VLR 场景（Taskflow 并行）
+// ----------------------------------------------------------------------------
+bool SceneLoader::buildFromPbrt(PbrtSceneData& pbrtScene, const LoadOptions& options) {
+    if (!options.appendMode) {
+        m_meshes.clear();
+        m_materials.clear();
+        m_meshCount    = 0;
+        m_materialCount = 0;
+    }
+
+    const std::string& baseDir = pbrtScene.baseDir;
+
+    // ---- 阶段1：串行构建材质索引表（VLR 材质创建可能不线程安全）----
+    // 按名称预构建 name -> VLRMaterial 映射
+    std::unordered_map<std::string, VLRMaterial> matMap;
+    matMap.reserve(pbrtScene.namedMaterials.size());
+    for (auto& [name, mat] : pbrtScene.namedMaterials) {
+        VLRMaterial vlrMat = createVLRMaterialFromPbrt(mat, pbrtScene.textures, baseDir);
+        if (vlrMat) matMap.emplace(name, vlrMat);
+    }
+
+    std::cout << "[SceneLoader] 构建材质完成: " << matMap.size() << " 个\n";
+
+    // ---- 阶段2：并行构建网格（每个 shape 独立，无依赖）----
+    size_t shapeCount = pbrtScene.shapes.size();
+    m_meshes.resize(m_meshes.size() + shapeCount); // 预分配槽位，写下标不冲突
+    size_t meshOffset = m_meshes.size() - shapeCount;
+
+    if (options.enableParallel && m_taskflow) {
+        tf::Taskflow taskflow;
+        taskflow.clear();
+
+        // 使用 std::atomic 跟踪失败数
+        std::atomic<size_t> successCount{0};
+
+        for (size_t i = 0; i < shapeCount; ++i) {
+            taskflow.emplace([&, i]() {
+                auto& shape = pbrtScene.shapes[i];
+                if (shape.type != PbrtShapeType::TriangleMesh) return;
+
+                auto& tm = std::get<PbrtTriangleMesh>(shape.geometry);
+                if (tm.positions.empty() || tm.indices.empty()) return;
+
+                // 查找材质
+                VLRMaterial vlrMat = nullptr;
+                if (!shape.materialName.empty()) {
+                    auto it = matMap.find(shape.materialName);
+                    if (it != matMap.end()) vlrMat = it->second;
+                }
+
+                // 面积光：覆盖材质为发光材质
+                if (shape.isAreaLight) {
+                    MaterialData emitData;
+                    emitData.materialType  = 0;
+                    emitData.emissionColor[0] = shape.areaLightL[0];
+                    emitData.emissionColor[1] = shape.areaLightL[1];
+                    emitData.emissionColor[2] = shape.areaLightL[2];
+                    emitData.baseColor[0] = emitData.baseColor[1] = emitData.baseColor[2] = 0.f;
+                    // createVLRMaterial 需要锁保护（VLR API 可能非线程安全）
+                    {
+                        std::lock_guard<std::mutex> lk(m_meshesMutex);
+                        vlrMat = createVLRMaterial(emitData);
+                    }
+                }
+
+                // 创建 VLR 网格
+                VLRTriangleMesh vlrMesh = nullptr;
+                VLRResult res;
+                {
+                    // VLR 创建调用加锁
+                    std::lock_guard<std::mutex> lk(m_meshesMutex);
+                    res = vlrCreateTriangleMesh(
+                        m_renderer.getScene(),
+                        tm.positions.data(),
+                        static_cast<uint32_t>(tm.positions.size() / 3),
+                        tm.indices.data(),
+                        static_cast<uint32_t>(tm.indices.size() / 3),
+                        vlrMat,
+                        &vlrMesh
+                    );
+                }
+
+                if (res != VLRResult_Success) return;
+
+                // 写入预分配槽位（不同 i 对应不同槽位，无需锁）
+                MeshData md;
+                md.positions = std::move(tm.positions);
+                md.normals   = std::move(tm.normals);
+                md.uvs       = std::move(tm.uvs);
+                md.indices   = std::move(tm.indices);
+                m_meshes[meshOffset + i] = std::move(md);
+                ++successCount;
+            }).name("shape_" + std::to_string(i));
+        }
+
+        // 导出任务图
+        if (options.showTaskGraph) {
+            std::ofstream ofs("pbrt_build_taskgraph.dot");
+            taskflow.dump(ofs);
+            std::cout << "[SceneLoader] 构建任务图已导出: pbrt_build_taskgraph.dot\n";
+        }
+
+        m_taskflow->executor.run(taskflow).wait();
+        m_meshCount += successCount.load();
+
+        std::cout << "[SceneLoader] 并行构建完成: " << successCount.load()
+                  << "/" << shapeCount << " 网格成功\n";
+    } else {
+        // 串行回退路径
+        size_t successCount = 0;
+        for (size_t i = 0; i < shapeCount; ++i) {
+            auto& shape = pbrtScene.shapes[i];
+            if (shape.type != PbrtShapeType::TriangleMesh) continue;
+
+            auto& tm = std::get<PbrtTriangleMesh>(shape.geometry);
+            if (tm.positions.empty() || tm.indices.empty()) continue;
+
+            VLRMaterial vlrMat = nullptr;
+            if (!shape.materialName.empty()) {
+                auto it = matMap.find(shape.materialName);
+                if (it != matMap.end()) vlrMat = it->second;
+            }
+
+            VLRTriangleMesh vlrMesh = nullptr;
+            VLRResult res = vlrCreateTriangleMesh(
+                m_renderer.getScene(),
+                tm.positions.data(),
+                static_cast<uint32_t>(tm.positions.size() / 3),
+                tm.indices.data(),
+                static_cast<uint32_t>(tm.indices.size() / 3),
+                vlrMat,
+                &vlrMesh
+            );
+            if (res != VLRResult_Success) continue;
+
+            MeshData md;
+            md.positions = std::move(tm.positions);
+            md.normals   = std::move(tm.normals);
+            md.uvs       = std::move(tm.uvs);
+            md.indices   = std::move(tm.indices);
+            m_meshes[meshOffset + i] = std::move(md);
+            ++successCount;
+        }
+        m_meshCount += successCount;
+    }
+
+    // 移除空槽位（加载失败的 shape 留空）
+    m_meshes.erase(
+        std::remove_if(m_meshes.begin() + static_cast<ptrdiff_t>(meshOffset), m_meshes.end(),
+            [](const MeshData& md) { return md.positions.empty(); }),
+        m_meshes.end()
+    );
+
+    computeBounds();
+    return true;
 }
 
 } // namespace viewer

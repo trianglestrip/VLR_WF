@@ -59,6 +59,7 @@ endif()
 set(VIEWER_SOURCES
     src/VLRRenderer.cpp
     src/SceneLoader.cpp
+    src/PbrtParser.cpp
 )
 
 set(VIEWER_HEADERS
@@ -66,6 +67,8 @@ set(VIEWER_HEADERS
     include/SceneLoader.h
     include/MeshData.h
     include/ZeroCopyMesh.h
+    include/PbrtSceneData.h
+    include/PbrtParser.h
 )
 
 # ----------------------------------------------------------------------------

@@ -1,20 +1,24 @@
 // ============================================================================
 // SceneLoader - 场景加载器（C++20优化版本）
 //
-// 功能：使用Assimp加载各种3D模型格式，转换为VLR场景
-// 支持格式：OBJ, FBX, GLTF, DAE, 3DS等
-// 优化：使用std::span、移动语义、零拷贝设计
+// 功能：
+//   - 使用 Assimp 加载 OBJ/FBX/GLTF/DAE 等格式
+//   - 使用内置 PbrtParser 加载 PBRT v4 格式（.pbrt + .ply）
+// 优化：std::span、移动语义、零拷贝、Taskflow 并行
 // ============================================================================
 
 #pragma once
 
 #include "VLRRenderer.h"
 #include "MeshData.h"
+#include "PbrtSceneData.h"
 #include <string>
 #include <vector>
 #include <memory>
 #include <span>
 #include <optional>
+#include <unordered_map>
+#include <mutex>
 
 // 前向声明Assimp类型
 struct aiScene;
@@ -30,11 +34,11 @@ namespace viewer {
 class SceneLoader {
 public:
     struct LoadOptions {
-        bool flipUVs = true;              // 翻转UV坐标
-        bool triangulate = true;          // 三角化网格
+        bool flipUVs = false;             // 翻转UV坐标
+        bool triangulate = false;         // 三角化网格
         bool generateNormals = false;     // 生成法线（如果缺失）
-        bool generateSmoothNormals = true; // 生成平滑法线
-        bool optimizeMeshes = true;       // 优化网格
+        bool generateSmoothNormals = false; // 生成平滑法线
+        bool optimizeMeshes = false;      // 优化网格
         float scale = 1.0f;               // 缩放因子
         
         // 并行加载选项（Taskflow）
@@ -44,7 +48,7 @@ public:
         bool showTaskGraph = true;       // 显示任务图（调试用）
         
         // 追加模式（不清空现有网格和材质）
-        bool appendMode = false;       // true = 追加到现有场景，false = 清空后加载
+        bool appendMode = true;       // true = 追加到现有场景，false = 清空后加载
     };
 
     SceneLoader(VLRRenderer& renderer);
@@ -57,6 +61,14 @@ public:
      * @return 是否成功
      */
     bool loadScene(const std::string& filepath, const LoadOptions& options = LoadOptions{});
+
+    /**
+     * @brief 加载 PBRT v4 场景（.pbrt 文件）
+     * @param filepath .pbrt 文件路径
+     * @param options  加载选项（并行配置沿用 LoadOptions）
+     * @return 是否成功
+     */
+    bool loadPbrtScene(const std::string& filepath, const LoadOptions& options = LoadOptions{});
 
     /**
      * @brief 获取场景边界盒
@@ -135,11 +147,19 @@ protected:
     ) const;
     [[nodiscard]] VLRMaterial createVLRMaterial(const MaterialData& data);
     
-    // 并行处理（Taskflow）
+    // 并行处理（Taskflow - Assimp 路径）
     bool loadSceneParallel(const aiScene* scene, const LoadOptions& options);
     void parallelProcessMaterials(const aiScene* scene, const LoadOptions& options);
     void parallelProcessMeshes(const aiScene* scene, const LoadOptions& options);
     void buildTaskGraph(const aiScene* scene, const LoadOptions& options);
+
+    // PBRT 路径：将 PbrtSceneData 转换为 VLR 场景
+    bool buildFromPbrt(PbrtSceneData& pbrtScene, const LoadOptions& options);
+    [[nodiscard]] VLRMaterial createVLRMaterialFromPbrt(
+        const PbrtMaterial& mat,
+        const std::unordered_map<std::string, PbrtTexture>& textures,
+        const std::string& baseDir
+    );
     
     // 辅助函数（使用span避免拷贝）
     void updateBounds(std::span<const float, 3> position) noexcept;
