@@ -118,6 +118,43 @@ Test-Path bin\VLR.dll
 2. 使用 `numSamples=1`（调试模式自动单次采样）
 3. 循环 mode 0-16 可批量导出所有调试视图
 
+## TaskFlow 并行框架
+
+### 基本信息
+- **版本**: TaskFlow (Header-Only)
+- **位置**: `external/taskflow/`（libVLR 和 viewer 各有一份副本）
+- **用途**: CPU 端任务并行与 DAG 编排，用于加速场景准备阶段
+
+### 使用方式
+```cpp
+#ifdef _WIN32
+#undef min
+#undef max
+#endif
+#include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>  // 必须显式包含
+```
+
+### 已应用的并行优化
+| 模块 | 优化内容 |
+|------|----------|
+| `Scene::buildGeometryAccelerationStructures()` | CPU 数据准备 parallel_for + 多 CUDA stream GAS 构建 |
+| `Scene::computeSceneBounds()` | 每个 Instance 独立计算局部 AABB，reduce 合并 |
+| `Scene::aggregateMeshData()` | prefix sum + parallel_for 拷贝各 mesh 数据到全局数组 |
+| `Scene::prepareSceneParallel()` | TaskFlow DAG 编排：GAS ∥ Bounds ∥ Aggregate → Upload → IAS |
+| `SceneLoader::buildFromPbrt()` | PBRT 材质并行创建（加锁保护 VLR API） |
+
+### 性能统计宏
+- **头文件**: `libVLR/vlr_profile.h`
+- **CMake 开关**: `cmake -DVLR_PROFILE_SCENE_PREPARE=ON`（默认开启）
+- **宏定义**:
+  - `VLR_PROFILE_BEGIN(var)` — 记录起始时间点
+  - `VLR_PROFILE_END(var, outMs)` — 耗时赋值到已有 double 变量
+  - `VLR_PROFILE_END_NEW(var, newMs)` — 声明新 double 变量并赋值耗时
+- **输出位置**:
+  - `Scene::prepareSceneParallel()` — 各阶段耗时 + 并行加速比
+  - `Context::renderWavefront()` — GPU 渲染耗时 + 端到端总时间
+
 ## 第三方库管理
 
 ### 已集成的库

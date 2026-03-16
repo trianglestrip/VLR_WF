@@ -277,6 +277,44 @@ Get-Content build_log.txt | Select-String "error"
 
 ---
 
+### 9. TaskFlow Windows min/max 宏冲突
+
+#### 症状
+- `C2589: "(":"::"右边的非法标记`（出现在 TaskFlow 内部头文件如 `wsq.hpp`）
+- 涉及 `std::min` / `std::max` 的编译错误
+
+#### 原因
+Windows SDK 的 `<windows.h>` 定义了 `min`/`max` 宏，与 `std::min`/`std::max` 冲突。TaskFlow 内部使用了这些标准库函数。
+
+#### 解决方案
+在 `#include <taskflow/taskflow.hpp>` **之前** 取消宏定义：
+```cpp
+#ifdef _WIN32
+#undef min
+#undef max
+#endif
+#include <taskflow/taskflow.hpp>
+```
+
+---
+
+### 10. TaskFlow for_each_index 链接错误
+
+#### 症状
+- `LNK2019: 无法解析的外部符号 tf::FlowBuilder::for_each_index<...>`
+
+#### 原因
+项目中的 `external/taskflow/algorithm/algorithm.hpp` 可能为空文件，导致 `taskflow.hpp` 无法传递包含 `for_each.hpp` 等算法头文件。
+
+#### 解决方案
+显式包含所需的算法头文件：
+```cpp
+#include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>  // 必须显式包含
+```
+
+---
+
 ## 记住的教训
 
 1. ✅ **换行符必须是 CRLF**（最重要，忘记这个会浪费大量时间）
@@ -291,3 +329,5 @@ Get-Content build_log.txt | Select-String "error"
 10. ✅ 集成tinyexr时使用`TINYEXR_USE_STB_ZLIB=1`避免miniz问题
 11. ✅ 从Git克隆第三方库后，删除`.git/`、`test/`、`examples/`、`*.md`等冗余文件
 12. ✅ 调试模式修改 `debug_rendering.cu` 后需重新编译 VLR 目标
+13. ✅ **TaskFlow 在 Windows 上必须先 `#undef min` / `#undef max`**，再 include
+14. ✅ **TaskFlow 的 `for_each.hpp` 需要显式 include**（`algorithm.hpp` 可能为空）

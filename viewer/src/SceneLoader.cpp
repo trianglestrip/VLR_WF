@@ -371,7 +371,7 @@ void SceneLoader::computeBounds() {
         // 遍历网格的所有顶点位置
         const size_t vertexCount = meshData.positions.size() / 3;
         for (size_t i = 0; i < vertexCount; ++i) {
-            // Create a span from the float array for the updateBounds function
+            // 从 float 数组创建 span 供 updateBounds 函数使用
             std::span<const float, 3> positionSpan(
                 &meshData.positions[i * 3], 3
             );

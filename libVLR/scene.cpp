@@ -1,15 +1,15 @@
 // ============================================================================
-// VLR ???? - ??
+// VLR 渲染引擎 - 场景
 //
-// ?????? Scene ??????????????????????????
-// ?? OptiX ??????? GPU ??????
+// 本文件实现 Scene 类的加速结构构建、场景边界计算、GPU 数据上传等核心逻辑
+// 基于 OptiX 几何加速结构 (GAS) 与实例加速结构 (IAS) 以及 GPU 数据缓冲区
 //
-// ???VLR ?????
-// ??????026-03-07
-// ???CUDA 13.1, OptiX 8.0.0, VS2022
+// 隶属于 VLR 渲染引擎
+// 最后修改：2026-03-07
+// 依赖：CUDA 13.1, OptiX 8.0.0, VS2022
 // ============================================================================
 
-// ????????????????
+// 启用后可在 CPU 端打印调试信息
 // #define VLR_ENABLE_CPU_DEBUG 1
 
 #ifdef VLR_ENABLE_CPU_DEBUG
@@ -41,6 +41,8 @@
 
 #define OPTIX_CHECK(call) ::vlr::optixu::checkError(call, #call, __FILE__, __LINE__)
 #define CUDA_CHECK(call) ::vlr::cudau::checkError(call, #call, __FILE__, __LINE__)
+
+#include "vlr_profile.h"
 
 namespace {
 using namespace vlr::shared;
@@ -150,7 +152,7 @@ namespace vlr {
 using namespace shared;
 
 // ============================================================================
-// ?????????
+// 构造函数与析构函数
 // ============================================================================
 
 Scene::Scene(OptixDeviceContext optixContext, cudaStream_t stream, cudau::Context* cudaContext)
@@ -182,7 +184,7 @@ Scene::~Scene() {
 }
 
 // ============================================================================
-// ????
+// 三角网格
 // ============================================================================
 
 uint32_t Scene::createTriangleMesh(
@@ -260,7 +262,7 @@ void Scene::removeTriangleMesh(uint32_t meshId) {
 }
 
 // ============================================================================
-// ????
+// 材质
 // ============================================================================
 
 uint32_t Scene::createMaterial(
@@ -483,7 +485,7 @@ void Scene::setMaterial(uint32_t materialId,
 }
 
 // ============================================================================
-// ????
+// 实例变换
 // ============================================================================
 
 ReferenceFrame Scene::transformToReferenceFrame(const InstanceTransform& t) {
@@ -536,13 +538,13 @@ void Scene::setInstanceTransform(uint32_t instanceId, const InstanceTransform& t
     if (instanceId >= m_instances.size()) return;
     m_instances[instanceId].transform = transformToReferenceFrame(transform);
     m_instances[instanceId].rotationPhi = transform.rotationRadians;
-    // ?? VLR?IAS ???? InstanceRecord.transform????????
+    // 保持 VLR 侧 IAS 重建时，InstanceRecord.transform 与实际 Instance 同步
     if (instanceId < m_instanceRecords.size())
         m_instanceRecords[instanceId].transform = transform;
 }
 
 // ============================================================================
-// ??????
+// 材质纹理
 // ============================================================================
 
 namespace {
@@ -602,7 +604,7 @@ void Scene::setMaterialTextureTransform(uint32_t materialId,
 }
 
 // ============================================================================
-// ????
+// 光源
 // ============================================================================
 
 void Scene::addAreaLight(const AreaLightParams& params) {
@@ -610,7 +612,7 @@ void Scene::addAreaLight(const AreaLightParams& params) {
 }
 
 void Scene::addPointLight(const PointLightParams& params) {
-    // ????????
+    // 创建 emissive 材质用于点光源
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
     uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
@@ -623,7 +625,7 @@ void Scene::addPointLight(const PointLightParams& params) {
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // ??????????
+    // 创建 Point 几何体实例
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_Point;
@@ -634,7 +636,7 @@ void Scene::addPointLight(const PointLightParams& params) {
     geomInst.nodeNormal = -1;
     geomInst.nodeTangent = -1;
     
-    // ???????? asPoint ??
+    // 填充 asPoint 结构
     geomInst.asPoint.x = params.position.x;
     geomInst.asPoint.y = params.position.y;
     geomInst.asPoint.z = params.position.z;
@@ -642,11 +644,11 @@ void Scene::addPointLight(const PointLightParams& params) {
     uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
     m_geometryInstances.push_back(geomInst);
     
-    // ??????????????
+    // 创建包含该几何体的 Instance
     shared::Instance inst;
     memset(&inst, 0, sizeof(inst));
     
-    // ??????????????
+    // 分配几何实例索引数组
     uint32_t* geomIndices = new uint32_t[1];
     geomIndices[0] = geomInstIndex;
     inst.geomInstIndices = geomIndices;
@@ -658,7 +660,7 @@ void Scene::addPointLight(const PointLightParams& params) {
     uint32_t instIndex = static_cast<uint32_t>(m_instances.size());
     m_instances.push_back(inst);
     
-    // ??????
+    // 记录实例
     InstanceRecord rec;
     rec.meshId = 0;
     rec.materialId = materialIndex;
@@ -667,12 +669,12 @@ void Scene::addPointLight(const PointLightParams& params) {
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // ????????
+    // 加入光源列表
     m_lightInstIndices.push_back(instIndex);
 }
 
 void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum& radiance) {
-    // ????????
+    // 创建 emissive 材质用于平行光
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
     uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
@@ -685,7 +687,7 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // ????????????????Instance.transform.z ??
+    // 创建 Directional 几何体，方向存于 Instance.transform.z
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_Directional;
@@ -698,7 +700,7 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
     m_geometryInstances.push_back(geomInst);
     
-    // ??????????????transform.z ??
+    // 创建 Instance，方向存于 transform.z
     Instance inst;
     memset(&inst, 0, sizeof(inst));
     uint32_t* geomIndices = new uint32_t[1];
@@ -720,25 +722,25 @@ void Scene::addDirectionalLight(const Vector3D& direction, const SampledSpectrum
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // ????????
+    // 加入光源列表
     m_lightInstIndices.push_back(instIndex);
 }
 
 void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
-    // ????????
-    // - ??????NEE????m_lightInstIndices??????????
-    // - ?? miss ??? processEnvironmentHit ??????
-    // - ?????GeometryType_InfiniteSphere ????miss shader ??
+    // 环境光说明：
+    // - 使用 NEE 时需将环境光加入 m_lightInstIndices
+    // - 在 miss shader 中 processEnvironmentHit 处理
+    // - GeometryType_InfiniteSphere 在 miss shader 中采样
     
-    // ????????????????
+    // 若已有旧环境光，先从光源列表移除
     if (m_envLightInstIndex.has_value() && m_envLightInstIndex.value() < m_instances.size()) {
-        // ??m_lightInstIndices ????????
+        // 从 m_lightInstIndices 移除旧索引
         auto it = std::find(m_lightInstIndices.begin(), m_lightInstIndices.end(), m_envLightInstIndex.value());
         if (it != m_lightInstIndices.end())
             m_lightInstIndices.erase(it);
     }
     
-    // ????????
+    // 创建环境光材质
     SurfaceMaterialDescriptor mat;
     memset(&mat, 0, sizeof(mat));
     uint32_t bsdfType = static_cast<uint32_t>(BSDFType_Lambert);
@@ -746,13 +748,13 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     mat.edfProcedureSetIndex = 0xFFFFFFFF;
     mat.data[MaterialDataLayout::BSDFType] = *reinterpret_cast<const uint32_t*>(&bsdfType);
     
-    // ??????
+    // 使用常量颜色或纹理
     if (params.useConstant) {
         mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<const uint32_t*>(&params.constantColor.values[0]);
         mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<const uint32_t*>(&params.constantColor.values[1]);
         mat.data[MaterialDataLayout::EmissionB] = *reinterpret_cast<const uint32_t*>(&params.constantColor.values[2]);
     } else {
-        // ?????????????? 1.0??????????
+        // 使用纹理时 emission 填 1.0 表示缩放系数
         float defaultEmission = 1.0f;
         mat.data[MaterialDataLayout::EmissionR] = *reinterpret_cast<const uint32_t*>(&defaultEmission);
         mat.data[MaterialDataLayout::EmissionG] = *reinterpret_cast<const uint32_t*>(&defaultEmission);
@@ -762,7 +764,7 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     uint32_t materialIndex = static_cast<uint32_t>(m_materials.size());
     m_materials.push_back(mat);
     
-    // ??????????
+    // 创建 InfiniteSphere 几何体
     GeometryInstance geomInst;
     memset(&geomInst, 0, sizeof(geomInst));
     geomInst.geomType = GeometryType_InfiniteSphere;
@@ -773,16 +775,16 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     geomInst.nodeNormal = -1;
     geomInst.nodeTangent = -1;
     
-    // ????????????
+    // 使用纹理时需构建重要性图
     if (!params.useConstant && params.textureData && params.textureWidth > 0 && params.textureHeight > 0) {
-        geomInst.asInfSphere.importanceMap = 1;  // 1 = ????????
-        // ??????
+        geomInst.asInfSphere.importanceMap = 1;  // 1 = 使用重要性采样
+        // 拷贝纹理数据
         size_t numPixels = static_cast<size_t>(params.textureWidth) * params.textureHeight * 3;
         m_envTextureData.resize(numPixels);
         std::memcpy(m_envTextureData.data(), params.textureData, numPixels * sizeof(float));
         m_envTextureWidth = params.textureWidth;
         m_envTextureHeight = params.textureHeight;
-        // ????????
+        // 构建 CDF 表用于重要性采样
         float* cdfTheta = nullptr;
         float* cdfPhi = nullptr;
         if (buildEnvironmentImportanceMap(
@@ -809,7 +811,7 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     uint32_t geomInstIndex = static_cast<uint32_t>(m_geometryInstances.size());
     m_geometryInstances.push_back(geomInst);
     
-    // ????
+    // 创建 Instance
     shared::Instance inst;
     memset(&inst, 0, sizeof(inst));
     
@@ -824,7 +826,7 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     uint32_t instIndex = static_cast<uint32_t>(m_instances.size());
     m_instances.push_back(inst);
     
-    // ??????
+    // 记录实例
     InstanceRecord rec;
     rec.meshId = 0;
     rec.materialId = materialIndex;
@@ -834,13 +836,13 @@ void Scene::setEnvironmentLight(const EnvironmentLightParams& params) {
     rec.geomInstIndices.push_back(geomInstIndex);
     m_instanceRecords.push_back(rec);
     
-    // ??????m_lightInstIndices ????NEE ??????
+    // 加入 m_lightInstIndices 供 NEE 采样
     m_lightInstIndices.push_back(instIndex);
     m_envLightInstIndex = instIndex;
 }
 
 // ============================================================================
-// ????
+// 相机
 // ============================================================================
 
 void Scene::setCamera(const CameraParams& params) {
@@ -863,7 +865,7 @@ void Scene::setCamera(const CameraParams& params) {
 }
 
 // ============================================================================
-// ???????
+// 几何加速结构构建
 // ============================================================================
 
 void Scene::buildGeometryAccelerationStructures() {
@@ -1002,7 +1004,7 @@ void Scene::buildInstanceAccelerationStructure() {
     optixInstances.reserve(m_instances.size());
     for (size_t i = 0; i < m_instances.size(); ++i) {
         const InstanceRecord& rec = m_instanceRecords[i];
-        // ??????????????????????IAS??????????NEE ????
+        // Point/Directional/InfiniteSphere 不加入 IAS，由 NEE 单独采样
         if (!rec.geomInstIndices.empty()) {
             const GeometryInstance& geomInst = m_geometryInstances[rec.geomInstIndices[0]];
             if (geomInst.geomType == GeometryType_Point ||
@@ -1020,11 +1022,11 @@ void Scene::buildInstanceAccelerationStructure() {
         oi.traversableHandle = m_gasHandles[gasIdx];
         const ReferenceFrame& rf = m_instances[i].transform;
         const InstanceTransform& it = rec.transform;
-        // OptiX transform ?????row-major??x4 ????
+        // OptiX transform 使用 row-major 3x4 矩阵
         // Row 0: [m00, m01, m02, tx]
         // Row 1: [m10, m11, m12, ty]
         // Row 2: [m20, m21, m22, tz]
-        // ReferenceFrame ??x, y, z ???????????????????
+        // ReferenceFrame 的 x, y, z 分别对应行 0, 1, 2
         oi.transform[0] = rf.x.x; oi.transform[1] = rf.y.x; oi.transform[2] = rf.z.x; oi.transform[3] = it.position.x;
         oi.transform[4] = rf.x.y; oi.transform[5] = rf.y.y; oi.transform[6] = rf.z.y; oi.transform[7] = it.position.y;
         oi.transform[8] = rf.x.z; oi.transform[9] = rf.y.z; oi.transform[10] = rf.z.z; oi.transform[11] = it.position.z;
@@ -1063,7 +1065,7 @@ void Scene::buildAccelerationStructure() {
 }
 
 // ============================================================================
-// GPU ????
+// GPU 数据上传
 // ============================================================================
 
 void Scene::computeSceneBounds() {
@@ -1192,7 +1194,7 @@ void Scene::uploadAggregatedData(const AggregatedMeshData& agg) {
     m_triangleBuffer->copyToDevice(agg.triangles.data(), agg.triangles.size(), m_stream);
     const auto& geomInstTriangleOffsets = agg.geomInstTriangleOffsets;
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
-        // ??????????triangleBuffer?Point/Directional/InfiniteSphere ?? union ????
+        // 跳过 triangleBuffer：Point/Directional/InfiniteSphere 使用 union 其他成员
         if (m_geometryInstances[g].geomType != GeometryType_TriangleMesh)
             continue;
         uint32_t meshId = (g < m_instanceRecords.size()) ? m_instanceRecords[g].meshId : 0;
@@ -1248,7 +1250,7 @@ void Scene::uploadAggregatedData(const AggregatedMeshData& agg) {
     
     m_materialBuffer->copyToDevice(m_materials.data(), m_materials.size(), m_stream);
 
-    // ????????????????????????
+    // 确保材质纹理数组大小并上传到 GPU
     ensureMaterialTextureArraysSize(m_materialAlbedoTextureIndices, m_materialRoughnessTextureIndices,
         m_materialMetallicTextureIndices, m_materialNormalMapIndices, m_materialTextureParams, m_materials.size());
     if (!m_materialAlbedoTextureIndices.empty()) {
@@ -1274,7 +1276,7 @@ void Scene::uploadAggregatedData(const AggregatedMeshData& agg) {
     if (!m_lightInstIndices.empty())
         m_lightInstIndicesBuffer->copyToDevice(m_lightInstIndices.data(), m_lightInstIndices.size(), m_stream);
 
-    // ???????????
+    // 上传环境光 CDF 表
     if (!m_envCdfTheta.empty() && !m_envCdfPhi.empty()) {
         if (!m_envCdfThetaBuffer) m_envCdfThetaBuffer = std::make_unique<cudau::Buffer<float>>();
         m_envCdfThetaBuffer->initialize(m_cudaContext, cudau::BufferType::Device, m_envCdfTheta.size());
@@ -1303,68 +1305,47 @@ void Scene::updateToGPU() {
 // ============================================================================
 
 void Scene::prepareSceneParallel() {
-#ifdef VLR_PROFILE_SCENE_PREPARE
-    using Clock = std::chrono::high_resolution_clock;
-    auto wallStart = Clock::now();
-    double gasMs = 0, boundsMs = 0, aggMs = 0, uploadMs = 0, iasMs = 0;
-#endif
+    VLR_PROFILE_BEGIN(_wall);
 
     tf::Executor executor;
     tf::Taskflow taskflow;
 
     AggregatedMeshData agg;
+#ifdef VLR_PROFILE_SCENE_PREPARE
+    double gasMs = 0, boundsMs = 0, aggMs = 0, uploadMs = 0, iasMs = 0;
+#endif
 
     auto gasTask = taskflow.emplace([&]() {
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        auto t0 = Clock::now();
-#endif
+        VLR_PROFILE_BEGIN(_t);
         buildGeometryAccelerationStructures();
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        gasMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-#endif
+        VLR_PROFILE_END(_t, gasMs);
     }).name("buildGAS");
 
     auto boundsTask = taskflow.emplace([&]() {
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        auto t0 = Clock::now();
-#endif
+        VLR_PROFILE_BEGIN(_t);
         computeSceneBounds();
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        boundsMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-#endif
+        VLR_PROFILE_END(_t, boundsMs);
     }).name("computeBounds");
 
     auto aggTask = taskflow.emplace([&]() {
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        auto t0 = Clock::now();
-#endif
+        VLR_PROFILE_BEGIN(_t);
         agg = aggregateMeshData();
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        aggMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-#endif
+        VLR_PROFILE_END(_t, aggMs);
     }).name("aggregateData");
 
     auto uploadTask = taskflow.emplace([&]() {
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        auto t0 = Clock::now();
-#endif
+        VLR_PROFILE_BEGIN(_t);
         uploadAggregatedData(agg);
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        uploadMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-#endif
+        VLR_PROFILE_END(_t, uploadMs);
     }).name("uploadGPU");
 
     boundsTask.precede(uploadTask);
     aggTask.precede(uploadTask);
 
     auto iasTask = taskflow.emplace([&]() {
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        auto t0 = Clock::now();
-#endif
+        VLR_PROFILE_BEGIN(_t);
         buildInstanceAccelerationStructure();
-#ifdef VLR_PROFILE_SCENE_PREPARE
-        iasMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
-#endif
+        VLR_PROFILE_END(_t, iasMs);
     }).name("buildIAS");
 
     gasTask.precede(iasTask);
@@ -1372,8 +1353,9 @@ void Scene::prepareSceneParallel() {
 
     executor.run(taskflow).wait();
 
+    VLR_PROFILE_END_NEW(_wall, wallMs);
+
 #ifdef VLR_PROFILE_SCENE_PREPARE
-    double wallMs = std::chrono::duration<double, std::milli>(Clock::now() - wallStart).count();
     double serialSum = gasMs + boundsMs + aggMs + uploadMs + iasMs;
     printf("\n");
     printf("[VLR-Profile] ===== Scene Prepare Timing =====\n");
