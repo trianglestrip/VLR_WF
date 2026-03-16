@@ -165,17 +165,15 @@ void Context::renderWavefront(
     VLR_DEBUG_PRINTF("[VLR] renderWavefront started: %ux%u, %u samples\n", width, height, numSamples);
     fflush(stdout);
 
-    // ????????????????????
     if (m_sceneSource) {
-        VLR_DEBUG_PRINTF("[VLR] Building acceleration structure...\n");
+        VLR_DEBUG_PRINTF("[VLR] Preparing scene (TaskFlow DAG: GAS + Bounds + Aggregate -> Upload -> IAS)...\n");
         fflush(stdout);
-        const_cast<Scene*>(m_sceneSource)->buildAccelerationStructure();
-        VLR_DEBUG_PRINTF("[VLR] Uploading scene data to GPU...\n");
-        fflush(stdout);
-        const_cast<Scene*>(m_sceneSource)->updateToGPU();
+        Scene* mutableScene = const_cast<Scene*>(m_sceneSource);
+        mutableScene->prepareSceneParallel();
         m_scene.camera = m_sceneSource->getCamera();
         m_scene.bounds = m_sceneSource->getSceneBounds();
-        VLR_DEBUG_PRINTF("[VLR] Scene ready\n");
+        mutableScene->releaseHostMeshData();
+        VLR_DEBUG_PRINTF("[VLR] Scene ready (host mesh data released)\n");
         fflush(stdout);
     }
 

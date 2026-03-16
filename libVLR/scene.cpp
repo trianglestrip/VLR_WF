@@ -27,11 +27,16 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <numeric>
 
 #ifdef _WIN32
 #undef min
 #undef max
 #endif
+
+#include <taskflow/taskflow.hpp>
+#include <taskflow/algorithm/for_each.hpp>
 
 #define OPTIX_CHECK(call) ::vlr::optixu::checkError(call, #call, __FILE__, __LINE__)
 #define CUDA_CHECK(call) ::vlr::cudau::checkError(call, #call, __FILE__, __LINE__)
@@ -864,75 +869,126 @@ void Scene::buildGeometryAccelerationStructures() {
     for (void* p : m_gasOutputBuffers) cudaFree(p);
     m_gasOutputBuffers.clear();
     m_gasHandles.clear();
-    m_gasHandles.reserve(m_meshes.size());
-    
+
+    const size_t numMeshes = m_meshes.size();
+    if (numMeshes == 0) return;
+
+    // 收集有效 mesh 索引（跳过空 mesh）
+    std::vector<size_t> validIndices;
+    validIndices.reserve(numMeshes);
+    for (size_t i = 0; i < numMeshes; ++i) {
+        if (!m_meshes[i].positions.empty() && !m_meshes[i].triangles.empty())
+            validIndices.push_back(i);
+    }
+    const size_t numValid = validIndices.size();
+    if (numValid == 0) return;
+
+    // 预分配 CPU 端数据缓冲区（每个 mesh 独立，写不同下标无需锁）
+    struct MeshCPUData {
+        std::vector<float> vertices;
+        std::vector<uint32_t> indices;
+        uint32_t numVertices = 0;
+        uint32_t numTriangles = 0;
+    };
+    std::vector<MeshCPUData> cpuData(numValid);
+
+    // ---- 阶段 A：并行准备 CPU 端顶点/索引数据 ----
+    {
+        tf::Executor executor;
+        tf::Taskflow taskflow;
+        taskflow.for_each_index(size_t(0), numValid, size_t(1), [&](size_t slot) {
+            const size_t meshIdx = validIndices[slot];
+            const TriangleMeshData& mesh = m_meshes[meshIdx];
+            auto& cd = cpuData[slot];
+            cd.numVertices = static_cast<uint32_t>(mesh.positions.size());
+            cd.numTriangles = static_cast<uint32_t>(mesh.triangles.size());
+
+            cd.vertices.resize(mesh.positions.size() * 3);
+            for (size_t i = 0; i < mesh.positions.size(); ++i) {
+                cd.vertices[i * 3 + 0] = mesh.positions[i].x;
+                cd.vertices[i * 3 + 1] = mesh.positions[i].y;
+                cd.vertices[i * 3 + 2] = mesh.positions[i].z;
+            }
+
+            cd.indices.resize(mesh.triangles.size() * 3);
+            for (size_t i = 0; i < mesh.triangles.size(); ++i) {
+                cd.indices[i * 3 + 0] = mesh.triangles[i].indices[0];
+                cd.indices[i * 3 + 1] = mesh.triangles[i].indices[1];
+                cd.indices[i * 3 + 2] = mesh.triangles[i].indices[2];
+            }
+        });
+        executor.run(taskflow).wait();
+    }
+
+    // ---- 阶段 B：GAS 构建（OptiX API 使用独立 CUDA stream 实现流水线重叠）----
+    m_gasOutputBuffers.resize(numValid, nullptr);
+    m_gasHandles.resize(numValid, 0);
+
     OptixAccelBuildOptions accelOptions = {
         .buildFlags = OPTIX_BUILD_FLAG_NONE,
         .operation = OPTIX_BUILD_OPERATION_BUILD
     };
-    
-    for (size_t meshIdx = 0; meshIdx < m_meshes.size(); ++meshIdx) {
-        const TriangleMeshData& mesh = m_meshes[meshIdx];
-        if (mesh.positions.empty() || mesh.triangles.empty()) continue;
+    static const uint32_t triangleInputFlags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
 
-        std::vector<float> vertices(mesh.positions.size() * 3);
-        for (size_t i = 0; i < mesh.positions.size(); ++i) {
-            vertices[i * 3 + 0] = mesh.positions[i].x;
-            vertices[i * 3 + 1] = mesh.positions[i].y;
-            vertices[i * 3 + 2] = mesh.positions[i].z;
-        }
+    constexpr size_t kMaxConcurrentStreams = 4;
+    const size_t numStreams = (std::min)(numValid, kMaxConcurrentStreams);
+    std::vector<cudaStream_t> buildStreams(numStreams);
+    for (size_t i = 0; i < numStreams; ++i)
+        CUDA_CHECK(cudaStreamCreate(&buildStreams[i]));
 
-        
+    for (size_t slot = 0; slot < numValid; ++slot) {
+        const auto& cd = cpuData[slot];
+        cudaStream_t bstream = buildStreams[slot % numStreams];
+
         CUdeviceptr d_vertices = 0;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_vertices), vertices.size() * sizeof(float)));
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_vertices), vertices.data(), vertices.size() * sizeof(float), cudaMemcpyHostToDevice));
-        
-        std::vector<uint32_t> ind(mesh.triangles.size() * 3);
-        for (size_t i = 0; i < mesh.triangles.size(); ++i) {
-            ind[i * 3 + 0] = mesh.triangles[i].indices[0];
-            ind[i * 3 + 1] = mesh.triangles[i].indices[1];
-            ind[i * 3 + 2] = mesh.triangles[i].indices[2];
-        }
-        
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_vertices), cd.vertices.size() * sizeof(float)));
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(d_vertices), cd.vertices.data(),
+            cd.vertices.size() * sizeof(float), cudaMemcpyHostToDevice, bstream));
+
         CUdeviceptr d_indices = 0;
-        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_indices), ind.size() * sizeof(uint32_t)));
-        CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_indices), ind.data(), ind.size() * sizeof(uint32_t), cudaMemcpyHostToDevice));
-        
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_indices), cd.indices.size() * sizeof(uint32_t)));
+        CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(d_indices), cd.indices.data(),
+            cd.indices.size() * sizeof(uint32_t), cudaMemcpyHostToDevice, bstream));
+
         OptixBuildInput triangleInput = {};
         triangleInput.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
         triangleInput.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
         triangleInput.triangleArray.vertexStrideInBytes = sizeof(float) * 3;
-        triangleInput.triangleArray.numVertices = static_cast<uint32_t>(mesh.positions.size());
+        triangleInput.triangleArray.numVertices = cd.numVertices;
         triangleInput.triangleArray.vertexBuffers = &d_vertices;
         triangleInput.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
         triangleInput.triangleArray.indexStrideInBytes = sizeof(uint32_t) * 3;
-        triangleInput.triangleArray.numIndexTriplets = static_cast<uint32_t>(mesh.triangles.size());
+        triangleInput.triangleArray.numIndexTriplets = cd.numTriangles;
         triangleInput.triangleArray.indexBuffer = d_indices;
-        
-        // ?????flags ????nullptr???????? flags ??
-        static const uint32_t triangleInputFlags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
         triangleInput.triangleArray.flags = triangleInputFlags;
         triangleInput.triangleArray.numSbtRecords = 1;
-        
+
         OptixAccelBufferSizes gasBufferSizes;
-        
         OPTIX_CHECK(optixAccelComputeMemoryUsage(m_optixContext, &accelOptions, &triangleInput, 1, &gasBufferSizes));
-        
+
         void* d_temp = nullptr;
         void* d_output = nullptr;
         CUDA_CHECK(cudaMalloc(&d_temp, gasBufferSizes.tempSizeInBytes));
         CUDA_CHECK(cudaMalloc(&d_output, gasBufferSizes.outputSizeInBytes));
+
         OptixTraversableHandle gasHandle = 0;
-        OPTIX_CHECK(optixAccelBuild(m_optixContext, m_stream, &accelOptions, &triangleInput, 1,
+        OPTIX_CHECK(optixAccelBuild(m_optixContext, bstream, &accelOptions, &triangleInput, 1,
             reinterpret_cast<CUdeviceptr>(d_temp), gasBufferSizes.tempSizeInBytes,
             reinterpret_cast<CUdeviceptr>(d_output), gasBufferSizes.outputSizeInBytes,
             &gasHandle, nullptr, 0));
+
+        // 异步释放临时缓冲区需要先同步当前 stream
+        CUDA_CHECK(cudaStreamSynchronize(bstream));
         cudaFree(reinterpret_cast<void*>(d_vertices));
         cudaFree(reinterpret_cast<void*>(d_indices));
         cudaFree(d_temp);
-        m_gasOutputBuffers.push_back(d_output);
-        m_gasHandles.push_back(gasHandle);
+
+        m_gasOutputBuffers[slot] = d_output;
+        m_gasHandles[slot] = gasHandle;
     }
+
+    for (size_t i = 0; i < numStreams; ++i)
+        CUDA_CHECK(cudaStreamDestroy(buildStreams[i]));
 }
 
 void Scene::buildInstanceAccelerationStructure() {
@@ -1010,64 +1066,130 @@ void Scene::buildAccelerationStructure() {
 // ============================================================================
 
 void Scene::computeSceneBounds() {
+    const size_t numInst = m_instanceRecords.size();
+    if (numInst == 0) {
+        m_sceneBounds.minPoint = Point3D(0, 0, 0);
+        m_sceneBounds.maxPoint = Point3D(0, 0, 0);
+        return;
+    }
+
+    // 每个 instance 独立计算局部 AABB，最终合并
+    struct LocalBounds {
+        Point3D minPt{1e10f, 1e10f, 1e10f};
+        Point3D maxPt{-1e10f, -1e10f, -1e10f};
+    };
+    std::vector<LocalBounds> perInstBounds(numInst);
+
+    {
+        tf::Executor executor;
+        tf::Taskflow taskflow;
+        taskflow.for_each_index(size_t(0), numInst, size_t(1), [&](size_t i) {
+            const InstanceRecord& instRec = m_instanceRecords[i];
+            const TriangleMeshData& mesh = m_meshes[instRec.meshId];
+            const Instance& inst = m_instances[i];
+            auto& lb = perInstBounds[i];
+            for (const auto& p : mesh.positions) {
+                Point3D wp = inst.transform.toWorld(p);
+                wp.x += instRec.transform.position.x;
+                wp.y += instRec.transform.position.y;
+                wp.z += instRec.transform.position.z;
+                lb.minPt.x = (std::min)(lb.minPt.x, wp.x);
+                lb.minPt.y = (std::min)(lb.minPt.y, wp.y);
+                lb.minPt.z = (std::min)(lb.minPt.z, wp.z);
+                lb.maxPt.x = (std::max)(lb.maxPt.x, wp.x);
+                lb.maxPt.y = (std::max)(lb.maxPt.y, wp.y);
+                lb.maxPt.z = (std::max)(lb.maxPt.z, wp.z);
+            }
+        });
+        executor.run(taskflow).wait();
+    }
+
+    // reduce 合并所有局部 AABB
     m_sceneBounds.minPoint = Point3D(1e10f, 1e10f, 1e10f);
     m_sceneBounds.maxPoint = Point3D(-1e10f, -1e10f, -1e10f);
-    for (size_t i = 0; i < m_instanceRecords.size(); ++i) {
-        const InstanceRecord& instRec = m_instanceRecords[i];
-        const TriangleMeshData& mesh = m_meshes[instRec.meshId];
-        const Instance& inst = m_instances[i];
-        for (const auto& p : mesh.positions) {
-            Point3D wp = inst.transform.toWorld(p);
-            wp.x += instRec.transform.position.x;
-            wp.y += instRec.transform.position.y;
-            wp.z += instRec.transform.position.z;
-            m_sceneBounds.minPoint.x = (std::min)(m_sceneBounds.minPoint.x, wp.x);
-            m_sceneBounds.minPoint.y = (std::min)(m_sceneBounds.minPoint.y, wp.y);
-            m_sceneBounds.minPoint.z = (std::min)(m_sceneBounds.minPoint.z, wp.z);
-            m_sceneBounds.maxPoint.x = (std::max)(m_sceneBounds.maxPoint.x, wp.x);
-            m_sceneBounds.maxPoint.y = (std::max)(m_sceneBounds.maxPoint.y, wp.y);
-            m_sceneBounds.maxPoint.z = (std::max)(m_sceneBounds.maxPoint.z, wp.z);
-        }
+    for (const auto& lb : perInstBounds) {
+        m_sceneBounds.minPoint.x = (std::min)(m_sceneBounds.minPoint.x, lb.minPt.x);
+        m_sceneBounds.minPoint.y = (std::min)(m_sceneBounds.minPoint.y, lb.minPt.y);
+        m_sceneBounds.minPoint.z = (std::min)(m_sceneBounds.minPoint.z, lb.minPt.z);
+        m_sceneBounds.maxPoint.x = (std::max)(m_sceneBounds.maxPoint.x, lb.maxPt.x);
+        m_sceneBounds.maxPoint.y = (std::max)(m_sceneBounds.maxPoint.y, lb.maxPt.y);
+        m_sceneBounds.maxPoint.z = (std::max)(m_sceneBounds.maxPoint.z, lb.maxPt.z);
     }
 }
 
-void Scene::updateToGPU() {
-    computeSceneBounds();
-    std::vector<Point3D> allPositions;
-    std::vector<Normal3D> allNormals;
-    std::vector<TexCoord2D> allTexCoords;
-    std::vector<Triangle> allTriangles;
-    std::vector<uint32_t> geomInstTriangleOffsets;
-    uint32_t vertexOffset = 0;
-    for (const auto& mesh : m_meshes) {
-        for (const auto& p : mesh.positions) allPositions.push_back(p);
-        for (const auto& n : mesh.normals) allNormals.push_back(n);
-        for (const auto& uv : mesh.texCoords) allTexCoords.push_back(uv);
-        geomInstTriangleOffsets.push_back(static_cast<uint32_t>(allTriangles.size()));
-        for (auto tri : mesh.triangles) {
-            tri.indices[0] += vertexOffset;
-            tri.indices[1] += vertexOffset;
-            tri.indices[2] += vertexOffset;
-            allTriangles.push_back(tri);
+Scene::AggregatedMeshData Scene::aggregateMeshData() {
+    const size_t numMeshes = m_meshes.size();
+    AggregatedMeshData agg;
+
+    if (numMeshes == 0) return agg;
+
+    // Prefix sum 计算每个 mesh 在全局数组中的偏移
+    std::vector<size_t> posOffsets(numMeshes + 1, 0);
+    std::vector<size_t> normOffsets(numMeshes + 1, 0);
+    std::vector<size_t> uvOffsets(numMeshes + 1, 0);
+    std::vector<size_t> triOffsets(numMeshes + 1, 0);
+    for (size_t i = 0; i < numMeshes; ++i) {
+        posOffsets[i + 1]  = posOffsets[i]  + m_meshes[i].positions.size();
+        normOffsets[i + 1] = normOffsets[i] + m_meshes[i].normals.size();
+        uvOffsets[i + 1]   = uvOffsets[i]   + m_meshes[i].texCoords.size();
+        triOffsets[i + 1]  = triOffsets[i]  + m_meshes[i].triangles.size();
+    }
+
+    agg.positions.resize(posOffsets[numMeshes]);
+    agg.normals.resize(normOffsets[numMeshes]);
+    agg.texCoords.resize(uvOffsets[numMeshes]);
+    agg.triangles.resize(triOffsets[numMeshes]);
+    agg.geomInstTriangleOffsets.resize(numMeshes);
+
+    // 并行拷贝各 mesh 数据到全局数组（每个 mesh 写独立区间，无锁）
+    tf::Executor executor;
+    tf::Taskflow taskflow;
+    taskflow.for_each_index(size_t(0), numMeshes, size_t(1), [&](size_t m) {
+        const TriangleMeshData& mesh = m_meshes[m];
+        const uint32_t vOff = static_cast<uint32_t>(posOffsets[m]);
+
+        std::memcpy(&agg.positions[posOffsets[m]], mesh.positions.data(),
+                    mesh.positions.size() * sizeof(Point3D));
+        if (!mesh.normals.empty())
+            std::memcpy(&agg.normals[normOffsets[m]], mesh.normals.data(),
+                        mesh.normals.size() * sizeof(Normal3D));
+        if (!mesh.texCoords.empty())
+            std::memcpy(&agg.texCoords[uvOffsets[m]], mesh.texCoords.data(),
+                        mesh.texCoords.size() * sizeof(TexCoord2D));
+
+        agg.geomInstTriangleOffsets[m] = static_cast<uint32_t>(triOffsets[m]);
+        const size_t tOff = triOffsets[m];
+        for (size_t t = 0; t < mesh.triangles.size(); ++t) {
+            Triangle tri = mesh.triangles[t];
+            tri.indices[0] += vOff;
+            tri.indices[1] += vOff;
+            tri.indices[2] += vOff;
+            agg.triangles[tOff + t] = tri;
         }
-        vertexOffset += static_cast<uint32_t>(mesh.positions.size());
-    }
+    });
+    executor.run(taskflow).wait();
+
+    return agg;
+}
+
+void Scene::uploadAggregatedData(const AggregatedMeshData& agg) {
     if (!m_vertexPositionBuffer) m_vertexPositionBuffer = std::make_unique<cudau::Buffer<Point3D>>();
-    m_vertexPositionBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allPositions.size());
-    m_vertexPositionBuffer->copyToDevice(allPositions.data(), allPositions.size(), m_stream);
-    if (!allNormals.empty()) {
+    m_vertexPositionBuffer->initialize(m_cudaContext, cudau::BufferType::Device, agg.positions.size());
+    m_vertexPositionBuffer->copyToDevice(agg.positions.data(), agg.positions.size(), m_stream);
+    if (!agg.normals.empty()) {
         if (!m_vertexNormalBuffer) m_vertexNormalBuffer = std::make_unique<cudau::Buffer<Normal3D>>();
-        m_vertexNormalBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allNormals.size());
-        m_vertexNormalBuffer->copyToDevice(allNormals.data(), allNormals.size(), m_stream);
+        m_vertexNormalBuffer->initialize(m_cudaContext, cudau::BufferType::Device, agg.normals.size());
+        m_vertexNormalBuffer->copyToDevice(agg.normals.data(), agg.normals.size(), m_stream);
     }
-    if (!allTexCoords.empty()) {
+    if (!agg.texCoords.empty()) {
         if (!m_vertexTexCoordBuffer) m_vertexTexCoordBuffer = std::make_unique<cudau::Buffer<TexCoord2D>>();
-        m_vertexTexCoordBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTexCoords.size());
-        m_vertexTexCoordBuffer->copyToDevice(allTexCoords.data(), allTexCoords.size(), m_stream);
+        m_vertexTexCoordBuffer->initialize(m_cudaContext, cudau::BufferType::Device, agg.texCoords.size());
+        m_vertexTexCoordBuffer->copyToDevice(agg.texCoords.data(), agg.texCoords.size(), m_stream);
     }
     if (!m_triangleBuffer) m_triangleBuffer = std::make_unique<cudau::Buffer<Triangle>>();
-    m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, allTriangles.size());
-    m_triangleBuffer->copyToDevice(allTriangles.data(), allTriangles.size(), m_stream);
+    m_triangleBuffer->initialize(m_cudaContext, cudau::BufferType::Device, agg.triangles.size());
+    m_triangleBuffer->copyToDevice(agg.triangles.data(), agg.triangles.size(), m_stream);
+    const auto& geomInstTriangleOffsets = agg.geomInstTriangleOffsets;
     for (size_t g = 0; g < m_geometryInstances.size(); ++g) {
         // ??????????triangleBuffer?Point/Directional/InfiniteSphere ?? union ????
         if (m_geometryInstances[g].geomType != GeometryType_TriangleMesh)
@@ -1169,8 +1291,76 @@ void Scene::updateToGPU() {
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
 }
 
+void Scene::updateToGPU() {
+    computeSceneBounds();
+    auto agg = aggregateMeshData();
+    uploadAggregatedData(agg);
+}
+
 // ============================================================================
-// ????
+// TaskFlow DAG 编排：GAS + Bounds + Aggregate 并行 -> Upload + IAS
+// ============================================================================
+
+void Scene::prepareSceneParallel() {
+    tf::Executor executor;
+    tf::Taskflow taskflow;
+
+    AggregatedMeshData agg;
+
+    // Phase 1（三个独立任务，可完全并行）
+    auto gasTask = taskflow.emplace([this]() {
+        buildGeometryAccelerationStructures();
+    }).name("buildGAS");
+
+    auto boundsTask = taskflow.emplace([this]() {
+        computeSceneBounds();
+    }).name("computeBounds");
+
+    auto aggTask = taskflow.emplace([this, &agg]() {
+        agg = aggregateMeshData();
+    }).name("aggregateData");
+
+    // Phase 2: Upload 依赖 Bounds + Aggregate 完成
+    auto uploadTask = taskflow.emplace([this, &agg]() {
+        uploadAggregatedData(agg);
+    }).name("uploadGPU");
+
+    boundsTask.precede(uploadTask);
+    aggTask.precede(uploadTask);
+
+    // Phase 3: IAS 依赖 GAS + Upload 完成
+    auto iasTask = taskflow.emplace([this]() {
+        buildInstanceAccelerationStructure();
+    }).name("buildIAS");
+
+    gasTask.precede(iasTask);
+    uploadTask.precede(iasTask);
+
+    executor.run(taskflow).wait();
+}
+
+// ============================================================================
+// 内存释放
+// ============================================================================
+
+void Scene::releaseHostMeshData() {
+    size_t freedBytes = 0;
+    for (auto& mesh : m_meshes) {
+        freedBytes += mesh.positions.capacity() * sizeof(Point3D);
+        freedBytes += mesh.normals.capacity() * sizeof(Normal3D);
+        freedBytes += mesh.texCoords.capacity() * sizeof(TexCoord2D);
+        freedBytes += mesh.triangles.capacity() * sizeof(Triangle);
+        std::vector<Point3D>().swap(mesh.positions);
+        std::vector<Normal3D>().swap(mesh.normals);
+        std::vector<TexCoord2D>().swap(mesh.texCoords);
+        std::vector<Triangle>().swap(mesh.triangles);
+    }
+    std::cout << "[Scene] releaseHostMeshData: 释放 CPU 端网格数据 "
+              << (freedBytes / (1024 * 1024)) << " MB\n";
+}
+
+// ============================================================================
+// 数据访问
 // ============================================================================
 
 const shared::GeometryInstance* Scene::getGeomInstBuffer() const {

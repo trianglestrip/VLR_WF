@@ -299,6 +299,12 @@ public:
     /// 上传场景数据到 GPU
     void updateToGPU();
 
+    /// TaskFlow DAG 编排：GAS + Bounds + Aggregate 并行，然后 Upload + IAS
+    void prepareSceneParallel();
+
+    /// 释放 CPU 端网格几何数据（GPU 上传完成后调用以回收内存）
+    void releaseHostMeshData();
+
     // ------------------------------------------------------------------------
     // 数据访问（供 Context 使用）
     // ------------------------------------------------------------------------
@@ -393,6 +399,20 @@ private:
     void computeSceneBounds();
     void buildGeometryAccelerationStructures();
     void buildInstanceAccelerationStructure();
+
+    /// 聚合顶点/三角形数据到连续数组（可并行，不涉及 GPU）
+    struct AggregatedMeshData {
+        std::vector<Point3D> positions;
+        std::vector<Normal3D> normals;
+        std::vector<TexCoord2D> texCoords;
+        std::vector<Triangle> triangles;
+        std::vector<uint32_t> geomInstTriangleOffsets;
+    };
+    AggregatedMeshData aggregateMeshData();
+
+    /// 将聚合数据上传到 GPU 并更新 geometry instance 引用
+    void uploadAggregatedData(const AggregatedMeshData& agg);
+
     ReferenceFrame transformToReferenceFrame(const InstanceTransform& t);
 };
 

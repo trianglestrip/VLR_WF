@@ -387,12 +387,13 @@ static PlyData loadPly(const std::string& path) {
     };
 
     // ---- 读取顶点数据 ----
+    std::vector<float> vals(propCount);
+
     if (fmt == Format::Ascii) {
         for (size_t vi = 0; vi < vertCount; ++vi) {
             std::getline(f, line);
             if (!line.empty() && line.back() == '\r') line.pop_back();
             std::istringstream ss2(line);
-            std::vector<float> vals(propCount);
             for (size_t pi = 0; pi < propCount; ++pi) ss2 >> vals[pi];
 
             data.positions[vi*3+0] = (idxX >= 0) ? vals[idxX] : 0.f;
@@ -409,8 +410,7 @@ static PlyData loadPly(const std::string& path) {
             }
         }
     } else {
-        // Binary little endian（本项目场景文件常见格式）
-        // 计算每顶点字节数
+        // Binary little endian
         std::vector<size_t> propSizes(propCount);
         size_t vertStride = 0;
         for (size_t pi = 0; pi < propCount; ++pi) {
@@ -424,7 +424,6 @@ static PlyData loadPly(const std::string& path) {
         for (size_t vi = 0; vi < vertCount; ++vi) {
             const char* row = vertBuf.data() + vi * vertStride;
             size_t offset = 0;
-            std::vector<float> vals(propCount);
             for (size_t pi = 0; pi < propCount; ++pi) {
                 size_t sz = propSizes[pi];
                 if (sz == 4) {
@@ -518,6 +517,7 @@ public:
 
     std::optional<PbrtSceneData> parse() {
         m_scene.baseDir = m_baseDir;
+        m_scene.shapes.reserve(512);
 
         Token tok;
         while (m_lex.next(tok)) {
@@ -842,12 +842,14 @@ std::optional<PbrtSceneData> PbrtParser::parseFile(
     auto sceneOpt = impl.parse();
     if (!sceneOpt) return std::nullopt;
 
+    std::cout << "[PbrtParser] move scene..." << std::endl;
     PbrtSceneData scene = std::move(*sceneOpt);
+    std::cout << "[PbrtParser] move OK" << std::endl;
 
     std::cout << "[PbrtParser] 解析完成: "
               << scene.textures.size()      << " 纹理, "
               << scene.namedMaterials.size() << " 材质, "
-              << scene.shapes.size()         << " 形状\n";
+              << scene.shapes.size()         << " 形状" << std::endl;
 
     if (!options.loadPlyFiles) return scene;
 
@@ -915,6 +917,17 @@ std::optional<PbrtSceneData> PbrtParser::parseFile(
               << " 成功 (线程数: " << numWorkers << ")\n";
 
     return scene;
+}
+
+PbrtTriangleMesh PbrtParser::loadPlyMesh(const std::string& path) {
+    PbrtTriangleMesh tm;
+    PlyData plyData = loadPly(path);
+    if (!plyData.ok) return tm;
+    tm.positions = std::move(plyData.positions);
+    tm.normals   = std::move(plyData.normals);
+    tm.uvs       = std::move(plyData.uvs);
+    tm.indices   = std::move(plyData.indices);
+    return tm;
 }
 
 } // namespace viewer

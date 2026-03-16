@@ -66,9 +66,14 @@ public:
      * @brief 加载 PBRT v4 场景（.pbrt 文件）
      * @param filepath .pbrt 文件路径
      * @param options  加载选项（并行配置沿用 LoadOptions）
+     * @param outCamera 可选输出：PBRT 相机参数（Transform + FOV）
+     * @param outFilm   可选输出：PBRT 胶片参数（分辨率）
      * @return 是否成功
      */
-    bool loadPbrtScene(const std::string& filepath, const LoadOptions& options = LoadOptions{});
+    bool loadPbrtScene(const std::string& filepath,
+                       const LoadOptions& options = LoadOptions{},
+                       PbrtCamera* outCamera = nullptr,
+                       PbrtFilm* outFilm = nullptr);
 
     /**
      * @brief 获取场景边界盒

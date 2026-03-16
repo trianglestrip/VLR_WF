@@ -39,8 +39,14 @@ public:
         const ParseOptions& options = {}
     );
 
+    /**
+     * @brief 加载单个 PLY 文件为 PbrtTriangleMesh
+     * @param path PLY 文件的绝对或相对路径
+     * @return 成功时包含顶点/索引数据，失败时 positions 为空
+     */
+    [[nodiscard]] static PbrtTriangleMesh loadPlyMesh(const std::string& path);
+
 private:
-    // 仅供静态函数内部使用的实现类（隐藏在 .cpp 中）
     struct Impl;
 };
 

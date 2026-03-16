@@ -596,10 +596,12 @@ void SceneLoader::exportTaskGraph(const std::string& filename) const {
 // PBRT v4 加载路径
 // ============================================================================
 
-bool SceneLoader::loadPbrtScene(const std::string& filepath, const LoadOptions& options) {
+bool SceneLoader::loadPbrtScene(const std::string& filepath,
+                                const LoadOptions& options,
+                                PbrtCamera* outCamera,
+                                PbrtFilm* outFilm) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    // 初始化 Taskflow（供 buildFromPbrt 阶段使用）
     if (options.enableParallel && !m_taskflow) {
         m_taskflow = std::make_unique<TaskflowImpl>(options.numThreads);
         std::cout << "[SceneLoader] 并行模式已启用，线程数: "
@@ -607,7 +609,7 @@ bool SceneLoader::loadPbrtScene(const std::string& filepath, const LoadOptions& 
     }
 
     PbrtParser::ParseOptions parseOpts;
-    parseOpts.loadPlyFiles = true;
+    parseOpts.loadPlyFiles = false;
     parseOpts.verbose      = false;
     parseOpts.numThreads   = options.numThreads;
 
@@ -616,6 +618,9 @@ bool SceneLoader::loadPbrtScene(const std::string& filepath, const LoadOptions& 
         std::cerr << "[SceneLoader] PBRT 解析失败: " << filepath << std::endl;
         return false;
     }
+
+    if (outCamera) *outCamera = pbrtOpt->camera;
+    if (outFilm)   *outFilm   = pbrtOpt->film;
 
     bool result = buildFromPbrt(*pbrtOpt, options);
 
@@ -701,7 +706,7 @@ VLRMaterial SceneLoader::createVLRMaterialFromPbrt(
 }
 
 // ----------------------------------------------------------------------------
-// 将完整的 PbrtSceneData 构建为 VLR 场景（Taskflow 并行）
+// 将 PbrtSceneData 构建为 VLR 场景（流式加载 PLY，边加载边提交边释放）
 // ----------------------------------------------------------------------------
 bool SceneLoader::buildFromPbrt(PbrtSceneData& pbrtScene, const LoadOptions& options) {
     if (!options.appendMode) {
@@ -713,8 +718,7 @@ bool SceneLoader::buildFromPbrt(PbrtSceneData& pbrtScene, const LoadOptions& opt
 
     const std::string& baseDir = pbrtScene.baseDir;
 
-    // ---- 阶段1：串行构建材质索引表（VLR 材质创建可能不线程安全）----
-    // 按名称预构建 name -> VLRMaterial 映射
+    // ---- 阶段1：串行构建材质索引表 ----
     std::unordered_map<std::string, VLRMaterial> matMap;
     matMap.reserve(pbrtScene.namedMaterials.size());
     for (auto& [name, mat] : pbrtScene.namedMaterials) {
@@ -724,137 +728,101 @@ bool SceneLoader::buildFromPbrt(PbrtSceneData& pbrtScene, const LoadOptions& opt
 
     std::cout << "[SceneLoader] 构建材质完成: " << matMap.size() << " 个\n";
 
-    // ---- 阶段2：并行构建网格（每个 shape 独立，无依赖）----
+    // ---- 阶段2：流式加载 PLY + 提交 VLR + 增量边界 ----
+    constexpr float fmax = std::numeric_limits<float>::max();
+    constexpr float fmin = std::numeric_limits<float>::lowest();
+    m_boundsMin[0] = m_boundsMin[1] = m_boundsMin[2] = fmax;
+    m_boundsMax[0] = m_boundsMax[1] = m_boundsMax[2] = fmin;
+
     size_t shapeCount = pbrtScene.shapes.size();
-    m_meshes.resize(m_meshes.size() + shapeCount); // 预分配槽位，写下标不冲突
-    size_t meshOffset = m_meshes.size() - shapeCount;
+    size_t successCount = 0;
 
-    if (options.enableParallel && m_taskflow) {
-        tf::Taskflow taskflow;
-        taskflow.clear();
+    for (size_t i = 0; i < shapeCount; ++i) {
+        auto& shape = pbrtScene.shapes[i];
 
-        // 使用 std::atomic 跟踪失败数
-        std::atomic<size_t> successCount{0};
-
-        for (size_t i = 0; i < shapeCount; ++i) {
-            taskflow.emplace([&, i]() {
-                auto& shape = pbrtScene.shapes[i];
-                if (shape.type != PbrtShapeType::TriangleMesh) return;
-
-                auto& tm = std::get<PbrtTriangleMesh>(shape.geometry);
-                if (tm.positions.empty() || tm.indices.empty()) return;
-
-                // 查找材质
-                VLRMaterial vlrMat = nullptr;
-                if (!shape.materialName.empty()) {
-                    auto it = matMap.find(shape.materialName);
-                    if (it != matMap.end()) vlrMat = it->second;
-                }
-
-                // 面积光：覆盖材质为发光材质
-                if (shape.isAreaLight) {
-                    MaterialData emitData;
-                    emitData.materialType  = 0;
-                    emitData.emissionColor[0] = shape.areaLightL[0];
-                    emitData.emissionColor[1] = shape.areaLightL[1];
-                    emitData.emissionColor[2] = shape.areaLightL[2];
-                    emitData.baseColor[0] = emitData.baseColor[1] = emitData.baseColor[2] = 0.f;
-                    // createVLRMaterial 需要锁保护（VLR API 可能非线程安全）
-                    {
-                        std::lock_guard<std::mutex> lk(m_meshesMutex);
-                        vlrMat = createVLRMaterial(emitData);
-                    }
-                }
-
-                // 创建 VLR 网格
-                VLRTriangleMesh vlrMesh = nullptr;
-                VLRResult res;
-                {
-                    // VLR 创建调用加锁
-                    std::lock_guard<std::mutex> lk(m_meshesMutex);
-                    res = vlrCreateTriangleMesh(
-                        m_renderer.getScene(),
-                        tm.positions.data(),
-                        static_cast<uint32_t>(tm.positions.size() / 3),
-                        tm.indices.data(),
-                        static_cast<uint32_t>(tm.indices.size() / 3),
-                        vlrMat,
-                        &vlrMesh
-                    );
-                }
-
-                if (res != VLRResult_Success) return;
-
-                // 写入预分配槽位（不同 i 对应不同槽位，无需锁）
-                MeshData md;
-                md.positions = std::move(tm.positions);
-                md.normals   = std::move(tm.normals);
-                md.uvs       = std::move(tm.uvs);
-                md.indices   = std::move(tm.indices);
-                m_meshes[meshOffset + i] = std::move(md);
-                ++successCount;
-            }).name("shape_" + std::to_string(i));
-        }
-
-        // 导出任务图
-        if (options.showTaskGraph) {
-            std::ofstream ofs("pbrt_build_taskgraph.dot");
-            taskflow.dump(ofs);
-            std::cout << "[SceneLoader] 构建任务图已导出: pbrt_build_taskgraph.dot\n";
-        }
-
-        m_taskflow->executor.run(taskflow).wait();
-        m_meshCount += successCount.load();
-
-        std::cout << "[SceneLoader] 并行构建完成: " << successCount.load()
-                  << "/" << shapeCount << " 网格成功\n";
-    } else {
-        // 串行回退路径
-        size_t successCount = 0;
-        for (size_t i = 0; i < shapeCount; ++i) {
-            auto& shape = pbrtScene.shapes[i];
-            if (shape.type != PbrtShapeType::TriangleMesh) continue;
-
-            auto& tm = std::get<PbrtTriangleMesh>(shape.geometry);
-            if (tm.positions.empty() || tm.indices.empty()) continue;
-
-            VLRMaterial vlrMat = nullptr;
-            if (!shape.materialName.empty()) {
-                auto it = matMap.find(shape.materialName);
-                if (it != matMap.end()) vlrMat = it->second;
+        // PlyMesh: 按需加载 PLY 文件，加载后立即转为 TriangleMesh
+        if (shape.type == PbrtShapeType::PlyMesh) {
+            auto& ref = std::get<PbrtPlyMesh>(shape.geometry);
+            std::string plyPath = baseDir + "/" + ref.filename;
+            PbrtTriangleMesh tm = PbrtParser::loadPlyMesh(plyPath);
+            if (tm.positions.empty()) {
+                std::cerr << "[SceneLoader] PLY 加载失败: " << plyPath << "\n";
+                continue;
             }
-
-            VLRTriangleMesh vlrMesh = nullptr;
-            VLRResult res = vlrCreateTriangleMesh(
-                m_renderer.getScene(),
-                tm.positions.data(),
-                static_cast<uint32_t>(tm.positions.size() / 3),
-                tm.indices.data(),
-                static_cast<uint32_t>(tm.indices.size() / 3),
-                vlrMat,
-                &vlrMesh
-            );
-            if (res != VLRResult_Success) continue;
-
-            MeshData md;
-            md.positions = std::move(tm.positions);
-            md.normals   = std::move(tm.normals);
-            md.uvs       = std::move(tm.uvs);
-            md.indices   = std::move(tm.indices);
-            m_meshes[meshOffset + i] = std::move(md);
-            ++successCount;
+            shape.type = PbrtShapeType::TriangleMesh;
+            shape.geometry = std::move(tm);
         }
-        m_meshCount += successCount;
+
+        if (shape.type != PbrtShapeType::TriangleMesh) continue;
+
+        auto& tm = std::get<PbrtTriangleMesh>(shape.geometry);
+        if (tm.positions.empty() || tm.indices.empty()) continue;
+
+        // 增量计算包围盒（无需额外 MeshData 拷贝）
+        const size_t vertCount = tm.positions.size() / 3;
+        for (size_t v = 0; v < vertCount; ++v) {
+            float px = tm.positions[v * 3 + 0];
+            float py = tm.positions[v * 3 + 1];
+            float pz = tm.positions[v * 3 + 2];
+            if (px < m_boundsMin[0]) m_boundsMin[0] = px;
+            if (py < m_boundsMin[1]) m_boundsMin[1] = py;
+            if (pz < m_boundsMin[2]) m_boundsMin[2] = pz;
+            if (px > m_boundsMax[0]) m_boundsMax[0] = px;
+            if (py > m_boundsMax[1]) m_boundsMax[1] = py;
+            if (pz > m_boundsMax[2]) m_boundsMax[2] = pz;
+        }
+
+        // 查找材质
+        VLRMaterial vlrMat = nullptr;
+        if (!shape.materialName.empty()) {
+            auto it = matMap.find(shape.materialName);
+            if (it != matMap.end()) vlrMat = it->second;
+        }
+
+        if (shape.isAreaLight) {
+            MaterialData emitData;
+            emitData.materialType  = 0;
+            emitData.emissionColor[0] = shape.areaLightL[0];
+            emitData.emissionColor[1] = shape.areaLightL[1];
+            emitData.emissionColor[2] = shape.areaLightL[2];
+            emitData.baseColor[0] = emitData.baseColor[1] = emitData.baseColor[2] = 0.f;
+            vlrMat = createVLRMaterial(emitData);
+        }
+
+        // 提交到 VLR（内部会拷贝数据到 TriangleMeshData）
+        VLRTriangleMesh vlrMesh = nullptr;
+        VLRResult res = vlrCreateTriangleMesh(
+            m_renderer.getScene(),
+            tm.positions.data(),
+            static_cast<uint32_t>(tm.positions.size() / 3),
+            tm.indices.data(),
+            static_cast<uint32_t>(tm.indices.size() / 3),
+            vlrMat,
+            &vlrMesh
+        );
+
+        // 立即释放 PLY 原始数据（VLR 内部已拷贝到 TriangleMeshData）
+        { std::vector<float>().swap(tm.positions); }
+        { std::vector<float>().swap(tm.normals); }
+        { std::vector<float>().swap(tm.uvs); }
+        { std::vector<uint32_t>().swap(tm.indices); }
+
+        if (res != VLRResult_Success) continue;
+        ++successCount;
+
+        if ((successCount % 50) == 0) {
+            std::cout << "[SceneLoader] 已提交 " << successCount << "/" << shapeCount << " 网格\n";
+        }
     }
 
-    // 移除空槽位（加载失败的 shape 留空）
-    m_meshes.erase(
-        std::remove_if(m_meshes.begin() + static_cast<ptrdiff_t>(meshOffset), m_meshes.end(),
-            [](const MeshData& md) { return md.positions.empty(); }),
-        m_meshes.end()
-    );
+    m_meshCount += successCount;
 
-    computeBounds();
+    std::cout << "[SceneLoader] 场景边界: "
+              << "Min(" << m_boundsMin[0] << ", " << m_boundsMin[1] << ", " << m_boundsMin[2] << ") "
+              << "Max(" << m_boundsMax[0] << ", " << m_boundsMax[1] << ", " << m_boundsMax[2] << ")\n";
+    std::cout << "[SceneLoader] 流式构建完成: " << successCount
+              << "/" << shapeCount << " 网格成功\n";
+
     return true;
 }
 

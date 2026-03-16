@@ -185,6 +185,14 @@ void vlrDestroyScene(VLRScene scene) {
     delete impl;
 }
 
+void vlrReleaseHostMeshData(VLRScene scene) {
+    if (!scene) return;
+    VLRSceneImpl* impl = TO_SCENE(scene);
+    if (impl->scene) {
+        impl->scene->releaseHostMeshData();
+    }
+}
+
 VLRResult vlrCreateTriangleMesh(
     VLRScene scene,
     const float* vertices,

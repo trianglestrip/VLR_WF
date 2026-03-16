@@ -1,8 +1,8 @@
 // ============================================================================
 // Kitchen Scene Rendering Test
-// 
-// Loads the Kitchen scene (295 PLY meshes) and renders using VLR
-// Demonstrates parallel loading performance on a complex real-world scene
+//
+// Loads the Kitchen scene from a PBRT v4 file (.pbrt + PLY meshes)
+// Camera position, FOV, and resolution are read from the PBRT file.
 // ============================================================================
 
 #include "SceneLoader.h"
@@ -10,314 +10,222 @@
 #include <iostream>
 #include <chrono>
 #include <filesystem>
-#include <vector>
 #include <string>
+#include <cmath>
+#include <array>
 
-using namespace viewer;
 namespace fs = std::filesystem;
+using viewer::VLRRenderer;
+using viewer::SceneLoader;
+using viewer::PbrtCamera;
+using viewer::PbrtFilm;
+using viewer::Mat4f;
 
+struct CameraVectors {
+    float position[3];
+    float target[3];
+    float up[3];
+};
+
+static CameraVectors cameraFromPbrtTransform(const Mat4f& m) {
+    // m is row-major world-to-camera. Transpose the 3x3 block to get R^T.
+    // Row-major layout: m[row*4+col]
+    float r00 = m[0], r01 = m[1], r02 = m[2];
+    float r10 = m[4], r11 = m[5], r12 = m[6];
+    float r20 = m[8], r21 = m[9], r22 = m[10];
+    float tx  = m[3], ty  = m[7], tz  = m[11];
+
+    // Inverted rotation (transpose)
+    float ir00 = r00, ir01 = r10, ir02 = r20;
+    float ir10 = r01, ir11 = r11, ir12 = r21;
+    float ir20 = r02, ir21 = r12, ir22 = r22;
+
+    // Camera position = -R^T * t
+    float px = -(ir00*tx + ir01*ty + ir02*tz);
+    float py = -(ir10*tx + ir11*ty + ir12*tz);
+    float pz = -(ir20*tx + ir21*ty + ir22*tz);
+
+    // Forward direction in world space = R^T * (0,0,-1) = third column of R^T negated
+    float fwd_x = -ir02;
+    float fwd_y = -ir12;
+    float fwd_z = -ir22;
+
+    // Up direction in world space = R^T * (0,1,0) = second column of R^T
+    float up_x = ir01;
+    float up_y = ir11;
+    float up_z = ir21;
+
+    CameraVectors cam{};
+    cam.position[0] = px;  cam.position[1] = py;  cam.position[2] = pz;
+    cam.target[0] = px + fwd_x;
+    cam.target[1] = py + fwd_y;
+    cam.target[2] = pz + fwd_z;
+    cam.up[0] = up_x;  cam.up[1] = up_y;  cam.up[2] = up_z;
+    return cam;
+}
+
+// ---------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " [options]" << std::endl;
-    std::cout << "\nOptions:" << std::endl;
-    std::cout << "  --serial          Use serial loading (default: parallel)" << std::endl;
-    std::cout << "  --no-taskgraph    Disable task graph optimization" << std::endl;
-    std::cout << "  --threads N       Number of threads (default: auto)" << std::endl;
-    std::cout << "  --width W         Image width (default: 1280)" << std::endl;
-    std::cout << "  --height H        Image height (default: 720)" << std::endl;
-    std::cout << "  --output FILE     Output filename (default: kitchen_render.png)" << std::endl;
-    std::cout << "  --help            Show this help" << std::endl;
+    std::cout << "Usage: " << progName << " [options]\n\n"
+              << "Options:\n"
+              << "  --pbrt FILE       PBRT scene file (default: models/kitchen/scene-v4.pbrt)\n"
+              << "  --serial          Use serial loading (default: parallel)\n"
+              << "  --threads N       Number of threads (default: auto)\n"
+              << "  --output FILE     Output filename (default: kitchen_render.png)\n"
+              << "  --samples N       Override sample count from PBRT file\n"
+              << "  --help            Show this help\n";
 }
 
 struct TestConfig {
-    bool enableParallel = true;
-    bool enableTaskGraph = true;
-    int numThreads = 0;
-    int width = 1280;
-    int height = 720;
+    std::string pbrtFile   = "models/kitchen/scene-v4.pbrt";
+    bool enableParallel    = true;
+    int  numThreads        = 0;
     std::string outputFile = "kitchen_render.png";
+    int  samplesOverride   = 0;
 };
 
 TestConfig parseArgs(int argc, char* argv[]) {
     TestConfig config;
-    
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
-        if (arg == "--serial") {
+        if (arg == "--pbrt" && i + 1 < argc) {
+            config.pbrtFile = argv[++i];
+        } else if (arg == "--serial") {
             config.enableParallel = false;
-        } else if (arg == "--no-taskgraph") {
-            config.enableTaskGraph = false;
         } else if (arg == "--threads" && i + 1 < argc) {
             config.numThreads = std::stoi(argv[++i]);
-        } else if (arg == "--width" && i + 1 < argc) {
-            config.width = std::stoi(argv[++i]);
-        } else if (arg == "--height" && i + 1 < argc) {
-            config.height = std::stoi(argv[++i]);
         } else if (arg == "--output" && i + 1 < argc) {
             config.outputFile = argv[++i];
+        } else if (arg == "--samples" && i + 1 < argc) {
+            config.samplesOverride = std::stoi(argv[++i]);
         } else if (arg == "--help") {
             printUsage(argv[0]);
             std::exit(0);
         }
     }
-    
     return config;
 }
 
-std::vector<std::string> findKitchenMeshes(const std::string& kitchenDir) {
-    std::vector<std::string> meshFiles;
-    fs::path modelsPath = fs::path(kitchenDir) / "models";
-    
-    if (!fs::exists(modelsPath)) {
-        std::cerr << "Error: Kitchen models directory not found: " << modelsPath << std::endl;
-        return meshFiles;
-    }
-    
-    for (const auto& entry : fs::directory_iterator(modelsPath)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".ply") {
-            meshFiles.push_back(entry.path().string());
-        }
-    }
-    
-    std::sort(meshFiles.begin(), meshFiles.end());
-    return meshFiles;
-}
-
 int main(int argc, char* argv[]) {
-    std::cout << "========================================" << std::endl;
-    std::cout << "    Kitchen Scene Rendering Test" << std::endl;
-    std::cout << "========================================" << std::endl;
-    std::cout << "C++20 + Taskflow + Zero-Copy + VLR" << std::endl;
-    std::cout << std::endl;
-    
+    std::cout << "========================================\n"
+              << "    Kitchen Scene Rendering Test\n"
+              << "========================================\n"
+              << "PBRT v4 + Taskflow + VLR Wavefront\n\n";
+
     TestConfig config = parseArgs(argc, argv);
-    
-    // Find kitchen directory
-    std::string kitchenDir = "models/kitchen";
-    if (!fs::exists(kitchenDir)) {
-        std::cerr << "Error: Kitchen directory not found: " << kitchenDir << std::endl;
-        std::cerr << "Please ensure the kitchen scene is in models/kitchen/" << std::endl;
+
+    if (!fs::exists(config.pbrtFile)) {
+        std::cerr << "Error: PBRT file not found: " << config.pbrtFile << "\n";
         return 1;
     }
-    
-    // Find all PLY meshes
-    std::cout << "Scanning for kitchen meshes..." << std::endl;
-    auto meshFiles = findKitchenMeshes(kitchenDir);
-    
-    if (meshFiles.empty()) {
-        std::cerr << "Error: No PLY meshes found in " << kitchenDir << "/models" << std::endl;
-        return 1;
-    }
-    
-    std::cout << "Found " << meshFiles.size() << " PLY meshes" << std::endl;
-    std::cout << std::endl;
-    
-    // Initialize VLR renderer
-    std::cout << "Initializing VLR renderer..." << std::endl;
+
+    // ------------------------------------------------------------------
+    // Phase 1: Initialize VLR renderer (use default resolution; will be
+    //          refined after PBRT parsing returns film settings)
+    // ------------------------------------------------------------------
     VLRRenderer::Config renderConfig;
-    renderConfig.width = config.width;
-    renderConfig.height = config.height;
+    renderConfig.width      = 1280;
+    renderConfig.height     = 720;
     renderConfig.maxBounces = 8;
     renderConfig.maxSamples = 64;
-    
+
     VLRRenderer renderer;
     if (!renderer.initialize(renderConfig)) {
-        std::cerr << "Failed to initialize VLR renderer" << std::endl;
+        std::cerr << "Failed to initialize VLR renderer\n";
         return 1;
     }
-    std::cout << "Renderer initialized: " << config.width << "x" << config.height << std::endl;
-    
-    // Create VLR scene
+
     VLRScene scene = renderer.createScene();
     if (!scene) {
-        std::cerr << "Failed to create VLR scene" << std::endl;
+        std::cerr << "Failed to create VLR scene\n";
         return 1;
     }
     renderer.setScene(scene);
-    std::cout << "VLR scene created" << std::endl;
-    std::cout << std::endl;
-    
-    // Create scene loader
+
+    // ------------------------------------------------------------------
+    // Phase 2: Load scene geometry + retrieve camera/film from PBRT
+    // ------------------------------------------------------------------
     SceneLoader loader(renderer);
-    
-    // Configure loading options
+
     SceneLoader::LoadOptions loadOptions;
-    loadOptions.triangulate = true;
-    loadOptions.generateNormals = true;
-    loadOptions.optimizeMeshes = true;
-    loadOptions.scale = 1.0f;
-    
-    // Parallel configuration
-    loadOptions.enableParallel = config.enableParallel;
-    loadOptions.numThreads = config.numThreads;
-    loadOptions.enableTaskGraph = config.enableTaskGraph;
-    loadOptions.showTaskGraph = false;
-    loadOptions.appendMode = false;  // First load clears scene
-    
-    std::cout << "=== Loading Configuration ===" << std::endl;
-    std::cout << "Mode: " << (config.enableParallel ? "Parallel" : "Serial") << std::endl;
-    if (config.enableParallel) {
-        std::cout << "Task Graph: " << (config.enableTaskGraph ? "Enabled" : "Disabled") << std::endl;
-        std::cout << "Threads: " << (config.numThreads == 0 ? "Auto" : std::to_string(config.numThreads)) << std::endl;
-    }
-    std::cout << std::endl;
-    
-    // Load kitchen meshes (limit to first 50 for stability)
-    std::cout << "Loading kitchen scene..." << std::endl;
-    size_t maxMeshesToLoad = (std::min)(static_cast<size_t>(50), meshFiles.size());
-    std::cout << "Loading first " << maxMeshesToLoad << " meshes (out of " << meshFiles.size() << " total)" << std::endl;
-    
+    loadOptions.enableParallel  = config.enableParallel;
+    loadOptions.numThreads      = config.numThreads;
+    loadOptions.enableTaskGraph = true;
+    loadOptions.showTaskGraph   = false;
+    loadOptions.appendMode      = false;
+
+    PbrtCamera pbrtCamera;
+    PbrtFilm   pbrtFilm;
+
+    std::cout << "Loading PBRT scene: " << config.pbrtFile << "\n";
+    std::cout << "  CWD: " << fs::current_path().string() << "\n";
     auto loadStart = std::chrono::high_resolution_clock::now();
-    
-    size_t successCount = 0;
-    size_t failCount = 0;
-    
-    for (size_t i = 0; i < maxMeshesToLoad; ++i) {
-        const auto& meshFile = meshFiles[i];
-        
-        // After first load, use append mode
-        if (i > 0) {
-            loadOptions.appendMode = true;
-        }
-        
-        if (loader.loadScene(meshFile, loadOptions)) {
-            ++successCount;
-            if ((i + 1) % 10 == 0) {
-                std::cout << "  Loaded " << (i + 1) << "/" << maxMeshesToLoad << " meshes..." << std::endl;
-            }
-        } else {
-            ++failCount;
-            std::cerr << "Warning: Failed to load " << meshFile << std::endl;
-        }
+
+    if (!loader.loadPbrtScene(config.pbrtFile, loadOptions, &pbrtCamera, &pbrtFilm)) {
+        std::cerr << "Failed to load PBRT scene\n";
+        return 1;
     }
-    
+
     auto loadEnd = std::chrono::high_resolution_clock::now();
     double loadTime = std::chrono::duration<double>(loadEnd - loadStart).count();
-    
-    std::cout << std::endl;
-    std::cout << "=== Loading Results ===" << std::endl;
-    std::cout << "Successfully loaded: " << successCount << " meshes" << std::endl;
-    std::cout << "Failed: " << failCount << " meshes" << std::endl;
-    std::cout << "Total loading time: " << loadTime * 1000.0 << " ms" << std::endl;
-    std::cout << "Average per mesh: " << (loadTime * 1000.0 / maxMeshesToLoad) << " ms" << std::endl;
-    
-    // Get statistics from last load
-    const auto& stats = loader.getStatistics();
-    std::cout << "\n=== Last Load Statistics ===" << std::endl;
-    std::cout << "Load time: " << stats.loadTime * 1000.0 << " ms" << std::endl;
-    std::cout << "Threads used: " << stats.threadsUsed << std::endl;
-    std::cout << "Total tasks: " << stats.totalTasks << std::endl;
-    std::cout << "Parallel tasks: " << stats.parallelTasks << std::endl;
-    std::cout << "Total meshes in scene: " << loader.getMeshCount() << std::endl;
-    std::cout << "Total materials: " << loader.getMaterialCount() << std::endl;
-    std::cout << std::endl;
-    
-    // Export task graph if enabled
-    if (config.enableParallel && config.enableTaskGraph) {
-        std::string graphFile = "kitchen_taskgraph.dot";
-        loader.exportTaskGraph(graphFile);
-        std::cout << "Task graph exported to: " << graphFile << std::endl;
-        std::cout << "Visualize with: dot -Tpng " << graphFile << " -o kitchen_taskgraph.png" << std::endl;
-        std::cout << std::endl;
-    }
-    
-    // Get scene bounds
-    float boundsMin[3], boundsMax[3];
-    loader.getSceneBounds(boundsMin, boundsMax);
-    std::cout << "=== Scene Bounds ===" << std::endl;
-    std::cout << "Min: (" << boundsMin[0] << ", " << boundsMin[1] << ", " << boundsMin[2] << ")" << std::endl;
-    std::cout << "Max: (" << boundsMax[0] << ", " << boundsMax[1] << ", " << boundsMax[2] << ")" << std::endl;
-    float sceneSize[3] = {
-        boundsMax[0] - boundsMin[0],
-        boundsMax[1] - boundsMin[1],
-        boundsMax[2] - boundsMin[2]
-    };
-    std::cout << "Size: (" << sceneSize[0] << ", " << sceneSize[1] << ", " << sceneSize[2] << ")" << std::endl;
-    std::cout << std::endl;
-    
-    // Set up camera using auto-calculated position
-    float cameraPos[3], targetPos[3];
-    loader.getSuggestedCameraPosition(cameraPos, targetPos);
-    float upVec[] = {0.0f, 1.0f, 0.0f};
-    float fov = 45.0f;
-    
-    std::cout << "Setting up camera..." << std::endl;
-    std::cout << "Position: (" << cameraPos[0] << ", " << cameraPos[1] << ", " << cameraPos[2] << ")" << std::endl;
-    std::cout << "FOV: " << fov << " degrees" << std::endl;
-    float aspect = static_cast<float>(config.width) / static_cast<float>(config.height);
-    renderer.setCamera(cameraPos, targetPos, upVec, fov, aspect);
-    std::cout << std::endl;
-    
-    // Add lighting to the scene (positioned relative to scene bounds)
-    std::cout << "Setting up lighting..." << std::endl;
-    
-    // Calculate scene center and size for light positioning
-    float sceneCenter[3] = {
-        (boundsMin[0] + boundsMax[0]) * 0.5f,
-        (boundsMin[1] + boundsMax[1]) * 0.5f,
-        (boundsMin[2] + boundsMax[2]) * 0.5f
-    };
-    float maxSize = (std::max)({sceneSize[0], sceneSize[1], sceneSize[2]});
-    
-    // Add environment light (soft ambient illumination)
+
+    int width  = static_cast<int>(pbrtFilm.xResolution);
+    int height = static_cast<int>(pbrtFilm.yResolution);
+    int spp    = config.samplesOverride > 0
+                     ? config.samplesOverride
+                     : static_cast<int>(renderConfig.maxSamples);
+
+    std::cout << "  Resolution: " << width << "x" << height << "\n"
+              << "  FOV: " << pbrtCamera.fov << " deg\n"
+              << "  Samples: " << spp << "\n"
+              << "  Meshes: " << loader.getMeshCount()
+              << ", Materials: " << loader.getMaterialCount()
+              << ", Time: " << loadTime * 1000.0 << " ms\n\n";
+
+    // ------------------------------------------------------------------
+    // Phase 3: Set camera from PBRT Transform matrix
+    // ------------------------------------------------------------------
+    CameraVectors cam = cameraFromPbrtTransform(pbrtCamera.cameraToWorld);
+    float aspect = static_cast<float>(width) / static_cast<float>(height);
+
+    std::cout << "=== Camera (from PBRT) ===\n"
+              << "  Position: (" << cam.position[0] << ", "
+              << cam.position[1] << ", " << cam.position[2] << ")\n"
+              << "  Target:   (" << cam.target[0] << ", "
+              << cam.target[1] << ", " << cam.target[2] << ")\n"
+              << "  Up:       (" << cam.up[0] << ", "
+              << cam.up[1] << ", " << cam.up[2] << ")\n"
+              << "  FOV: " << pbrtCamera.fov << " deg, Aspect: " << aspect << "\n\n";
+
+    renderer.setCamera(cam.position, cam.target, cam.up, pbrtCamera.fov, aspect);
+
+    // ------------------------------------------------------------------
+    // Phase 5: Lighting (use PBRT area lights already parsed; add env fallback)
+    // ------------------------------------------------------------------
     float envColor[] = {1.0f, 1.0f, 1.0f};
-    VLRResult result = vlrSetEnvironmentLight(renderer.getScene(), envColor);
-    if (result == VLRResult_Success) {
-        std::cout << "  Environment light added (intensity: 1.0)" << std::endl;
-    }
-    
-    // Add key light (main illumination from top-front, scaled to scene)
-    float keyLightPos[] = {
-        sceneCenter[0] + maxSize * 0.5f,
-        sceneCenter[1] + maxSize * 1.0f,
-        sceneCenter[2] + maxSize * 0.5f
-    };
-    float keyLightIntensity[] = {100.0f * maxSize, 100.0f * maxSize, 100.0f * maxSize};
-    result = vlrAddPointLight(renderer.getScene(), keyLightPos, keyLightIntensity);
-    if (result == VLRResult_Success) {
-        std::cout << "  Key light added at (" << keyLightPos[0] << ", " << keyLightPos[1] << ", " << keyLightPos[2] << ")" << std::endl;
-    }
-    
-    // Add fill light (softer light from side)
-    float fillLightPos[] = {
-        sceneCenter[0] - maxSize * 0.5f,
-        sceneCenter[1] + maxSize * 0.5f,
-        sceneCenter[2] + maxSize * 0.5f
-    };
-    float fillLightIntensity[] = {40.0f * maxSize, 40.0f * maxSize, 40.0f * maxSize};
-    result = vlrAddPointLight(renderer.getScene(), fillLightPos, fillLightIntensity);
-    if (result == VLRResult_Success) {
-        std::cout << "  Fill light added at (" << fillLightPos[0] << ", " << fillLightPos[1] << ", " << fillLightPos[2] << ")" << std::endl;
-    }
-    
-    std::cout << std::endl;
-    
-    // Render the scene
-    std::cout << "Rendering kitchen scene..." << std::endl;
-    std::cout << "Output: " << config.outputFile << std::endl;
-    std::cout << "Resolution: " << config.width << "x" << config.height << std::endl;
-    std::cout << "Samples per pixel: " << renderConfig.maxSamples << std::endl;
-    std::cout << std::endl;
-    
+    vlrSetEnvironmentLight(renderer.getScene(), envColor);
+
+    // ------------------------------------------------------------------
+    // Phase 6: Render
+    // ------------------------------------------------------------------
+    std::cout << "Rendering " << width << "x" << height
+              << " @ " << spp << " spp...\n";
+
     auto renderStart = std::chrono::high_resolution_clock::now();
-    
+
     if (renderer.render(config.outputFile)) {
         auto renderEnd = std::chrono::high_resolution_clock::now();
         double renderTime = std::chrono::duration<double>(renderEnd - renderStart).count();
-        
-        std::cout << "\n=== Render Complete ===" << std::endl;
-        std::cout << "Render time: " << renderTime << " seconds" << std::endl;
-        std::cout << "Output saved to: " << config.outputFile << std::endl;
-        std::cout << std::endl;
-        
-        std::cout << "=== Performance Summary ===" << std::endl;
-        std::cout << "Scene loading: " << loadTime * 1000.0 << " ms" << std::endl;
-        std::cout << "Rendering: " << renderTime << " s" << std::endl;
-        std::cout << "Total: " << (loadTime + renderTime) << " s" << std::endl;
+
+        std::cout << "\n=== Complete ===\n"
+                  << "  Load:   " << loadTime * 1000.0 << " ms\n"
+                  << "  Render: " << renderTime << " s\n"
+                  << "  Total:  " << (loadTime + renderTime) << " s\n"
+                  << "  Output: " << config.outputFile << "\n";
     } else {
-        std::cerr << "Render failed!" << std::endl;
+        std::cerr << "Render failed!\n";
         return 1;
     }
-    
+
     return 0;
 }

@@ -120,6 +120,10 @@ VLR_API VLRResult vlrCreateScene(VLRContext context, VLRScene* outScene);
 /// @param scene 场景句柄（可为 NULL，无操作）
 VLR_API void vlrDestroyScene(VLRScene scene);
 
+/// 释放 CPU 端网格几何数据（GPU 上传完成后调用以回收内存）
+/// @param scene 场景句柄
+VLR_API void vlrReleaseHostMeshData(VLRScene scene);
+
 /// 创建三角形网格
 /// @param scene 所属场景
 /// @param vertices 顶点位置数组 [x,y,z, x,y,z, ...]（3*numVertices 个 float）

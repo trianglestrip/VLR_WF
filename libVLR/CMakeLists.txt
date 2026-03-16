@@ -115,6 +115,9 @@ if(OPTIX_FOUND)
     add_dependencies(VLR trace_rays_ptx)
 endif()
 
+# Taskflow 头文件库路径（Header-Only）
+set(TASKFLOW_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/external/taskflow")
+
 # 设置目标属性
 target_include_directories(VLR PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -123,6 +126,7 @@ target_include_directories(VLR PUBLIC
     ${CMAKE_SOURCE_DIR}/external
     ${CMAKE_SOURCE_DIR}/external/tinyexr
     ${CMAKE_SOURCE_DIR}/external/tinyexr/deps/miniz
+    ${TASKFLOW_INCLUDE_DIR}
 )
 
 target_compile_options(VLR PRIVATE

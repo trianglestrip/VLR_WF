@@ -192,12 +192,16 @@ target_link_libraries(glass_metal_test PRIVATE VLR CUDA::cudart)
 # Viewer 示例程序（如果Viewer库可用）
 # ----------------------------------------------------------------------------
 if(TARGET Viewer)
+    # MSVC 需要 /utf-8 处理含中文注释的头文件
+    set(VIEWER_TEST_COMPILE_OPTIONS $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+
     # 简单的Viewer测试程序
     add_executable(simple_viewer_test viewer/examples/simple_viewer_test.cpp)
     target_include_directories(simple_viewer_test PRIVATE
         ${CMAKE_SOURCE_DIR}/viewer/include
         ${CMAKE_SOURCE_DIR}/libVLR/include
     )
+    target_compile_options(simple_viewer_test PRIVATE ${VIEWER_TEST_COMPILE_OPTIONS})
     target_link_libraries(simple_viewer_test PRIVATE Viewer VLR CUDA::cudart)
     
     # 零拷贝性能基准测试（需要直接链接Assimp）
@@ -208,6 +212,7 @@ if(TARGET Viewer)
             ${CMAKE_SOURCE_DIR}/viewer/include
             ${CMAKE_SOURCE_DIR}/viewer/external/assimp/include
         )
+        target_compile_options(zero_copy_benchmark PRIVATE ${VIEWER_TEST_COMPILE_OPTIONS})
         target_link_libraries(zero_copy_benchmark PRIVATE ${ASSIMP_LIB_RELEASE})
         message(STATUS "[VLR] 零拷贝基准测试已启用: zero_copy_benchmark")
     endif()
@@ -218,6 +223,7 @@ if(TARGET Viewer)
         ${CMAKE_SOURCE_DIR}/viewer/include
         ${CMAKE_SOURCE_DIR}/libVLR/include
     )
+    target_compile_options(parallel_benchmark PRIVATE ${VIEWER_TEST_COMPILE_OPTIONS})
     target_link_libraries(parallel_benchmark PRIVATE Viewer VLR CUDA::cudart)
     
     # Kitchen场景渲染测试（295个PLY网格）
@@ -226,6 +232,7 @@ if(TARGET Viewer)
         ${CMAKE_SOURCE_DIR}/viewer/include
         ${CMAKE_SOURCE_DIR}/libVLR/include
     )
+    target_compile_options(kitchen_render_test PRIVATE ${VIEWER_TEST_COMPILE_OPTIONS})
     target_link_libraries(kitchen_render_test PRIVATE Viewer VLR CUDA::cudart)
     
     message(STATUS "[VLR] Viewer测试程序已启用: simple_viewer_test, zero_copy_benchmark, parallel_benchmark, kitchen_render_test")
