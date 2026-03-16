@@ -705,6 +705,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
 }
 
 /// 采样导体微表面反射 BSDF（GGX VNDF + FresnelConductor）- 各向同性
+/// dirInLocal = V (观察方向, 入射光反方向), dirOutLocal = L (采样反射方向)
 CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     const SampledSpectrum& coeffR,
     const SampledSpectrum& eta,
@@ -715,8 +716,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     float u0, float u1,
     BSDFSampleResult* result) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    if (NdotL <= 0.0f) {
+    float NdotV = dot(dirInLocal, geomNormalLocal);
+    if (NdotV <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
@@ -733,8 +734,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     }
 
     Vector3D dirOutLocal = 2.0f * VdotH * H - dirInLocal;
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
-    if (NdotV <= 0.0f) {
+    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    if (NdotL <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
@@ -743,13 +744,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     float NdotH = dot(H, geomNormalLocal);
     float alpha2 = alpha * alpha;
     float D = GGX_D(NdotH, alpha2);
-    float G1_v = GGX_G1(NdotV, alpha2);
-    float G1_l = GGX_G1(NdotL, alpha2);
-    float G = G1_l * G1_v;
+    float G1_V = GGX_G1(NdotV, alpha2);
+    float G1_L = GGX_G1(NdotL, alpha2);
 
-    float VdotH_clamped = ::vlr::vlr_max(VdotH, 1e-6f);
-    // VNDF PDF: G1 应使用观察方向 dirInLocal，即 G1(NdotL)
-    float pdf = D * G1_l * NdotV / (4.0f * VdotH_clamped);
+    // VNDF PDF: pdf(L) = D(H) * G1(V) / (4 * N·V)
+    float NdotV_clamped = ::vlr::vlr_max(NdotV, 1e-6f);
+    float pdf = D * G1_V / (4.0f * NdotV_clamped);
 
     result->dirLocal = dirOutLocal;
     result->pdf = pdf;
@@ -760,12 +760,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     float cosTheta = std::abs(VdotH);
     for (int i = 0; i < NumSpectralSamples; ++i) {
         float fresnelValue = FresnelConductor(cosTheta, eta.values[i], kappa.values[i]);
-        F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);  // Clamp 到 [0,1] 确保能量守恒
+        F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);
     }
 
-    float denom = 4.0f * NdotL * NdotV;
+    // f = coeffR * F * D * G / (4 * N·V * N·L)
+    float denom = 4.0f * NdotV * NdotL;
     if (denom > 1e-7f) {
-        float spec = D * G / denom;
+        float spec = D * G1_V * G1_L / denom;
         for (int i = 0; i < NumSpectralSamples; ++i) {
             result->f.values[i] = coeffR.values[i] * F.values[i] * spec;
         }
@@ -775,6 +776,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
 }
 
 /// 采样导体微表面反射 BSDF（各向异性 GGX VNDF + FresnelConductor）
+/// dirInLocal = V (观察方向), dirOutLocal = L (采样反射方向)
 CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
     const SampledSpectrum& coeffR,
     const SampledSpectrum& eta,
@@ -785,8 +787,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
     float u0, float u1,
     BSDFSampleResult* result) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    if (NdotL <= 0.0f) {
+    float NdotV = dot(dirInLocal, geomNormalLocal);
+    if (NdotV <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
@@ -802,8 +804,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
     }
 
     Vector3D dirOutLocal = 2.0f * VdotH * H - dirInLocal;
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
-    if (NdotV <= 0.0f) {
+    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    if (NdotL <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
@@ -811,16 +813,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
 
     float NdotH = dot(H, geomNormalLocal);
     float HdotX = H.x, HdotY = H.y;
-    float LdotX = dirInLocal.x, LdotY = dirInLocal.y;
-    float VdotX = dirOutLocal.x, VdotY = dirOutLocal.y;
+    float VdotX = dirInLocal.x, VdotY = dirInLocal.y;
+    float LdotX = dirOutLocal.x, LdotY = dirOutLocal.y;
 
     float D = GGX_D_Aniso(NdotH, HdotX, HdotY, alphaX, alphaY);
-    float G1_l = GGX_G1_Aniso(NdotL, LdotX, LdotY, alphaX, alphaY);
-    float G1_v = GGX_G1_Aniso(NdotV, VdotX, VdotY, alphaX, alphaY);
-    float G = G1_l * G1_v;
+    float G1_V = GGX_G1_Aniso(NdotV, VdotX, VdotY, alphaX, alphaY);
+    float G1_L = GGX_G1_Aniso(NdotL, LdotX, LdotY, alphaX, alphaY);
 
-    float VdotH_clamped = ::vlr::vlr_max(VdotH, 1e-6f);
-    float pdf = D * G1_l * NdotV / (4.0f * VdotH_clamped);
+    // VNDF PDF: pdf(L) = D(H) * G1(V) / (4 * N·V)
+    float NdotV_clamped = ::vlr::vlr_max(NdotV, 1e-6f);
+    float pdf = D * G1_V / (4.0f * NdotV_clamped);
 
     result->dirLocal = dirOutLocal;
     result->pdf = pdf;
@@ -834,9 +836,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
         F.values[i] = ::vlr::vlr_min(1.0f, fresnelValue);
     }
 
-    float denom = 4.0f * NdotL * NdotV;
+    // f = coeffR * F * D * G / (4 * N·V * N·L)
+    float denom = 4.0f * NdotV * NdotL;
     if (denom > 1e-7f) {
-        float spec = D * G / denom;
+        float spec = D * G1_V * G1_L / denom;
         for (int i = 0; i < NumSpectralSamples; ++i) {
             result->f.values[i] = coeffR.values[i] * F.values[i] * spec;
         }
@@ -846,64 +849,65 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
 }
 
 /// MicrofacetReflection BSDF 的 PDF（各向同性）
+/// dirInLocal = V (观察方向), dirOutLocal = L (反射方向)
 CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF(
     float roughness,
     const Vector3D& dirInLocal,
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
-    if (NdotL <= 0.0f || NdotV <= 0.0f)
+    float NdotV = dot(dirInLocal, geomNormalLocal);
+    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    if (NdotV <= 0.0f || NdotL <= 0.0f)
         return 0.0f;
 
     Vector3D halfSum = dirInLocal + dirOutLocal;
     float halfLenSq = dot(halfSum, halfSum);
     if (halfLenSq < 1e-12f)
         return 0.0f;
-    
+
     Vector3D halfVec = normalize(halfSum);
     float NdotH = dot(halfVec, geomNormalLocal);
-    float VdotH = dot(dirOutLocal, halfVec);
-    
+
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
     float D = GGX_D(NdotH, alpha2);
-    // VNDF PDF: 应使用观察方向 G1(V)，即 dirInLocal 的 G1，即 G1(NdotL)
-    float G1_v = GGX_G1(NdotL, alpha2);
+    // VNDF PDF: pdf(L) = D(H) * G1(V) / (4 * N·V)
+    float G1_V = GGX_G1(NdotV, alpha2);
 
-    float VdotHSafe = ::vlr::vlr_max(VdotH, 1e-6f);
-    return D * G1_v * NdotV / (4.0f * VdotHSafe);
+    float NdotV_clamped = ::vlr::vlr_max(NdotV, 1e-6f);
+    return D * G1_V / (4.0f * NdotV_clamped);
 }
 
 /// MicrofacetReflection BSDF 的 PDF（各向异性）
+/// dirInLocal = V (观察方向), dirOutLocal = L (反射方向)
 CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF_Aniso(
     float alphaX, float alphaY,
     const Vector3D& dirInLocal,
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
-    if (NdotL <= 0.0f || NdotV <= 0.0f)
+    float NdotV = dot(dirInLocal, geomNormalLocal);
+    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    if (NdotV <= 0.0f || NdotL <= 0.0f)
         return 0.0f;
 
     Vector3D halfSum = dirInLocal + dirOutLocal;
     float halfLenSq = dot(halfSum, halfSum);
     if (halfLenSq < 1e-12f)
         return 0.0f;
-    
+
     Vector3D halfVec = normalize(halfSum);
     float NdotH = dot(halfVec, geomNormalLocal);
-    float VdotH = dot(dirOutLocal, halfVec);
+    float VdotX = dirInLocal.x, VdotY = dirInLocal.y;
     float HdotX = halfVec.x, HdotY = halfVec.y;
-    float LdotX = dirInLocal.x, LdotY = dirInLocal.y;
 
     float D = GGX_D_Aniso(NdotH, HdotX, HdotY, alphaX, alphaY);
-    float G1_l = GGX_G1_Aniso(NdotL, LdotX, LdotY, alphaX, alphaY);
+    // VNDF PDF: pdf(L) = D(H) * G1(V) / (4 * N·V)
+    float G1_V = GGX_G1_Aniso(NdotV, VdotX, VdotY, alphaX, alphaY);
 
-    float VdotHSafe = ::vlr::vlr_max(VdotH, 1e-6f);
-    return D * G1_l * NdotV / (4.0f * VdotHSafe);
+    float NdotV_clamped = ::vlr::vlr_max(NdotV, 1e-6f);
+    return D * G1_V / (4.0f * NdotV_clamped);
 }
 
 
