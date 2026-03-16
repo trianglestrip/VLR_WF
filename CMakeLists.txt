@@ -39,6 +39,9 @@ set_property(CACHE VLR_CUDA_ARCH PROPERTY STRINGS "75" "80" "86" "89" "90")
 # 调试选项：NaN 追踪（启用时在 GPU 内核中打印 NaN 检测信息）
 set(VLR_DEBUG_NAN_TRACKING OFF CACHE BOOL "启用 NaN 调试追踪（每帧打印前 5 次 NaN 检测）")
 
+# 性能统计：场景准备各阶段耗时输出
+set(VLR_PROFILE_SCENE_PREPARE ON CACHE BOOL "启用场景准备性能统计（GAS/Bounds/Aggregate/Upload/IAS 耗时）")
+
 # OptiX SDK 路径（默认：ProgramData 安装位置）
 set(OPTIX_PATH "C:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0" CACHE PATH "OptiX SDK 安装路径")
 if(DEFINED ENV{OPTIX_PATH})

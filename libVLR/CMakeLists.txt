@@ -175,6 +175,12 @@ if(VLR_USE_FAST_RNG)
     message(STATUS "[libVLR] VLR_USE_FAST_RNG 已启用（使用 xorshift RNG）")
 endif()
 
+# 场景准备性能统计（cmake -DVLR_PROFILE_SCENE_PREPARE=ON）
+if(VLR_PROFILE_SCENE_PREPARE)
+    target_compile_definitions(VLR PRIVATE VLR_PROFILE_SCENE_PREPARE)
+    message(STATUS "[libVLR] VLR_PROFILE_SCENE_PREPARE 已启用（输出场景准备各阶段耗时）")
+endif()
+
 # ----------------------------------------------------------------------------
 # PTX 输出：已通过 PTX_OUTPUT_DIR 直接输出到 bin/GPU_kernels/，无需复制
 # ----------------------------------------------------------------------------

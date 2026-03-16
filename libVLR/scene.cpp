@@ -29,6 +29,7 @@
 #include <cmath>
 #include <mutex>
 #include <numeric>
+#include <chrono>
 
 #ifdef _WIN32
 #undef min
@@ -1302,41 +1303,96 @@ void Scene::updateToGPU() {
 // ============================================================================
 
 void Scene::prepareSceneParallel() {
+#ifdef VLR_PROFILE_SCENE_PREPARE
+    using Clock = std::chrono::high_resolution_clock;
+    auto wallStart = Clock::now();
+    double gasMs = 0, boundsMs = 0, aggMs = 0, uploadMs = 0, iasMs = 0;
+#endif
+
     tf::Executor executor;
     tf::Taskflow taskflow;
 
     AggregatedMeshData agg;
 
-    // Phase 1（三个独立任务，可完全并行）
-    auto gasTask = taskflow.emplace([this]() {
+    auto gasTask = taskflow.emplace([&]() {
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        auto t0 = Clock::now();
+#endif
         buildGeometryAccelerationStructures();
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        gasMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+#endif
     }).name("buildGAS");
 
-    auto boundsTask = taskflow.emplace([this]() {
+    auto boundsTask = taskflow.emplace([&]() {
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        auto t0 = Clock::now();
+#endif
         computeSceneBounds();
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        boundsMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+#endif
     }).name("computeBounds");
 
-    auto aggTask = taskflow.emplace([this, &agg]() {
+    auto aggTask = taskflow.emplace([&]() {
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        auto t0 = Clock::now();
+#endif
         agg = aggregateMeshData();
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        aggMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+#endif
     }).name("aggregateData");
 
-    // Phase 2: Upload 依赖 Bounds + Aggregate 完成
-    auto uploadTask = taskflow.emplace([this, &agg]() {
+    auto uploadTask = taskflow.emplace([&]() {
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        auto t0 = Clock::now();
+#endif
         uploadAggregatedData(agg);
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        uploadMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+#endif
     }).name("uploadGPU");
 
     boundsTask.precede(uploadTask);
     aggTask.precede(uploadTask);
 
-    // Phase 3: IAS 依赖 GAS + Upload 完成
-    auto iasTask = taskflow.emplace([this]() {
+    auto iasTask = taskflow.emplace([&]() {
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        auto t0 = Clock::now();
+#endif
         buildInstanceAccelerationStructure();
+#ifdef VLR_PROFILE_SCENE_PREPARE
+        iasMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+#endif
     }).name("buildIAS");
 
     gasTask.precede(iasTask);
     uploadTask.precede(iasTask);
 
     executor.run(taskflow).wait();
+
+#ifdef VLR_PROFILE_SCENE_PREPARE
+    double wallMs = std::chrono::duration<double, std::milli>(Clock::now() - wallStart).count();
+    double serialSum = gasMs + boundsMs + aggMs + uploadMs + iasMs;
+    printf("\n");
+    printf("[VLR-Profile] ===== Scene Prepare Timing =====\n");
+    printf("[VLR-Profile]   buildGAS         : %8.2f ms  (%zu meshes, %zu valid)\n",
+           gasMs, m_meshes.size(), m_gasHandles.size());
+    printf("[VLR-Profile]   computeBounds    : %8.2f ms  (%zu instances)\n",
+           boundsMs, m_instanceRecords.size());
+    printf("[VLR-Profile]   aggregateData    : %8.2f ms\n", aggMs);
+    printf("[VLR-Profile]   uploadGPU        : %8.2f ms\n", uploadMs);
+    printf("[VLR-Profile]   buildIAS         : %8.2f ms  (%zu GAS handles)\n",
+           iasMs, m_gasHandles.size());
+    printf("[VLR-Profile]   ---------------------------------\n");
+    printf("[VLR-Profile]   Serial sum       : %8.2f ms\n", serialSum);
+    printf("[VLR-Profile]   Wall clock       : %8.2f ms\n", wallMs);
+    printf("[VLR-Profile]   Parallel speedup : %8.2fx\n",
+           wallMs > 0 ? serialSum / wallMs : 0.0);
+    printf("[VLR-Profile] ================================\n\n");
+    fflush(stdout);
+#endif
 }
 
 // ============================================================================
