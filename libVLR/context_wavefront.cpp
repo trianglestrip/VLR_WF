@@ -22,6 +22,28 @@
 
 namespace vlr {
 
+// ============================================================================
+// Wavefront 辅助函数
+// ============================================================================
+
+shared::WavefrontLaunchParameters* Context::getDeviceLaunchParams() {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return nullptr;
+    return static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+}
+
+void Context::uploadLaunchParamsToDevice() {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.launchParamsBuffer) return;
+    CUDA_CHECK(cudaMemcpy(
+        wf.launchParamsBuffer,
+        &wf.launchParams,
+        sizeof(shared::WavefrontLaunchParameters),
+        cudaMemcpyHostToDevice
+    ));
+}
+
+// ============================================================================
 
 void Context::allocateWavefrontBuffers(uint32_t width, uint32_t height) {
     auto& wf = m_optix.wavefrontPathTracing;
@@ -1001,15 +1023,12 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
 
 void Context::launchGenerateRays(uint32_t numPaths) {
     auto& wf = m_optix.wavefrontPathTracing;
-    if (!wf.launchParamsBuffer) return;
-
-    // ???????? grid/block????generateRays CUDA kernel
     uint32_t width = wf.currentWidth;
     uint32_t height = wf.currentHeight;
     if (width == 0 || height == 0) return;
 
-    shared::WavefrontLaunchParameters* d_params =
-        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
+    auto* d_params = getDeviceLaunchParams();
+    if (!d_params) return;
 
     launchGenerateRaysKernel(d_params, width, height, m_stream);
 }
@@ -1017,37 +1036,12 @@ void Context::launchGenerateRays(uint32_t numPaths) {
 void Context::launchTraceRays(uint32_t numActivePaths) {
     auto& wf = m_optix.wavefrontPathTracing;
 
-    // ?? optixLaunch ?? OptiX Ray Generation ??????SBT ??launchParams
     if (!wf.pipeline) {
         throw std::runtime_error("launchTraceRays: OptiX pipeline not initialized, call createWavefrontPrograms first");
     }
-    if (!wf.launchParamsBuffer) return;
-    if (numActivePaths == 0) return;
+    if (!wf.launchParamsBuffer || numActivePaths == 0) return;
 
-    // ?????? launchParams ????????????
-    static bool firstCall = true;
-    if (firstCall) {
-        VLR_DEBUG_PRINTF("[VLR] launchTraceRays: Re-uploading entire launchParams to ensure consistency\n");
-        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: counter ptr=%p, imageSize=(%u,%u), maxPathLength=%u\n",
-               wf.launchParams.activePathQueue.counter,
-               wf.launchParams.imageSize.x, wf.launchParams.imageSize.y,
-               wf.launchParams.maxPathLength);
-        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: pathStateBuffer=%p, topGroup=%llu\n",
-               wf.launchParams.pathStateBuffer, (unsigned long long)wf.launchParams.topGroup);
-        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: sizeof(WavefrontLaunchParameters)=%zu\n",
-               sizeof(shared::WavefrontLaunchParameters));
-        VLR_DEBUG_PRINTF("[VLR] launchTraceRays HOST: offsetof(pathStateBuffer)=%zu, offsetof(activePathQueue)=%zu\n",
-               offsetof(shared::WavefrontLaunchParameters, pathStateBuffer),
-               offsetof(shared::WavefrontLaunchParameters, activePathQueue));
-        firstCall = false;
-    }
-    
-    CUDA_CHECK(cudaMemcpy(
-        wf.launchParamsBuffer,
-        &wf.launchParams,
-        sizeof(shared::WavefrontLaunchParameters),
-        cudaMemcpyHostToDevice
-    ));
+    uploadLaunchParamsToDevice();
     
     // ????????
     CUDA_CHECK(cudaStreamSynchronize(m_stream));
@@ -1127,60 +1121,37 @@ void Context::launchTraceShadowRays(uint32_t numShadowRays) {
 }
 
 void Context::launchProcessHits(uint32_t numActivePaths) {
-    auto& wf = m_optix.wavefrontPathTracing;
-    if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
-
-    shared::WavefrontLaunchParameters* d_params =
-        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
-
+    auto* d_params = getDeviceLaunchParams();
+    if (!d_params) return;
     launchProcessHitsKernel(d_params, numActivePaths, m_stream);
 }
 
 void Context::launchSampleLights(uint32_t numActivePaths) {
-    auto& wf = m_optix.wavefrontPathTracing;
-    if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
-
-    // ?? sampleLights CUDA kernel
-    shared::WavefrontLaunchParameters* d_params =
-        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
-
+    auto* d_params = getDeviceLaunchParams();
+    if (!d_params) return;
     launchSampleLightsKernel(d_params, numActivePaths, m_stream);
 }
 
 void Context::launchSampleBSDF(uint32_t numActivePaths) {
-    auto& wf = m_optix.wavefrontPathTracing;
-    if (!wf.launchParamsBuffer) return;
     if (numActivePaths == 0) return;
-
-    // ?? sampleBSDF CUDA kernel
-    shared::WavefrontLaunchParameters* d_params =
-        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
-
+    auto* d_params = getDeviceLaunchParams();
+    if (!d_params) return;
     launchSampleBSDFKernel(d_params, numActivePaths, m_stream);
 }
 
 void Context::launchAccumulate(uint32_t numPaths) {
-    auto& wf = m_optix.wavefrontPathTracing;
-    if (!wf.launchParamsBuffer) return;
     if (numPaths == 0) return;
-
-    // ?? accumulateResults CUDA kernel
-    shared::WavefrontLaunchParameters* d_params =
-        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
-
+    auto* d_params = getDeviceLaunchParams();
+    if (!d_params) return;
     launchAccumulateKernel(d_params, numPaths, m_stream);
 }
 
 void Context::launchRenderDebugMode(uint32_t numPixels, uint32_t debugMode) {
-    auto& wf = m_optix.wavefrontPathTracing;
-    if (!wf.launchParamsBuffer) return;
     if (numPixels == 0) return;
-
-    shared::WavefrontLaunchParameters* d_params =
-        static_cast<shared::WavefrontLaunchParameters*>(wf.launchParamsBuffer);
-
+    auto* d_params = getDeviceLaunchParams();
+    if (!d_params) return;
     launchRenderDebugModeKernel(d_params, numPixels, debugMode, m_stream);
 }
 

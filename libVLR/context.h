@@ -444,6 +444,9 @@ private:
     // 工具方法
     void checkOptixError(OptixResult result, const char* call, const char* file, int line);
     void checkCudaError(cudaError_t error, const char* call, const char* file, int line);
+
+    shared::WavefrontLaunchParameters* getDeviceLaunchParams();
+    void uploadLaunchParamsToDevice();
 };
 
 // 注意：OPTIX_CHECK 和 CUDA_CHECK 宏在 utils/optix_util.h 和 utils/cuda_util.h 中定义
