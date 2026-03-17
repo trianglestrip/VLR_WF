@@ -36,11 +36,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
     const Normal3D& geomNormalLocal,
     ::vlr::TransportMode transportMode = ::vlr::TransportMode::Radiance) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    // Use z-component (shading normal direction) for hemisphere tests
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     float dotNVdotNL = NdotL * NdotV;
 
-    // 判断是从外部进入还是从内部出射(参考materials.cu第1388行)
     bool entering = (NdotL >= 0.0f);
     float eEnter = entering ? 1.0f : ior;
     float eExit = entering ? ior : 1.0f;
@@ -56,7 +56,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
             return SampledSpectrum::Zero();
 
         Vector3D halfVec = normalize(halfSum);
-        float NdotH = dot(halfVec, geomNormalLocal);
+        float NdotH = halfVec.z;
         if (NdotH <= 0.0f)
             return SampledSpectrum::Zero();
 
@@ -99,7 +99,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
             float G1_v = GGX_G1(std::abs(NdotL), alpha2);
             float G1_l = GGX_G1(std::abs(NdotV), alpha2);
             float G_wl = G1_v * G1_l;
-            float D_wl = GGX_D(std::abs(dot(halfVec, geomNormalLocal)), alpha2);
+            float D_wl = GGX_D(std::abs(halfVec.z), alpha2);
 
             float denomSq = eEnter * dotHV_wl + eExit * dotHL_wl;
             denomSq = denomSq * denomSq;
@@ -120,18 +120,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetScatteringBSD
     return SampledSpectrum::Zero();
 }
 
-/// 计算 GGX VNDF 的 PDF：p(m) = D*G1(v,m)/(4)（用于反射/折射采样）
+/// 计算 GGX VNDF 的 PDF：p(m) = D*G1(v,m)*dotHV / |V.z|
+/// V must be in the z>0 hemisphere (post-flip for entering/exiting)
 CUDA_DEVICE_FUNCTION CUDA_INLINE float getGGXVNDFPDF(
     const Vector3D& H,
     const Vector3D& V,
-    const Normal3D& geomNormalLocal,
     float alpha2) {
     float dotHV = dot(V, H);
     if (dotHV <= 0.0f) return 0.0f;
-    float NdotV = std::abs(dot(V, geomNormalLocal));
+    float NdotV = std::abs(V.z);
     if (NdotV <= 1e-6f) return 0.0f;
-    float NdotH = dot(H, geomNormalLocal);
-    float D = GGX_D(std::abs(NdotH), alpha2);
+    float NdotH = std::abs(H.z);
+    float D = GGX_D(NdotH, alpha2);
     float G1 = GGX_G1(NdotV, alpha2);
     return D * G1 * dotHV / NdotV;
 }
@@ -148,27 +148,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
     BSDFSampleResult* result,
     ::vlr::TransportMode transportMode = ::vlr::TransportMode::Radiance) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    
-    // 判断是从外部进入(entering=true)还是从内部出射(entering=false)
-    // 参考materials.cu第1277-1284行
-    bool entering = (NdotL >= 0.0f);
+    // In shading-local coords, z-axis IS the shading normal.
+    // Use dirInLocal.z (not dot with geomNormal) to determine entering side,
+    // since VNDF sampling requires V.z > 0.
+    bool entering = (dirInLocal.z >= 0.0f);
     float eEnter = entering ? 1.0f : ior;
     float eExit = entering ? ior : 1.0f;
     float recRelIOR = eEnter / eExit;
-    
-    // 将方向转换到统一的坐标系(参考第1284行)
-    Vector3D dirV = entering ? dirInLocal : -dirInLocal;
 
-#ifdef __CUDA_ARCH__
-    // 调试输出:检查采样参数(只输出前10个路径)
-    if (blockIdx.x * blockDim.x + threadIdx.x < 10) {
-        printf("[MicrofacetScattering Sample pathIdx=%u] entering=%d, NdotL=%.3f, dirV.z=%.3f, ior=%.2f, roughness=%.4f\n",
-               blockIdx.x * blockDim.x + threadIdx.x, entering, NdotL, dirV.z, ior, roughness);
-        printf("  coeff=(%.3f,%.3f,%.3f), eEnter=%.2f, eExit=%.2f\n",
-               coeff.values[0], coeff.values[1], coeff.values[2], eEnter, eExit);
-    }
-#endif
+    // Flip to ensure dirV is in the z>0 hemisphere (required by sampleGGXVNDF)
+    Vector3D dirV = entering ? dirInLocal : -dirInLocal;
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
@@ -185,12 +174,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
     float reflectProb = F;
     bool sampleReflection = (u2 < reflectProb);
 
-#ifdef __CUDA_ARCH__
-    if (blockIdx.x * blockDim.x + threadIdx.x < 10) {
-        printf("  dotHV=%.3f, F=%.3f, reflectProb=%.3f, u2=%.3f, sampleReflection=%d\n",
-               dotHV, F, reflectProb, u2, sampleReflection);
-    }
-#endif
 
     if (sampleReflection) {
         // 反射：dirL = 2*dotHV*m - dirV（参考第1308行）
@@ -206,12 +189,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
         result->sampledBSDFType = BSDFType_MicrofacetScattering;
 
         // PDF = reflectProb / (4*dotHV) * mPDF（参考第1314-1315行）
-        float mPDF = getGGXVNDFPDF(H, dirV, geomNormalLocal, alpha2);
+        float mPDF = getGGXVNDFPDF(H, dirV, alpha2);
         float dotHV_safe = ::vlr::vlr_max(dotHV, 1e-6f);
         result->pdf = (reflectProb / (4.0f * dotHV_safe)) * mPDF;
 
-        // BSDF = coeff*F*D*G/(4*dirV.z*dirL.z)（参考第1319行）
-        float D = GGX_D(std::abs(dot(H, geomNormalLocal)), alpha2);
+        // BSDF = coeff*F*D*G/(4*dirV.z*dirL.z)
+        float D = GGX_D(std::abs(H.z), alpha2);
         float G1_v = GGX_G1(std::abs(dirV.z), alpha2);
         float G1_l = GGX_G1(std::abs(dirL.z), alpha2);
         float G = G1_v * G1_l;
@@ -219,14 +202,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
         if (denom > 1e-7f) {
             // 应用coeff系数(参考libVLR_reference第1319行)
             result->f = coeff * (F * D * G / denom);
-#ifdef __CUDA_ARCH__
-            if (blockIdx.x * blockDim.x + threadIdx.x < 10) {
-                printf("  [Reflection] dirL.z=%.3f, F=%.3f, D=%.3f, G=%.3f, denom=%.3f\n",
-                       dirL.z, F, D, G, denom);
-                printf("  BSDF=(%.4f,%.4f,%.4f)\n",
-                       result->f.values[0], result->f.values[1], result->f.values[2]);
-            }
-#endif
         } else {
             result->f = SampledSpectrum::Zero();
         }
@@ -258,20 +233,20 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
             result->f = SampledSpectrum::Zero();
             return;
         }
-        float mPDF = getGGXVNDFPDF(H, dirV, geomNormalLocal, alpha2);
+        float mPDF = getGGXVNDFPDF(H, dirV, alpha2);
         result->pdf = (1.0f - reflectProb) / denomPdfSq * mPDF * (eExit * eExit) * std::fabs(dotHL);
 
         // 直接计算BSDF,不调用evaluate(参考第1354-1370行)
         SampledSpectrum ret = SampledSpectrum::Zero();
         for (int wlIdx = 0; wlIdx < NumSpectralSamples; ++wlIdx) {
-            Normal3D m_wl = normalize(-(eEnter * dirV + eExit * dirL) * (entering ? 1.0f : -1.0f));
+            Normal3D m_wl = normalize(-(eEnter * dirV + eExit * dirL));
             float dotHV_wl = dot(dirV, m_wl);
             float dotHL_wl = dot(dirL, m_wl);
             float F_wl = FresnelDielectric(std::abs(dotHV_wl), eEnter, eExit);
             float G1_v = GGX_G1(std::abs(dirV.z), alpha2);
             float G1_l = GGX_G1(std::abs(dirL.z), alpha2);
             float G_wl = G1_v * G1_l;
-            float D_wl = GGX_D(std::abs(dot(m_wl, geomNormalLocal)), alpha2);
+            float D_wl = GGX_D(std::abs(m_wl.z), alpha2);
             float denomBsdf = eEnter * dotHV_wl + eExit * dotHL_wl;
             ret.values[wlIdx] = std::fabs(dotHV_wl * dotHL_wl) * (1.0f - F_wl) * G_wl * D_wl / (denomBsdf * denomBsdf);
         }
@@ -281,13 +256,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetScatteringBSDF(
         ret = ret * adjoint;
         result->f = ret;
 
-#ifdef __CUDA_ARCH__
-        if (blockIdx.x * blockDim.x + threadIdx.x < 10) {
-            printf("  [Refraction] dirL.z=%.3f, dotHL=%.3f, pdf=%.6f\n", dirL.z, dotHL, result->pdf);
-            printf("  BSDF=(%.4f,%.4f,%.4f), adjoint=%.2f\n",
-                   ret.values[0], ret.values[1], ret.values[2], adjoint);
-        }
-#endif
     }
 }
 
@@ -300,8 +268,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetScatteringBSDFPDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    // Use z-component (shading normal direction) for hemisphere tests
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     float dotNVdotNL = NdotL * NdotV;
 
     if (dotNVdotNL == 0.0f)
@@ -314,23 +283,28 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetScatteringBSDFPDF(
     float eEnter = entering ? 1.0f : ior;
     float eExit = entering ? ior : 1.0f;
 
+    // dirV: flipped to z>0 hemisphere (needed for VNDF PDF)
+    Vector3D dirV = entering ? dirInLocal : -dirInLocal;
+
     Normal3D m;
     if (dotNVdotNL > 0.0f) {
-        // 反射：halfVector(dirV, dirL)
-        Vector3D halfSum = dirInLocal + dirOutLocal;
+        // Reflection: half-vector of dirV and flipped dirOut
+        Vector3D dirL = entering ? dirOutLocal : -dirOutLocal;
+        Vector3D halfSum = dirV + dirL;
         float halfLenSq = dot(halfSum, halfSum);
         if (halfLenSq < 1e-12f) return 0.0f;
         m = normalize(halfSum);
     } else {
-        // 折射：m = normalize(-(eEnter*dirV + eExit*dirL) * sign)
-        m = normalize(-(eEnter * dirInLocal + eExit * dirOutLocal) * (entering ? 1.0f : -1.0f));
+        // Refraction: m = normalize(-(eEnter*dirV + eExit*dirL))
+        Vector3D dirL = entering ? dirOutLocal : -dirOutLocal;
+        m = normalize(-(eEnter * dirV + eExit * dirL));
     }
 
-    float dotHV = dot(dirInLocal, m);
+    float dotHV = dot(dirV, m);
     if (dotHV <= 0.0f)
         return 0.0f;
 
-    float mPDF = getGGXVNDFPDF(m, dirInLocal, geomNormalLocal, alpha2);
+    float mPDF = getGGXVNDFPDF(m, dirV, alpha2);
     float F = FresnelDielectric(dotHV, eEnter, eExit);
     float reflectProb = F;
 
@@ -340,7 +314,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetScatteringBSDFPDF(
         return (reflectProb / (4.0f * dotHV_safe)) * mPDF;
     } else {
         // 折射 PDF：(1-reflectProb) / (eEnter*dotHV + eExit*dotHL)^2 * mPDF * eExit^2 * |dotHL|
-        float dotHL = dot(dirOutLocal, m);
+        Vector3D dirL = entering ? dirOutLocal : -dirOutLocal;
+        float dotHL = dot(dirL, m);
         float denomPdf = eEnter * dotHV + eExit * dotHL;
         float denomPdfSq = denomPdf * denomPdf;
         if (denomPdfSq < 1e-14f) return 0.0f;

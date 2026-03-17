@@ -101,6 +101,7 @@ set(LIBVLR_CUDA_SOURCES
     GPU_kernels/accumulate.cu
     GPU_kernels/debug_rendering.cu
     GPU_kernels/kernel_launch.cu
+    GPU_kernels/tonemap.cu
 )
 
 # 注意：trace_rays.cu 仅编译为 PTX，供 OptiX 运行时加载，不参与库链接

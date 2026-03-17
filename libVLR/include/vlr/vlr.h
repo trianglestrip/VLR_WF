@@ -494,6 +494,43 @@ VLR_API void* vlrGetOutputBuffer(VLRContext context);
 
 
 // ============================================================================
+// 渐进渲染 API（用于交互式实时显示）
+// ============================================================================
+
+/// 准备渐进渲染（场景准备 + 缓冲区分配，仅需调用一次）
+/// @param context 上下文句柄
+/// @param scene 场景句柄
+/// @param width 图像宽度
+/// @param height 图像高度
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrBeginProgressive(
+    VLRContext context,
+    VLRScene scene,
+    uint32_t width,
+    uint32_t height);
+
+/// 渲染一个 sample 并累积到缓冲区
+/// @param context 上下文句柄
+/// @param outAccumFrames 输出当前累积帧数
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrRenderOneSample(
+    VLRContext context,
+    uint32_t* outAccumFrames);
+
+/// 将累积缓冲区 tonemap 到 RGBA8 设备缓冲区（供 OpenGL 显示）
+/// @param context 上下文句柄
+/// @param outRGBA8 输出设备指针（uint8_t[width*height*4]，由调用者分配）
+/// @param exposure 曝光值（默认 1.0）
+/// @param gamma gamma 校正值（默认 2.2）
+/// @return VLRResult_Success 或错误码
+VLR_API VLRResult vlrTonemapToRGBA8(
+    VLRContext context,
+    void* outRGBA8,
+    float exposure,
+    float gamma);
+
+
+// ============================================================================
 // Wavefront 优化配置
 // ============================================================================
 

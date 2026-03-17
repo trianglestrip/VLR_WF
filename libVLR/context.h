@@ -80,6 +80,11 @@ public:
         uint32_t height,
         uint32_t numSamples,
         void* outputBuffer);
+
+    // 渐进渲染接口
+    void beginProgressive(uint32_t width, uint32_t height);
+    void renderOneSample(uint32_t* outAccumFrames);
+    void tonemapToRGBA8(void* outRGBA8, float exposure, float gamma);
     
     // 降噪器配置
     void setDenoiserConfig(const DenoiserConfig& config);
@@ -318,7 +323,7 @@ private:
                 , cubTempStorageBytes(0)
                 , maxPathLength(shared::WavefrontConfig::DefaultMaxPathLength)
                 , maxNumPaths(0)
-                , useBDPT(true)
+                , useBDPT(false)
                 , usePathSorting(shared::WavefrontConfig::UsePathSorting)
                 , useMaterialQueues(shared::WavefrontConfig::UseMaterialQueues)
                 , useStreamCompaction(shared::WavefrontConfig::UseStreamCompaction)
@@ -392,6 +397,8 @@ private:
     // 降噪器
     Denoiser m_denoiser;
     DenoiserConfig m_denoiserConfig;
+    CUdeviceptr m_d_denoisedBuffer = 0;
+    uint32_t m_denoisedBufferSize = 0;
     
     // 调试状态
     VLRDebugMode m_debugMode;

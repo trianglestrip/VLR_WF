@@ -10,7 +10,7 @@
 cmake_minimum_required(VERSION 3.18)
 project(VLR_Wavefront
     VERSION 1.0.0
-    LANGUAGES CXX CUDA
+    LANGUAGES C CXX CUDA
     DESCRIPTION "VLR Wavefront Path Tracing Renderer"
 )
 
@@ -237,8 +237,63 @@ if(TARGET Viewer)
     )
     target_compile_options(kitchen_render_test PRIVATE ${VIEWER_TEST_COMPILE_OPTIONS})
     target_link_libraries(kitchen_render_test PRIVATE Viewer VLR CUDA::cudart)
-    
+
     message(STATUS "[VLR] Viewer测试程序已启用: simple_viewer_test, zero_copy_benchmark, parallel_benchmark, kitchen_render_test")
+endif()
+
+# ----------------------------------------------------------------------------
+# Interactive Progressive Viewer (GLFW + OpenGL + CUDA-GL Interop)
+# ----------------------------------------------------------------------------
+set(GLFW_ROOT "${CMAKE_SOURCE_DIR}/external/glfw")
+set(GLAD_ROOT "${CMAKE_SOURCE_DIR}/external/glad")
+set(IMGUI_ROOT "${CMAKE_SOURCE_DIR}/external/imgui")
+
+if(EXISTS "${GLFW_ROOT}/include/GLFW/glfw3.h"
+   AND EXISTS "${GLAD_ROOT}/include/glad/glad.h"
+   AND EXISTS "${IMGUI_ROOT}/imgui.h")
+
+    set(IMGUI_SOURCES
+        ${IMGUI_ROOT}/imgui.cpp
+        ${IMGUI_ROOT}/imgui_draw.cpp
+        ${IMGUI_ROOT}/imgui_tables.cpp
+        ${IMGUI_ROOT}/imgui_widgets.cpp
+        ${IMGUI_ROOT}/imgui_demo.cpp
+        ${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp
+        ${IMGUI_ROOT}/backends/imgui_impl_opengl3.cpp
+    )
+
+    add_executable(interactive_viewer
+        viewer/examples/interactive_viewer.cpp
+        ${GLAD_ROOT}/src/glad.c
+        ${IMGUI_SOURCES}
+    )
+    target_include_directories(interactive_viewer PRIVATE
+        ${CMAKE_SOURCE_DIR}/libVLR/include
+        ${GLFW_ROOT}/include
+        ${GLAD_ROOT}/include
+        ${IMGUI_ROOT}
+        ${IMGUI_ROOT}/backends
+    )
+    target_link_libraries(interactive_viewer PRIVATE
+        VLR
+        CUDA::cudart
+        ${GLFW_ROOT}/lib/glfw3dll.lib
+        opengl32
+    )
+    target_compile_options(interactive_viewer PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+    )
+
+    add_custom_command(TARGET interactive_viewer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${GLFW_ROOT}/bin/glfw3.dll"
+            "${CMAKE_SOURCE_DIR}/bin/"
+        COMMENT "Copy glfw3.dll to bin/"
+    )
+
+    message(STATUS "[VLR] Interactive Viewer enabled (GLFW + OpenGL + Dear ImGui + CUDA-GL Interop)")
+else()
+    message(STATUS "[VLR] Interactive Viewer skipped (GLFW, GLAD, or ImGui not found)")
 endif()
 
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/

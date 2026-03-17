@@ -29,16 +29,6 @@
 #include <cuda_runtime.h>
 #include <cmath>
 
-#ifndef VLR_DEBUG_SPEC_TRANS_ONEPIX
-#define VLR_DEBUG_SPEC_TRANS_ONEPIX 1
-#endif
-#ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 187
-#endif
-#ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 141
-#endif
-
 namespace {
 
 using namespace vlr;
@@ -167,28 +157,6 @@ extern "C" __global__ void sampleBSDF(
     BSDFSampleResult result;
     sampleBSDFWithU2(bsdfCtx, dirInLocal, u0, u1, u2, &result);
 
-#if VLR_DEBUG_SPEC_TRANS_ONEPIX
-    {
-        BSDFType bsdfType = getBSDFType(matDesc);
-        if (wlp.numAccumFrames <= 2 &&
-            pathState.pixelX >= 200 && pathState.pixelX <= 240 &&
-            pathState.pixelY >= 350 && pathState.pixelY <= 395 &&
-            pathState.pathLength <= 8 &&
-            bsdfType == BSDFType_SpecularTransmission) {
-            unsigned int idx = atomicAdd(&g_vlrDebugPrintCount, 1u);
-            if (idx < 40) {
-                printf("[GP] px=(%u,%u) len=%u front=%d sampled=%u wiZ=%.4f pdf=%.4f thr=(%.4f,%.4f,%.4f)\n",
-                    pathState.pixelX, pathState.pixelY,
-                    pathState.pathLength,
-                    surfPt.isFrontFace ? 1 : 0,
-                    (uint32_t)result.sampledBSDFType,
-                    result.dirLocal.z,
-                    result.pdf,
-                    pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
-            }
-        }
-    }
-#endif
 
 #ifdef VLR_DEBUG_MATERIAL
     if (pathIndex < 10) {
@@ -238,7 +206,7 @@ extern "C" __global__ void sampleBSDF(
     // ========================================================================
     // ????VLR path_tracing.cu ?????alpha *= fs * (|cosFactor| / dirPDF)
     // ?????? pdf ??clamp???? pdf ??throughput ????????
-    float cosFactor = dot(result.dirLocal, geomNormalLocal);
+    float cosFactor = result.dirLocal.z;
     float cosAbs = std::abs(cosFactor);
 
     // Safety check: If cosAbs is too small (perpendicular hit), terminate to avoid division issues
@@ -247,10 +215,20 @@ extern "C" __global__ void sampleBSDF(
         return;
     }
 
+    SampledSpectrum prevThroughput = pathState.throughput;
     if (result.isDelta) {
         pathState.throughput *= result.f / result.pdf;
     } else {
         pathState.throughput *= result.f * (cosAbs / result.pdf);
+    }
+
+    // Firefly suppression: clamp per-bounce throughput multiplier
+    constexpr float maxBounceFactor = 20.0f;
+    for (int i = 0; i < NumSpectralSamples; ++i) {
+        float prevVal = (prevThroughput.values[i] > 1e-10f) ? prevThroughput.values[i] : 1e-10f;
+        float factor = pathState.throughput.values[i] / prevVal;
+        if (factor > maxBounceFactor)
+            pathState.throughput.values[i] = prevVal * maxBounceFactor;
     }
 
 #ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
@@ -293,46 +271,9 @@ extern "C" __global__ void sampleBSDF(
     // ========================================================================
     Vector3D dirIn = surfPt.shadingFrame.toWorld(result.dirLocal);
 
-    // DEBUG: Find glass sphere pixels - no pixel filter, just BSDF type filter
-    {
-        if (pathState.pixelX == 192 && pathState.pixelY == 316 &&
-            pathState.pathLength <= 6) {
-            printf("[GT] len=%u front=%d delta=%d "
-                   "dirL=(%.4f,%.4f,%.4f) dirW=(%.4f,%.4f,%.4f) "
-                   "cos=%.4f pos=(%.3f,%.3f,%.3f) thr=(%.3g,%.3g,%.3g)\n",
-                   pathState.pathLength, surfPt.isFrontFace ? 1 : 0, result.isDelta ? 1 : 0,
-                   result.dirLocal.x, result.dirLocal.y, result.dirLocal.z,
-                   dirIn.x, dirIn.y, dirIn.z,
-                   cosFactor,
-                   surfPt.position.x, surfPt.position.y, surfPt.position.z,
-                   pathState.throughput.values[0], pathState.throughput.values[1],
-                   pathState.throughput.values[2]);
-        }
-    }
-
-    pathState.origin = offsetRayOriginForNextBounce(surfPt, cosFactor);
+    float cosFactorWorld = dot(dirIn, surfPt.geometricNormal);
+    pathState.origin = offsetRayOriginForNextBounce(surfPt, cosFactorWorld);
     pathState.direction = dirIn;
-
-
-#if VLR_DEBUG_SPEC_TRANS_ONEPIX
-    {
-        BSDFType bsdfType = getBSDFType(matDesc);
-        if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX &&
-            pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
-            pathState.pathLength <= 4 &&
-            (bsdfType == BSDFType_SpecularTransmission || bsdfType == BSDFType_Specular)) {
-            unsigned int idx2 = atomicAdd(&g_vlrDebugPrintCount, 1u);
-            if (idx2 < 64) {
-                printf("[SpecTransDbg2] len=%u cosFactor=%.4f cosAbs=%.4f throughput=(%.4g,%.4g,%.4g)\n",
-                    pathState.pathLength, cosFactor, cosAbs,
-                    pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
-                printf("[SpecTransDbg2] origin=(%.4f,%.4f,%.4f) dirWorld=(%.4f,%.4f,%.4f)\n",
-                    pathState.origin.x, pathState.origin.y, pathState.origin.z,
-                    dirIn.x, dirIn.y, dirIn.z);
-            }
-        }
-    }
-#endif
 
     // ========================================================================
     // 6. ?? PathState

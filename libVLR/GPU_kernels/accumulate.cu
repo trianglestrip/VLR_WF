@@ -12,16 +12,7 @@
 // ============================================================================
 
 #define VLR_DEBUG_ACCUMULATE 0
-
-#ifndef VLR_DEBUG_SPEC_TRANS_ONEPIX
-#define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
-#endif
-#ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 256
-#endif
-#ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 166
-#endif
+#include <cstdio>
 
 #include "../shared/path_types.h"
 #include "../include/vlr/basic_types.h"
@@ -99,21 +90,6 @@ extern "C" __global__ void accumulateResults(
     // Wavefront ???????????????????????????
     DiscretizedSpectrum contrib = pathState.contribution.toDiscretizedSpectrum(pathState.wls);
 
-#if VLR_DEBUG_SPEC_TRANS_ONEPIX
-    if (wlp.numAccumFrames <= 2) {
-        if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX && pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY) {
-            printf("[AccumDbg] GLASS px=(%u,%u) frame=%u pathLen=%u contrib=(%.6g,%.6g,%.6g)\n",
-                pathState.pixelX, pathState.pixelY, wlp.numAccumFrames, pathState.pathLength,
-                pathState.contribution.values[0], pathState.contribution.values[1], pathState.contribution.values[2]);
-        }
-        if (pathState.pixelX == 256 && pathState.pixelY == 84) {
-            printf("[AccumDbg] WALL  px=(%u,%u) frame=%u pathLen=%u contrib=(%.6g,%.6g,%.6g)\n",
-                pathState.pixelX, pathState.pixelY, wlp.numAccumFrames, pathState.pathLength,
-                pathState.contribution.values[0], pathState.contribution.values[1], pathState.contribution.values[2]);
-        }
-    }
-#endif
-
 #ifdef VLR_DEBUG_ACCUMULATE
     if (pathIndex == 0) {
         VLR_DEBUG_PRINTF("[GPU Accumulate] pathIndex=0: contribution=(%.6f,%.6f,%.6f,%.6f), RGB=(%.6f,%.6f,%.6f)\n",
@@ -126,7 +102,6 @@ extern "C" __global__ void accumulateResults(
     accum[pixelIdx].r += contrib.r;
     accum[pixelIdx].g += contrib.g;
     accum[pixelIdx].b += contrib.b;
-
 
     // ?????? NaN/Inf?????????? contribution ??? allFinite ?????
     // ????0 ????????????

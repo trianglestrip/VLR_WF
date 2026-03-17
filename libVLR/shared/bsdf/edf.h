@@ -21,13 +21,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE EDFEvaluateResult evaluateEDF(
     getEmissiveRadiance(matDesc, &radiance);
 
     EDFEvaluateResult result;
-    result.Le = radiance;
     result.hasEmission = materialHasEmission(matDesc);
 
-    if (result.hasEmission && dot(dirOutLocal, ctx.surfPt->shadingFrame.z) > 0.0f) {
+    // In local space, z > 0 means the query direction is on the front
+    // (emitting) hemisphere.  Only emit from the front face.
+    if (result.hasEmission && dirOutLocal.z > 0.0f) {
         result.Le = radiance;
-    } else if (!result.hasEmission) {
+    } else {
         result.Le = SampledSpectrum::Zero();
+        result.hasEmission = false;
     }
 
     return result;

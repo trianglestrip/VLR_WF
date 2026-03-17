@@ -841,6 +841,10 @@ void Context::executeWavefrontRender(uint32_t numSamples) {
                 CUDA_CHECK(cudaMemcpy(&numShadowReqs,
                     wf.numShadowRayRequestsBuffer->getDevicePointer(),
                     sizeof(uint32_t), cudaMemcpyDeviceToHost));
+                if (wf.numAccumFrames <= 2) {
+                    printf("[NEE] frame=%u depth=%u activePaths=%u shadowReqs=%u\n",
+                        wf.numAccumFrames, depth, numActivePaths, numShadowReqs);
+                }
                 if (numShadowReqs > 0) {
                     numShadowReqs = std::min(numShadowReqs, wf.launchParams.maxShadowRayRequests);
                     launchTraceShadowRays(numShadowReqs);

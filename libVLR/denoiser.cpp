@@ -184,7 +184,7 @@ void Denoiser::denoise(CUdeviceptr input, CUdeviceptr output, CUdeviceptr albedo
         cudaMemcpyDeviceToDevice
     ));
     
-    std::cout << "[Denoiser] 降噪完成" << std::endl;
+    // 降噪完成（静默运行，避免每帧日志刷屏）
 }
 
 void Denoiser::cleanup() {

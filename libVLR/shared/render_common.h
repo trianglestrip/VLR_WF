@@ -151,23 +151,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool shouldTerminatePath(
     WavefrontPathState& pathState,
     float rrThreshold = 0.05f) {
     
-    // Don't use RR for first few bounces
     if (pathState.pathLength < WavefrontConfig::RRStartDepth)
         return false;
     
-    // Compute continuation probability
     float importance = pathState.throughput.importance(pathState.wls.selectedLambdaIndex());
     float continueProb = std::min(importance / pathState.initImportance, 1.0f);
     
-    // Force termination if importance is too low
-    if (continueProb < rrThreshold)
-        return true;
+    // Clamp to minimum threshold instead of hard-cutting (avoids bias)
+    continueProb = std::max(continueProb, rrThreshold);
     
-    // Russian roulette
     if (pathState.rng.getFloat0cTo1o() >= continueProb)
         return true;
     
-    // Path continues, adjust throughput
     pathState.throughput /= continueProb;
     return false;
 }
@@ -185,8 +180,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool shouldTerminatePathSimple(
     float importance = pathState.throughput.importance(pathState.wls.selectedLambdaIndex());
     float continueProb = std::min(importance / pathState.initImportance, 1.0f);
     
-    if (continueProb < rrThreshold)
-        return true;
+    // Clamp to minimum threshold instead of hard-cutting (avoids bias)
+    continueProb = std::max(continueProb, rrThreshold);
     
     return pathState.rng.getFloat0cTo1o() >= continueProb;
 }
@@ -298,9 +293,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
         SampledSpectrum Le = spEmittance * edf.evaluate(feQuery, dirOutLocal);
         
         // MIS weight calculation
+        // pathLength 0 = direct camera miss to env, no NEE → MIS = 1
+        // pathLength >= 1 = NEE was active → compute proper MIS
         float MISWeight = 1.0f;
-        if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
-            // Uniform sphere: uvPDF = 1/(2*pi^2), hypAreaPDF = 1/(2*pi^2*sin(theta))
+        if (!pathState.prevSampledType.isDelta() && pathState.pathLength >= 1) {
             float sinThetaSafe = (sin(theta) > 1e-6f) ? sin(theta) : 1e-6f;
             float hypAreaPDF = 1.0f / (VLR_M_2PI * VLR_M_PI * sinThetaSafe);
             
@@ -349,9 +345,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     SampledSpectrum Le = spEmittance * edf.evaluate(feQuery, dirOutLocal);
     
     // MIS weight calculation
+    // pathLength 0 = direct camera hit on emitter, no NEE → MIS = 1
+    // pathLength >= 1 = NEE was active at previous vertex → compute proper MIS
     float MISWeight = 1.0f;
-    if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
-        // Compute light sampling PDF (simplified: use uniform distribution)
+    if (!pathState.prevSampledType.isDelta() && pathState.pathLength >= 1) {
         const Instance& inst = wlp.instBuffer[geomInst.instIndex];
         float lightInstIntegral = wlp.lightInstDist.integral();
         float instProb = (lightInstIntegral > 1e-8f)

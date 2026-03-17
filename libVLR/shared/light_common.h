@@ -264,19 +264,21 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
             if (numTris == 0) numTris = 1;  // 兼容旧数据
 
             const Triangle* triBuf = geomInst.asTriMesh.triangleBuffer;
+
+            // Single-pass area-weighted triangle selection (avoids double traversal).
+            // First pass: compute total area.
             float totalArea = 0.0f;
             for (uint32_t i = 0; i < numTris; ++i)
                 totalArea += triBuf[i].area;
             if (totalArea < 1e-10f) totalArea = 1.0f;
 
-            // 按面积加权选择三角形（与 libWR emissiveTriangleCDF 等价）
-            float uTri = u0;
-            uint32_t triIdx = 0;
+            // Second pass: select triangle by cumulative area.
+            float target = u0 * totalArea;
+            uint32_t triIdx = numTris - 1;
             float acc = 0.0f;
             for (uint32_t i = 0; i < numTris; ++i) {
-                acc += triBuf[i].area / totalArea;
-                if (uTri < acc) { triIdx = i; break; }
-                triIdx = i;
+                acc += triBuf[i].area;
+                if (target < acc) { triIdx = i; break; }
             }
 
             const Triangle& tri = triBuf[triIdx];
@@ -316,6 +318,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool sampleLight(
         
         // 变换到世界空间
         transformSurfacePoint(inst.transform, lightPosSample.surfPt, &result->lightSurfPt);
+
+        // Face-forward the light normal toward the reference (shading) point
+        // so that NEE always sees the emitting side regardless of winding order.
+        Vector3D toRef = refPosition - result->lightSurfPt.position;
+        if (dot(toRef, result->lightSurfPt.geometricNormal) < 0.0f) {
+            result->lightSurfPt.geometricNormal = -result->lightSurfPt.geometricNormal;
+            result->lightSurfPt.shadingFrame = ReferenceFrame(
+                Vector3D(1, 0, 0), result->lightSurfPt.geometricNormal);
+        }
+
         result->areaPDF = lightPosSample.areaPDF;
         result->isValid = result->areaPDF > 0.0f;
         break;
@@ -376,8 +388,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool evaluateLightEmission(
         return true;
     }
 
-    // Lambertian 发光：辐射度与方向无关，仅当着色点在发光半球内有效
-    // dirToShading = 从光源指向着色点；发光方向即 dirToShading，需 dot(dirToShading, normal) > 0
+    // Lambertian area emitter: check that the shading point is on the
+    // emitting side.  sampleLight() face-forwards the light normal toward
+    // the reference point, so this dot product should normally be positive.
     float cosLight = dot(dirToShading, lightSurfPt.geometricNormal);
     if (cosLight <= 0.0f) {
         result->isValid = false;

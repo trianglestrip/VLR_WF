@@ -12,16 +12,6 @@
 
 #define VLR_DEBUG_LIGHT_SAMPLING 0
 
-#ifndef VLR_DEBUG_SPEC_TRANS_ONEPIX
-#define VLR_DEBUG_SPEC_TRANS_ONEPIX 0
-#endif
-#ifndef VLR_DEBUG_SPEC_TRANS_PX
-#define VLR_DEBUG_SPEC_TRANS_PX 256
-#endif
-#ifndef VLR_DEBUG_SPEC_TRANS_PY
-#define VLR_DEBUG_SPEC_TRANS_PY 166
-#endif
-
 #include "../shared/kernel_common.h"
 #include "kernel_launch.h"
 #include "../shared/path_types.h"
@@ -39,6 +29,7 @@
 #include <cuda_runtime.h>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
 
 // ? constexpr ?????????????
 // ????????,??WavefrontLaunchParameters???????
@@ -77,29 +68,30 @@ extern "C" __global__ void sampleLights(
 #endif
 
     uint32_t workIndex = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    if (workIndex >= wlp.activePathQueue.size())
+
+    if (workIndex >= wlp.activePathQueue.size()) {
         return;
+    }
 
     uint32_t pathIndex = wlp.activePathQueue.pathIndices[workIndex];
-    
-    // ??????__restrict__ ????????????
+
     WavefrontPathState* __restrict__ pathStatePtr = &wlp.pathStateBuffer[pathIndex];
     WavefrontPathState& pathState = *pathStatePtr;
 
-    // ???warp-level ?????
     bool isActive = pathState.isActive();
-    if (warpAllInactive(isActive))
+    if (warpAllInactive(isActive)) {
         return;
-    
-    // ????????
-    if (!isActive)
+    }
+
+    if (!isActive) {
         return;
+    }
 
     const WavefrontHitInfo* __restrict__ hitInfoPtr = &wlp.hitInfoBuffer[pathIndex];
     const WavefrontHitInfo& hitInfo = *hitInfoPtr;
-    if (!hitInfo.hasHit() || hitInfo.hitInfinity())
+    if (!hitInfo.hasHit() || hitInfo.hitInfinity()) {
         return;
+    }
 
     const SurfacePoint* __restrict__ surfPtPtr = &wlp.surfacePointBuffer[pathIndex];
     const SurfacePoint& surfPt = *surfPtPtr;
@@ -109,19 +101,9 @@ extern "C" __global__ void sampleLights(
     const SurfaceMaterialDescriptor& matDesc = wlp.materialDescriptorBuffer[geomInst.materialIndex];
 
     // ??????delta ??????????NEE ??delta ????
-#if VLR_DEBUG_SPEC_TRANS_ONEPIX
-    if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX && pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
-        pathState.pathLength <= 4) {
-        BSDFType bt = getBSDFType(matDesc);
-        printf("[NEE_Dbg] px=(%u,%u) len=%u bsdfType=%u isDelta=%d surfPos=(%.3f,%.3f,%.3f) throughput=(%.4g,%.4g,%.4g)\n",
-            pathState.pixelX, pathState.pixelY, pathState.pathLength,
-            (uint32_t)bt, materialIsDelta(matDesc) ? 1 : 0,
-            surfPt.position.x, surfPt.position.y, surfPt.position.z,
-            pathState.throughput.values[0], pathState.throughput.values[1], pathState.throughput.values[2]);
-    }
-#endif
-    if (materialIsDelta(matDesc))
+    if (materialIsDelta(matDesc)) {
         return;
+    }
 
     // ========================================================================
     // 1. ????
@@ -129,14 +111,9 @@ extern "C" __global__ void sampleLights(
     float uLight = pathState.rng.getFloat0cTo1o();
     LightSelectResult selectResult;
     if (!selectLight(uLight, &selectResult, wlp)) {
-#ifdef VLR_DEBUG_LIGHT_SAMPLING
-        if (pathIndex == 0) {
-            VLR_DEBUG_PRINTF("[GPU] selectLight failed: numLights=%u\n", wlp.lightInstDist.numValues);
-        }
-#endif
         return;
     }
-    
+
 #ifdef VLR_DEBUG_LIGHT_SAMPLING
     if (pathIndex == 0) {
         VLR_DEBUG_PRINTF("[GPU] selectLight success: lightType=%u, instIndex=%u, geomInstIndex=%u\n",
@@ -151,29 +128,30 @@ extern "C" __global__ void sampleLights(
     float u1 = pathState.rng.getFloat0cTo1o();
     float u2 = pathState.rng.getFloat0cTo1o();
     LightSampleResult sampleResult;
-    if (!sampleLight(selectResult.descriptor, surfPt.position, u0, u1, u2, &sampleResult, wlp))
+    if (!sampleLight(selectResult.descriptor, surfPt.position, u0, u1, u2, &sampleResult, wlp)) {
         return;
+    }
 
     sampleResult.lightSelectProb = selectResult.selectProb;
 
     // ????????????????
     Vector3D dirToLight = sampleResult.lightSurfPt.position - surfPt.position;
     float distance = length(dirToLight);
-    if (distance < 1e-8f)
+    if (distance < 1e-8f) {
         return;
+    }
     dirToLight = dirToLight / distance;
 
-    // ========================================================================
-    // 3. ??????
-    // ========================================================================
-    Vector3D dirToShading = -dirToLight;  // ????????
+    Vector3D dirToShading = -dirToLight;
     LightEmissionResult emissionResult;
     if (!evaluateLightEmission(selectResult.descriptor, sampleResult.lightSurfPt,
-                              dirToShading, pathState.wls, &emissionResult, wlp))
+                              dirToShading, pathState.wls, &emissionResult, wlp)) {
         return;
+    }
 
-    if (!emissionResult.Le.hasNonZero())
+    if (!emissionResult.Le.hasNonZero()) {
         return;
+    }
 
     // Visibility will be tested later via shadow ray pass; skip stub here.
 
@@ -218,8 +196,9 @@ extern "C" __global__ void sampleLights(
     }
 #endif
 
-    if (!fs.hasNonZero())
+    if (!fs.hasNonZero()) {
         return;
+    }
 
     // ========================================================================
     // 6. ?? PDF ??BSDF PDF????MIS??
@@ -252,8 +231,9 @@ extern "C" __global__ void sampleLights(
     // ========================================================================
     float G = computeGeometryTerm(surfPt, sampleResult.lightSurfPt, dirToLight, squaredDistance);
 
-    if (G <= 0.0f)
+    if (G <= 0.0f) {
         return;
+    }
 
     // ========================================================================
     // 9. ????????
@@ -267,19 +247,6 @@ extern "C" __global__ void sampleLights(
 
     SampledSpectrum contrib = pathState.throughput * emissionResult.Le * fs * G * MISWeight * invLightPDF;
 
-
-#if VLR_DEBUG_SPEC_TRANS_ONEPIX
-    if (pathState.pixelX == VLR_DEBUG_SPEC_TRANS_PX && pathState.pixelY == VLR_DEBUG_SPEC_TRANS_PY &&
-        pathState.pathLength <= 4) {
-        printf("[NEE_Dbg] CONTRIB len=%u Le=(%.4g,%.4g,%.4g) fs=(%.4g,%.4g,%.4g) G=%.6g MIS=%.4f invPDF=%.4g contrib=(%.6g,%.6g,%.6g)\n",
-            pathState.pathLength,
-            emissionResult.Le.values[0], emissionResult.Le.values[1], emissionResult.Le.values[2],
-            fs.values[0], fs.values[1], fs.values[2],
-            G, MISWeight, invLightPDF,
-            contrib.values[0], contrib.values[1], contrib.values[2]);
-    }
-#endif
-
     if (!contrib.allFinite() || !contrib.hasNonZero())
         return;
 
@@ -289,7 +256,6 @@ extern "C" __global__ void sampleLights(
         uint32_t slot = atomicAdd(wlp.numShadowRayRequests, 1u);
         if (slot < wlp.maxShadowRayRequests) {
             ShadowRayRequest& req = wlp.shadowRayQueue[slot];
-            // Offset along normal facing the light to avoid self-intersection
             Normal3D offsetN = selectOffsetNormal(dot(dirToLight, surfPt.geometricNormal),
                                                   surfPt.geometricNormal);
             req.origin = offsetRayOrigin(surfPt.position, offsetN);

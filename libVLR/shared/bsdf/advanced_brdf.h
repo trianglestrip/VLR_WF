@@ -19,8 +19,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateFresnelBlendBSDF(
     const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     if (NdotL <= 0.0f || NdotV <= 0.0f) return SampledSpectrum::Zero();
 
     Vector3D halfSum = dirInLocal + dirOutLocal;
@@ -32,7 +32,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateFresnelBlendBSDF(
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     float D = GGX_D(NdotH, alpha2);
     float G1_l = GGX_G1(NdotL, alpha2);
     float G1_v = GGX_G1(NdotV, alpha2);
@@ -54,7 +54,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleFresnelBlendBSDF(
     float u0, float u1, float u2,
     BSDFSampleResult* result) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
     if (NdotL <= 0.0f) { result->pdf = 0.0f; result->f = SampledSpectrum::Zero(); return; }
 
     // 使用平均 F 决定采样概率（Schlick F0=0.04 在 cos≈0.2 时的近似）
@@ -85,8 +85,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateUE4BRDF(
     SampledSpectrum F0;
     computeF0FromMetallic(baseColor, metallic, &F0);
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     if (NdotL <= 0.0f || NdotV <= 0.0f) return SampledSpectrum::Zero();
 
     Vector3D halfSum = dirInLocal + dirOutLocal;
@@ -103,7 +103,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateUE4BRDF(
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     float D = GGX_D(NdotH, alpha2);
     float G1_l = GGX_G1(NdotL, alpha2);
     float G1_v = GGX_G1(NdotV, alpha2);
@@ -228,8 +228,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDisneyBRDF(
     const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     if (NdotV <= 0.0f) return SampledSpectrum::Zero();
     if (NdotL <= 0.0f) NdotL = -NdotL;  // 允许光线从任意方向入射
 
@@ -237,7 +237,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDisneyBRDF(
     float halfLenSq = dot(halfSum, halfSum);
     if (halfLenSq < 1e-12f) return SampledSpectrum::Zero();
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     float LdotH = dot(dirInLocal, halfVec);
     float VdotH = dot(dirOutLocal, halfVec);
 
@@ -291,7 +291,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDisneyBRDF(
     float u0, float u1, float u2,
     BSDFSampleResult* result) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
     if (NdotL <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
@@ -318,7 +318,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDisneyBRDF(
         result->pdf *= pd;
         // 重新计算 f（Disney diffuse 而非 Lambert）
         Vector3D dirOut = result->dirLocal;
-        float NdotV = dot(dirOut, geomNormalLocal);
+        float NdotV = dirOut.z;
         Vector3D halfSum = dirInLocal + dirOut;
         float halfLenSq = dot(halfSum, halfSum);
         if (halfLenSq > 1e-12f) {

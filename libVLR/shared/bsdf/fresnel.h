@@ -54,25 +54,40 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float FresnelDielectric(
 /// 避免分母为零导致 NaN
 CUDA_DEVICE_FUNCTION CUDA_INLINE float FresnelConductor(
     float cosThetaI, float eta, float kappa) {
+    cosThetaI = ::vlr::vlr_min(::vlr::vlr_max(std::abs(cosThetaI), 0.0f), 1.0f);
     float cos2 = cosThetaI * cosThetaI;
     float sin2 = 1.0f - cos2;
     float eta2 = eta * eta;
-    float kappa2 = kappa * kappa;
+    float k2 = kappa * kappa;
 
-    float t0 = eta2 - kappa2 - sin2;
-    float t1 = eta2 - kappa2 + sin2;
-    float t2 = 4.0f * eta2 * kappa2;
+    // Complex Fresnel (PBRT-v4 approach):
+    // eta_complex = eta - i*kappa
+    // sin2Theta_t = sin2 / |eta_complex|^2  (complex division)
+    // cosTheta_t = sqrt(1 - sin2Theta_t)     (complex sqrt)
+    // Then standard Fresnel with complex arithmetic.
+    //
+    // Expanded real arithmetic (Born & Wolf):
+    // a^2 + b^2 = sqrt((eta^2 - k^2 - sin^2)^2 + 4*eta^2*k^2)
+    float innerTerm = eta2 - k2 - sin2;
+    float a2pb2 = safeSqrt(innerTerm * innerTerm + 4.0f * eta2 * k2);
+    float a = safeSqrt(0.5f * (a2pb2 + innerTerm));
 
-    float denomPar = t1 * t1 + t2;
-    denomPar = (denomPar > 1e-10f) ? denomPar : 1e-10f;
-    float rPar2 = (t0 * t0 + t2) / denomPar;
-    float t3 = (eta2 + kappa2) * cos2;
-    float t4 = 2.0f * eta * cosThetaI;
-    float denomPerp = t3 + t4 + sin2;
-    denomPerp = (std::abs(denomPerp) > 1e-10f) ? denomPerp : 1e-10f;
-    float rPerp2 = (t3 - t4 + sin2) / denomPerp;
+    // Rs = ((a - cos)^2 + b^2) / ((a + cos)^2 + b^2)
+    // where b^2 = a2pb2 - a^2 = 0.5*(a2pb2 - innerTerm)
+    float Rs_num = (a - cosThetaI) * (a - cosThetaI) + (a2pb2 - a * a);
+    float Rs_den = (a + cosThetaI) * (a + cosThetaI) + (a2pb2 - a * a);
+    Rs_den = (Rs_den > 1e-10f) ? Rs_den : 1e-10f;
+    float Rs = Rs_num / Rs_den;
 
-    return 0.5f * (rPar2 + rPerp2);
+    // Rp = Rs * ((a - sin*tan)^2 + b^2) / ((a + sin*tan)^2 + b^2)
+    // Rewritten using cos: Rp = Rs * ((a*cos - sin2)^2 + b^2*cos^2) / ((a*cos + sin2)^2 + b^2*cos^2)
+    float b2 = a2pb2 - a * a;
+    float aCos = a * cosThetaI;
+    float Rp_num = (aCos - sin2) * (aCos - sin2) + b2 * cos2;
+    float Rp_den = (aCos + sin2) * (aCos + sin2) + b2 * cos2;
+    Rp_den = (Rp_den > 1e-10f) ? Rp_den : 1e-10f;
+
+    return 0.5f * (Rs + Rs * Rp_num / Rp_den);
 }
 
 /// 光谱型 Schlick Fresnel（每通道 F0）

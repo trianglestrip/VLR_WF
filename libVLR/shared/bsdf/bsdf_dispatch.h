@@ -217,12 +217,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
         float ior, roughness;
         SampledSpectrum coeff;
         getMicrofacetScatteringParams(matDesc, &ior, &roughness, &coeff);
-#ifdef __CUDA_ARCH__
-        if (blockIdx.x * blockDim.x + threadIdx.x < 5) {
-            printf("[sampleBSDFWithU2] Calling MicrofacetScattering: pathIdx=%u, ior=%.2f, roughness=%.4f\n",
-                   blockIdx.x * blockDim.x + threadIdx.x, ior, roughness);
-        }
-#endif
         sampleMicrofacetScatteringBSDF(ior, roughness, coeff, dirInLocal, ctx.geomNormalLocal, u0, u1, u2, result);
         break;
     }

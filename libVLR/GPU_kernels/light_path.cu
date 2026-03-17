@@ -301,6 +301,7 @@ extern "C" __global__ void applyShadowRayResults(
         return;
 
     float visibility = wlp.shadowRayResults[workIndex];
+
     if (visibility < 0.5f)
         return;
 

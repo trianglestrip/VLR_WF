@@ -60,6 +60,9 @@
     <CudaCompile Include="..\..\libVLR\GPU_kernels\kernel_launch.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\tonemap.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="D:\gitProject\VLR_WF\libVLR\CMakeLists.txt" />

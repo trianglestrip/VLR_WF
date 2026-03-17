@@ -98,10 +98,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE Vector3D sampleGGXVNDF_Aniso(
         alphaY * V.y,
         ::vlr::vlr_max(V.z, 1e-6f)));
 
-    float lensq = Vh.y * Vh.y + Vh.z * Vh.z;
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
     Vector3D T1 = (lensq > 1e-10f)
-        ? normalize(Vector3D(0, -Vh.z, Vh.y))
-        : Vector3D(0, 0, 1);
+        ? Vector3D(-Vh.y, Vh.x, 0.0f) * (1.0f / safeSqrt(lensq))
+        : Vector3D(1, 0, 0);
     Vector3D T2 = cross(Vh, T1);
 
     float r = safeSqrt(u1);

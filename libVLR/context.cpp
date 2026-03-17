@@ -402,4 +402,97 @@ void Context::getProbePixel(int32_t* outX, int32_t* outY) const {
     if (outY) *outY = m_probePixelY;
 }
 
+// ============================================================================
+// 渐进渲染
+// ============================================================================
+
+void Context::beginProgressive(uint32_t width, uint32_t height) {
+    auto& wf = m_optix.wavefrontPathTracing;
+
+    if (m_sceneSource) {
+        Scene* mutableScene = const_cast<Scene*>(m_sceneSource);
+        mutableScene->prepareSceneParallel();
+        m_scene.camera = m_sceneSource->getCamera();
+        m_scene.bounds = m_sceneSource->getSceneBounds();
+        mutableScene->releaseHostMeshData();
+    }
+
+    if (wf.currentWidth != width || wf.currentHeight != height) {
+        resizeWavefrontBuffers(width, height);
+    }
+
+    wf.numAccumFrames = 0;
+    if (wf.accumBuffer && wf.accumBuffer->size() > 0) {
+        wf.accumBuffer->clear(m_stream);
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+    }
+
+    setupWavefrontLaunchParams();
+}
+
+void Context::renderOneSample(uint32_t* outAccumFrames) {
+    auto& wf = m_optix.wavefrontPathTracing;
+    ++wf.numAccumFrames;
+    executeWavefrontRender(1);
+    if (outAccumFrames)
+        *outAccumFrames = wf.numAccumFrames;
+}
+
+// tonemap 实现在 GPU_kernels/tonemap.cu 中
+extern "C" void launchTonemapKernel(
+    const float* accumBuf, uint8_t* outRGBA8,
+    uint32_t numPixels, float invFrames, float exposure, float invGamma,
+    cudaStream_t stream);
+
+extern "C" void launchScaleBufferKernel(
+    const float* src, float* dst,
+    uint32_t numPixels, float scale,
+    cudaStream_t stream);
+
+void Context::tonemapToRGBA8(void* outRGBA8, float exposure, float gamma) {
+    auto& wf = m_optix.wavefrontPathTracing;
+    if (!wf.accumBuffer || wf.numAccumFrames == 0 || !outRGBA8)
+        return;
+
+    uint32_t numPixels = wf.currentWidth * wf.currentHeight;
+    float invFrames = 1.0f / static_cast<float>(wf.numAccumFrames);
+    float invGamma = 1.0f / gamma;
+
+    const float* accumPtr = reinterpret_cast<const float*>(wf.accumBuffer->getDevicePointer());
+
+    if (m_denoiserConfig.enabled && m_debugMode == VLRDebugMode_Normal) {
+        uint32_t bufSize = numPixels * sizeof(float) * 3;
+        if (m_d_denoisedBuffer == 0 || m_denoisedBufferSize < bufSize) {
+            if (m_d_denoisedBuffer) cudaFree(reinterpret_cast<void*>(m_d_denoisedBuffer));
+            cudaMalloc(reinterpret_cast<void**>(&m_d_denoisedBuffer), bufSize);
+            m_denoisedBufferSize = bufSize;
+        }
+
+        if (!m_denoiser.isInitialized()) {
+            m_denoiser.initialize(wf.currentWidth, wf.currentHeight, m_denoiserConfig, m_optix.context);
+        }
+
+        // accumBuffer stores accumulated sums; denoiser expects averaged HDR values.
+        // Scale to average first, denoise, then tonemap with invFrames=1.
+        launchScaleBufferKernel(accumPtr, reinterpret_cast<float*>(m_d_denoisedBuffer),
+            numPixels, invFrames, m_stream);
+        CUDA_CHECK(cudaStreamSynchronize(m_stream));
+
+        CUdeviceptr d_scaled = m_d_denoisedBuffer;
+        CUdeviceptr d_albedo = wf.accumAlbedoBuffer
+            ? reinterpret_cast<CUdeviceptr>(wf.accumAlbedoBuffer->getDevicePointer()) : 0;
+        CUdeviceptr d_normal = wf.accumNormalBuffer
+            ? reinterpret_cast<CUdeviceptr>(wf.accumNormalBuffer->getDevicePointer()) : 0;
+
+        m_denoiser.denoise(d_scaled, m_d_denoisedBuffer, d_albedo, d_normal, wf.numAccumFrames);
+
+        accumPtr = reinterpret_cast<const float*>(m_d_denoisedBuffer);
+        invFrames = 1.0f;  // already averaged
+    }
+
+    uint8_t* outPtr = reinterpret_cast<uint8_t*>(outRGBA8);
+    launchTonemapKernel(accumPtr, outPtr, numPixels, invFrames, exposure, invGamma, m_stream);
+    CUDA_CHECK(cudaStreamSynchronize(m_stream));
+}
+
 } // namespace vlr

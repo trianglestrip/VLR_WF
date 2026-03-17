@@ -24,41 +24,41 @@
 
 #include <cuda_runtime.h>
 #include <cmath>
+#include <cstdio>
 
 namespace {
 
 using namespace vlr;
 using namespace vlr::shared;
 
-/// ??????????MIS ??
-/// ????? BSDF ????????????????????????MIS
+/// Compute MIS weight for implicit light hits (BSDF sampling strategy).
+/// Uses power heuristic in solid-angle space:
+///   w_bsdf = pdfBSDF^2 / (pdfBSDF^2 + pdfLight_sa^2)
+/// where pdfLight_sa = lightSelectProb * areaInvPDF * distance^2 / cosLight
 CUDA_DEVICE_FUNCTION CUDA_INLINE float computeImplicitLightMISWeight(
     const WavefrontPathState& pathState,
     float hypAreaPDF,
-    float cosOutLocal) {
+    float cosOutLocal,
+    float distance,
+    float lightSelectProb) {
 
-    // ????? delta????????????????????MIS = 1
     if (pathState.prevSampledType.isDelta())
         return 1.0f;
 
-    // ???????????? MIS
-    if (pathState.pathLength <= 1)
+    if (pathState.pathLength == 0)
         return 1.0f;
 
-    // Power Heuristic: w_bsdf = pdf_bsdf^2 / (pdf_bsdf^2 + pdf_light^2)
-    // ???????????? BSDF ?????? prevDirPDF ?? pdf_bsdf
-    // pdf_light ???????????????????????1
     float pdfBSDF = pathState.prevDirPDF;
     if (pdfBSDF <= 0.0f) return 1.0f;
 
-    // ????? PDF?????????????PDF ??
-    // ???????lightInstDist ?? instProb ??geomInstProb
     float cosTerm = std::abs(cosOutLocal);
     if (cosTerm < 1e-6f) return 1.0f;
-    float pdfLight = hypAreaPDF / cosTerm;
-    if (pdfLight <= 0.0f || pdfLight >= 1e30f) return 1.0f;
 
-    return powerHeuristicMIS(pdfBSDF, pdfLight);
+    float distSq = distance * distance;
+    float pdfLightSolidAngle = lightSelectProb * hypAreaPDF * distSq / cosTerm;
+    if (pdfLightSolidAngle <= 0.0f || pdfLightSolidAngle >= 1e30f) return 1.0f;
+
+    return powerHeuristicMIS(pdfBSDF, pdfLightSolidAngle);
 }
 
 
@@ -120,9 +120,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEnvironmentHit(
 
     SampledSpectrum Le = edfResult.Le;
 
-    // MIS ???BSDF ?? vs ?????????
+    // MIS: BSDF sampling vs light sampling
+    // pathLength 0 = direct camera miss → no NEE → MIS = 1
+    // pathLength >= 1 = NEE was active → compute proper MIS
     float MISWeight = 1.0f;
-    if (!pathState.prevSampledType.isDelta() && pathState.pathLength > 1) {
+    if (!pathState.prevSampledType.isDelta() && pathState.pathLength >= 1) {
         float bsdfPDF = pathState.prevDirPDF;
         float cosOutSafe = (std::abs(dirOutLocal.z) > 1e-6f) ? std::abs(dirOutLocal.z) : 1e-6f;
         float lightPDF;
@@ -164,6 +166,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
     const SurfacePoint& surfPt,
     const GeometryInstance& geomInst,
     float hypAreaPDF,
+    float hitDistance,
     WavefrontLaunchParameters& wlp) {
 
 #ifdef VLR_DEBUG_PROCESS_HITS
@@ -197,7 +200,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void processEmissiveSurface(
         return;
 
     SampledSpectrum Le = edfResult.Le;
-    float MISWeight = computeImplicitLightMISWeight(pathState, hypAreaPDF, dirOutLocal.z);
+    uint32_t nLights = wlp.lightInstDist.numValues;
+    float lightSelectProb = (nLights > 0) ? (1.0f / static_cast<float>(nLights)) : 1.0f;
+    float MISWeight = computeImplicitLightMISWeight(pathState, hypAreaPDF, dirOutLocal.z, hitDistance, lightSelectProb);
 
     SampledSpectrum emissiveContrib = pathState.throughput * Le * MISWeight;
     
@@ -263,7 +268,6 @@ extern "C" __global__ void processHits(
     if (!pathState.isActive())
         return;
 
-    // ????????????????TraceRays ??????????
     if (!hitInfo.hasHit()) {
         pathState.setTerminated();
         return;
@@ -299,17 +303,20 @@ extern "C" __global__ void processHits(
 
         computeSurfacePointBasic(input, ctx, &surfPt, &hypAreaPDF);
 
-        // Always faceforward the geometric normal for a consistent local frame,
-        // but preserve whether this hit was on the front face (outside -> inside).
+        // Face-forward both the geometric normal AND the shading frame so that
+        // the camera-facing hemisphere is always the z>0 hemisphere in local
+        // space.  For dielectric BSDFs, isFrontFace determines the IOR
+        // direction (entering vs leaving), independent of the frame flip.
         {
             Vector3D rayDir = pathState.direction;
             float ndotd = dot(surfPt.geometricNormal, rayDir);
             surfPt.isFrontFace = (ndotd <= 0.0f);
             if (ndotd > 0.0f) {
                 surfPt.geometricNormal = -surfPt.geometricNormal;
-                // Do NOT flip the shading frame. The BSDF code uses isFrontFace
-                // to determine IOR direction. Keeping the original frame avoids
-                // handedness issues that corrupt the refracted world direction.
+                surfPt.shadingFrame.x = -surfPt.shadingFrame.x;
+                surfPt.shadingFrame.z = -surfPt.shadingFrame.z;
+                // y = cross(z, x), flipping both z and x keeps y unchanged
+                // so the frame remains right-handed.
             }
         }
 
@@ -454,7 +461,7 @@ extern "C" __global__ void processHits(
     // ========================================================================
     // 4. EDF ??????????????????
     // ========================================================================
-    processEmissiveSurface(pathState, surfPt, geomInst, hypAreaPDF, wlp);
+    processEmissiveSurface(pathState, surfPt, geomInst, hypAreaPDF, hitInfo.t, wlp);
 
     // ========================================================================
     // 4.5 LVC-BPT: Vertex Connection with Light Vertex Cache
@@ -528,10 +535,9 @@ extern "C" __global__ void processHits(
             ? ::vlr::vlr_min(importance / pathState.initImportance, 1.0f)
             : 1.0f;
 
-        if (continueProb < WavefrontConfig::RRThreshold) {
-            pathState.setTerminated();
-            return;
-        }
+        // Clamp to minimum threshold instead of hard-cutting.
+        // Hard-cutting introduces systematic energy loss (bias).
+        continueProb = ::vlr::vlr_max(continueProb, WavefrontConfig::RRThreshold);
 
         if (pathState.rng.getFloat0cTo1o() >= continueProb) {
             pathState.setTerminated();

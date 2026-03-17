@@ -16,8 +16,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateGGXTransmissionBSDF(
     const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     if (NdotL <= 0.0f || NdotV >= 0.0f) return SampledSpectrum::Zero();  // 透射：入射上侧，出射下侧
 
     // 确定半向量：透射时 H 在入射和折射方向之间
@@ -25,13 +25,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateGGXTransmissionBSDF(
     Vector3D halfSum = -dirInLocal + eta * dirOutLocal;
     if (dot(halfSum, halfSum) < 1e-12f) return SampledSpectrum::Zero();
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     if (NdotH <= 0.0f) halfVec = -halfVec;
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
 
-    float D = GGX_D(std::abs(dot(halfVec, geomNormalLocal)), alpha2);
+    float D = GGX_D(std::abs(halfVec.z), alpha2);
     float G1_l = GGX_G1(std::abs(NdotL), alpha2);
     float G1_v = GGX_G1(std::abs(NdotV), alpha2);
     float G = G1_l * G1_v;
@@ -70,10 +70,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleGGXTransmissionBSDF(
         // 反射分量：与原始 VLR MicrofacetBSDF 一致 f = coeff * F * D * G / (4 * NdotV * NdotL)
         float VdotH = dot(V, H);
         result->dirLocal = 2.0f * VdotH * H - V;
-        float NdotV = std::abs(dot(result->dirLocal, geomNormalLocal));
-        float NdotL = std::abs(dot(dirInLocal, geomNormalLocal));
+        float NdotV = std::abs(result->dirLocal.z);
+        float NdotL = std::abs(dirInLocal.z);
         float alpha2 = alpha * alpha;
-        float NdotH = std::abs(dot(H, geomNormalLocal));
+        float NdotH = std::abs(H.z);
         float D = GGX_D(NdotH, alpha2);
         float G1_v = GGX_G1(NdotV, alpha2);
         float G1_l = GGX_G1(NdotL, alpha2);
@@ -88,7 +88,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleGGXTransmissionBSDF(
         result->isDelta = false;
     } else {
         // 透射分量：H 为微表面法线，折射在 H 定义的平面上
-        Normal3D H_normal = dot(H, geomNormalLocal) > 0.0f ? H : Vector3D(-H.x, -H.y, -H.z);
+        Normal3D H_normal = H.z > 0.0f ? H : Vector3D(-H.x, -H.y, -H.z);
         Vector3D wt;
         if (!refract(dirInLocal, H_normal, eta, &wt)) {
             result->pdf = 0.0f;
@@ -97,10 +97,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleGGXTransmissionBSDF(
         }
         result->dirLocal = wt;
         result->sampledBSDFType = BSDFType_GGXTransmission;
-        float NdotV = std::abs(dot(wt, geomNormalLocal));
-        float NdotL = std::abs(dot(dirInLocal, geomNormalLocal));
+        float NdotV = std::abs(wt.z);
+        float NdotL = std::abs(dirInLocal.z);
         float alpha2 = alpha * alpha;
-        float D = GGX_D(std::abs(dot(H, geomNormalLocal)), alpha2);
+        float D = GGX_D(std::abs(H.z), alpha2);
         float G1_l = GGX_G1(NdotL, alpha2);
         float denom = dot(dirInLocal, H) + eta * dot(wt, H);
         denom = denom * denom;

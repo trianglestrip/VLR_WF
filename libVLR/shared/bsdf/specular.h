@@ -19,15 +19,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularBSDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    Vector3D reflected = 2.0f * dot(dirInLocal, geomNormalLocal) * geomNormalLocal - dirInLocal;
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    Vector3D reflected(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
+    float cosOut = dirOutLocal.z;
 
     if (cosOut <= 0.0f)
         return SampledSpectrum::Zero();
 
     float diff = std::abs(dot(reflected, dirOutLocal) - 1.0f);
     if (diff < 1e-5f) {
-        float cosTheta = std::abs(dot(dirInLocal, geomNormalLocal));
+        float cosTheta = std::abs(dirInLocal.z);
         float F = (eta.values[0] * eta.values[0] + kappa.values[0] * kappa.values[0] < 1e-10f)
             ? 1.0f : ::vlr::vlr_min(1.0f, FresnelConductor(cosTheta, eta.values[0], kappa.values[0]));
         SampledSpectrum ret;
@@ -52,7 +52,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularBSDF(
     float /*u0*/, float /*u1*/,
     BSDFSampleResult* result) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
 
     if (NdotL <= 0.0f) {
         result->pdf = 0.0f;
@@ -60,7 +60,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularBSDF(
         return;
     }
 
-    Vector3D reflected = 2.0f * NdotL * geomNormalLocal - dirInLocal;
+    Vector3D reflected(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
     result->dirLocal = reflected;
     result->sampledBSDFType = BSDFType_Specular;
     result->isDelta = true;
@@ -84,7 +84,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getSpecularBSDFPDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    Vector3D reflected = 2.0f * dot(dirInLocal, geomNormalLocal) * geomNormalLocal - dirInLocal;
+    Vector3D reflected(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
     float diff = std::abs(dot(reflected, dirOutLocal) - 1.0f);
     return (diff < 1e-5f) ? 1.0f : 0.0f;
 }
@@ -106,9 +106,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSD
     const Normal3D& geomNormalLocal,
     bool frontFace) {
     (void)geomNormalLocal;
+
+    // Undo face-forwarding so the sign convention matches the BSDF formulas
+    Vector3D woOrig = dirInLocal;
+    Vector3D wiOrig = dirOutLocal;
+    if (!frontFace) {
+        woOrig.z = -woOrig.z;
+        wiOrig.z = -wiOrig.z;
+    }
+
     Normal3D shadingNormalLocal(0.0f, 0.0f, 1.0f);
-    float cosThetaO = dirInLocal.z;
-    float cosOut = dirOutLocal.z;
+    float cosThetaO = woOrig.z;
+    float cosOut = wiOrig.z;
     float cosAbs = std::abs(cosThetaO);
 
     float etaIncident = frontFace ? 1.0f : ior;
@@ -118,8 +127,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSD
     float F = FresnelDielectric(cosAbs, etaIncident, etaTransmitted);
 
     if (cosThetaO * cosOut > 0.0f) {
-        Vector3D dirReflected(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
-        float diff = std::abs(dot(dirReflected, dirOutLocal) - 1.0f);
+        Vector3D dirReflected(-woOrig.x, -woOrig.y, woOrig.z);
+        float diff = std::abs(dot(dirReflected, wiOrig) - 1.0f);
         if (diff < 1e-5f) {
             if (cosAbs < 1e-6f) return SampledSpectrum::Zero();
             return transmittance * (F / cosAbs);
@@ -131,12 +140,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSD
     float sin2ThetaT = etaRatio * etaRatio * sin2ThetaO;
     if (sin2ThetaT >= 1.0f) return SampledSpectrum::Zero();
     float cosThetaT = safeSqrt(1.0f - sin2ThetaT);
-    Vector3D wt = etaRatio * -dirInLocal + (etaRatio * cosAbs - cosThetaT) * shadingNormalLocal;
-    float diff = std::abs(dot(wt, dirOutLocal) - 1.0f);
+    Vector3D wt = etaRatio * -woOrig + (etaRatio * cosAbs - cosThetaT) * shadingNormalLocal;
+    float diff = std::abs(dot(wt, wiOrig) - 1.0f);
     if (diff < 1e-5f) {
         float cosTAbs = std::abs(wt.z);
         if (cosTAbs < 1e-8f) return SampledSpectrum::Zero();
-        
+
         float squeezeFactor = (etaIncident * etaIncident) / (etaTransmitted * etaTransmitted);
         return transmittance * ((1.0f - F) * squeezeFactor / cosTAbs);
     }
@@ -260,14 +269,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
     BSDFSampleResult* result)
 {
     (void)geomNormalLocal;
-    (void)frontFace;
 
     Vector3D wo = dirInLocal;
-    float cosThetaO = wo.z;
+    if (!frontFace)
+        wo.z = -wo.z;
 
-    // Determine entering/exiting from the sign of cosThetaO:
-    // cosThetaO > 0: ray is on the same side as the surface normal → entering
-    // cosThetaO < 0: ray is on the opposite side → exiting (inside the medium)
+    float cosThetaO = wo.z;
     bool entering = (cosThetaO > 0.0f);
 
     float etaI = entering ? etaExt : etaInt;
@@ -279,21 +286,24 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
     float Fr = FresnelDielectric(absCosTheta, etaI, etaT);
 
     if (u0 < Fr) {
-        // Specular reflection: flip tangential, keep normal component sign
         Vector3D wi = Vector3D(-wo.x, -wo.y, wo.z);
-        
+        // Transform back to the face-forwarded frame
+        if (!frontFace)
+            wi.z = -wi.z;
+
         result->dirLocal = wi;
         result->pdf = Fr;
         result->f = transmittance * Fr;
         result->sampledBSDFType = BSDFType_Specular;
         result->isDelta = true;
     } else {
-        // Specular transmission (Snell's law)
         float sin2ThetaI = ::vlr::vlr_max(0.0f, 1.0f - absCosTheta * absCosTheta);
         float sin2ThetaT = eta * eta * sin2ThetaI;
-        
+
         if (sin2ThetaT >= 1.0f) {
             Vector3D wr = Vector3D(-wo.x, -wo.y, wo.z);
+            if (!frontFace)
+                wr.z = -wr.z;
             result->dirLocal = wr;
             result->pdf = 1.0f;
             result->f = transmittance;
@@ -301,27 +311,27 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleDielectricBSDF_PBRT(
             result->isDelta = true;
             return;
         }
-        
+
         float cosThetaT = safeSqrt(1.0f - sin2ThetaT);
-        
-        // Refracted direction: tangential components scale by eta,
-        // normal component flips to the other side of the surface.
+
         Vector3D wi;
         wi.x = -eta * wo.x;
         wi.y = -eta * wo.y;
-        // If entering (cosThetaO > 0), refracted ray goes to -z side: wi.z = -cosThetaT
-        // If exiting (cosThetaO < 0), refracted ray goes to +z side: wi.z = +cosThetaT
         wi.z = entering ? -cosThetaT : cosThetaT;
-        
+
         float len = safeSqrt(wi.x * wi.x + wi.y * wi.y + wi.z * wi.z);
         if (len > 1e-7f) {
             wi.x /= len;
             wi.y /= len;
             wi.z /= len;
         }
-        
+
+        // Transform back to the face-forwarded frame
+        if (!frontFace)
+            wi.z = -wi.z;
+
         float Ft = 1.0f - Fr;
-        
+
         result->dirLocal = wi;
         result->pdf = Ft;
         result->f = transmittance * Ft;
@@ -366,19 +376,19 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSD
     const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
     
-    float cosThetaI = dot(dirInLocal, geomNormalLocal);
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    float cosThetaI = dirInLocal.z;
+    float cosOut = dirOutLocal.z;
     
     // 判断进入/离开
     bool entering = (cosThetaI >= 0.0f);
     float etaI, etaT;
     Normal3D nEff;
     if (entering) {
-        nEff = geomNormalLocal;
+        nEff = Normal3D(0, 0, 1);
         etaI = 1.0f;
         etaT = ior;
     } else {
-        nEff = Vector3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
+        nEff = Normal3D(0, 0, -1);
         etaI = ior;
         etaT = 1.0f;
     }
@@ -388,8 +398,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateSpecularTransmissionBSD
     
     // 检查是否为反射方向(同半球)
     if (cosThetaI * cosOut > 0.0f) {
-        // 反射: 检查是否为镜面反射方向
-        Vector3D dirReflected = 2.0f * cosThetaI * geomNormalLocal - dirInLocal;
+        // 反射: 检查是否为镜面反射方向（local coords: normal = (0,0,1)）
+        Vector3D dirReflected(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
         float diff = std::abs(dot(dirReflected, dirOutLocal) - 1.0f);
         if (diff < 1e-5f) {
             float cosAbs = std::abs(cosThetaI);
@@ -434,23 +444,21 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
         etaT_eff = iorAtWavelength(lambda, etaT, dispersionStrength);
     }
 
-    float cosThetaI = dot(dirInLocal, geomNormalLocal);
-    // CRITICAL FIX: 'entering' condition was inverted.
-    // dirInLocal is outgoing direction (from surface toward viewer).
-    // geomNormalLocal points outward from surface.
-    // If dot(dirInLocal, geomNormalLocal) < 0, the ray is coming from outside and entering the surface.
-    // If dot(dirInLocal, geomNormalLocal) > 0, the ray is coming from inside and exiting the surface.
+    float cosThetaI = dirInLocal.z;
+    // In shading-local: z-axis is shading normal (0,0,1).
+    // cosThetaI < 0: ray from outside entering surface.
+    // cosThetaI > 0: ray from inside exiting surface.
     bool entering = (cosThetaI < 0.0f);
     float etaRatio;
     Normal3D nEff;
     float etaIncident, etaTransmitted;
     if (entering) {
-        nEff = geomNormalLocal;
+        nEff = Normal3D(0, 0, 1);
         etaRatio = etaI / etaT_eff;  // 1/2.4 进入玻璃
         etaIncident = etaI;
         etaTransmitted = etaT_eff;
     } else {
-        nEff = Vector3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
+        nEff = Normal3D(0, 0, -1);
         etaRatio = etaT_eff / etaI;  // 2.4/1 离开玻璃
         etaIncident = etaT_eff;
         etaTransmitted = etaI;
@@ -465,9 +473,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
 
     // 全内反射：必须反射，能量守恒 f = F/|cos| = 1/|cos|，pdf = 1（反射不经过介质，无透射系数）
     if (!canRefract) {
-        float NdotL = dot(dirInLocal, geomNormalLocal);
-        result->dirLocal = 2.0f * NdotL * geomNormalLocal - dirInLocal;
-        float cosAbs = std::abs(NdotL);
+        result->dirLocal = Vector3D(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
+        float cosAbs = std::abs(dirInLocal.z);
         float fVal = (cosAbs > 1e-6f) ? (1.0f / cosAbs) : 0.0f;
         for (int i = 0; i < NumSpectralSamples; ++i)
             result->f.values[i] = fVal;
@@ -483,9 +490,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
     // 透射: f = coeff*(1-F)*(etaI/etaT)^2/|cosT|, pdf = (1-F)*(etaI/etaT)^2, throughput *= f*cosT/pdf = coeff
     if (u0 < F) {
         // 反射（应用transmittance系数,参考line 1319）
-        float NdotL = dot(dirInLocal, geomNormalLocal);
-        result->dirLocal = 2.0f * NdotL * geomNormalLocal - dirInLocal;
-        float cosAbs = std::abs(NdotL);
+        result->dirLocal = Vector3D(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
+        float cosAbs = std::abs(dirInLocal.z);
         if (cosAbs < 1e-6f) {
             result->pdf = 0.0f;
             result->f = SampledSpectrum::Zero();
@@ -523,15 +529,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getSpecularTransmissionBSDFPDF(
     float ior,
     const Vector3D& dirInLocal, const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
-    float cosThetaI = dot(dirInLocal, geomNormalLocal);
+    float cosThetaI = dirInLocal.z;
     
-    // CRITICAL FIX: Correct entering/exiting logic
-    // dirInLocal is outgoing direction (wo), pointing away from surface toward viewer
-    // If dot(wo, n) > 0, ray is leaving the surface (exiting from inside)
-    // If dot(wo, n) < 0, ray is entering the surface (from outside)
-    bool entering = (cosThetaI > 0.0f);
+    // In shading-local: cosThetaI < 0 = entering (from outside), cosThetaI > 0 = exiting
+    bool entering = (cosThetaI < 0.0f);
     
-    Normal3D nEff = entering ? geomNormalLocal : -geomNormalLocal;
+    Normal3D nEff = entering ? Normal3D(0, 0, 1) : Normal3D(0, 0, -1);
     float etaRatio = entering ? (1.0f / ior) : ior;
     
     Vector3D wt;

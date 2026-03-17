@@ -1000,6 +1000,57 @@ void* vlrGetOutputBuffer(VLRContext context) {
     return impl->ctx->getAccumBufferDevicePointer();
 }
 
+// ============================================================================
+// 渐进渲染 API
+// ============================================================================
+
+VLRResult vlrBeginProgressive(
+    VLRContext context, VLRScene scene,
+    uint32_t width, uint32_t height)
+{
+    if (!context || !scene)
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* ctxImpl = TO_CTX(context);
+        VLRSceneImpl* scnImpl = reinterpret_cast<VLRSceneImpl*>(scene);
+        if (!ctxImpl->ctx || !scnImpl->scene)
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        ctxImpl->ctx->setScene(scnImpl->scene);
+        ctxImpl->ctx->beginProgressive(width, height);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return static_cast<VLRResult>(VLRResult_InternalError);
+    }
+}
+
+VLRResult vlrRenderOneSample(VLRContext context, uint32_t* outAccumFrames) {
+    if (!context)
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx)
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        impl->ctx->renderOneSample(outAccumFrames);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return static_cast<VLRResult>(VLRResult_InternalError);
+    }
+}
+
+VLRResult vlrTonemapToRGBA8(VLRContext context, void* outRGBA8, float exposure, float gamma) {
+    if (!context || !outRGBA8)
+        return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    try {
+        VLRContextImpl* impl = TO_CTX(context);
+        if (!impl->ctx)
+            return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        impl->ctx->tonemapToRGBA8(outRGBA8, exposure, gamma);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return static_cast<VLRResult>(VLRResult_InternalError);
+    }
+}
+
 void vlrGetVersion(uint32_t* major, uint32_t* minor, uint32_t* patch) {
     if (major) *major = vlr::VLR_VERSION.major;
     if (minor) *minor = vlr::VLR_VERSION.minor;

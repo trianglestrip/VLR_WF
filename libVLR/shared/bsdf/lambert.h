@@ -17,7 +17,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateLambertBSDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    float cosOut = dirOutLocal.z;
     if (cosOut <= 0.0f)
         return SampledSpectrum::Zero();
 
@@ -33,25 +33,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleLambertBSDF(
     float u0, float u1,
     BSDFSampleResult* result) {
 
-    // 余弦加权半球采样
+    // Cosine-weighted hemisphere sampling around z-axis (shading normal)
     float r = safeSqrt(u0);
     float phi = u1 * VLR_M_2PI;
     float x = r * std::cos(phi);
     float y = r * std::sin(phi);
     float z = safeSqrt(1.0f - u0);
 
-    // 构建局部坐标系（z 轴为法线）
-    Vector3D tangent = (std::abs(geomNormalLocal.z) < 0.999f)
-        ? normalize(cross(Vector3D(0, 1, 0), geomNormalLocal))
-        : normalize(cross(Vector3D(1, 0, 0), geomNormalLocal));
-    Vector3D bitangent = cross(geomNormalLocal, tangent);
-
-    Vector3D dirLocal = normalize(
-        tangent * x + bitangent * y + geomNormalLocal * z);
+    Vector3D dirLocal(x, y, z);
 
     result->dirLocal = dirLocal;
     result->f = albedo * VLR_M_INV_PI;
-    result->pdf = dot(dirLocal, geomNormalLocal) * VLR_M_INV_PI;
+    result->pdf = z * VLR_M_INV_PI;
     result->sampledBSDFType = BSDFType_Lambert;
     result->isDelta = false;
 }
@@ -61,7 +54,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getLambertBSDFPDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    float cosOut = dirOutLocal.z;
     if (cosOut <= 0.0f)
         return 0.0f;
     return cosOut * VLR_M_INV_PI;
@@ -85,7 +78,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateLambertianScatteringBSD
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    float cosOut = dirOutLocal.z;
     if (cosOut == 0.0f)
         return SampledSpectrum::Zero();
     // 反射：cosOut > 0（同半球）；透射：cosOut < 0（异半球），均有效
@@ -100,30 +93,23 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleLambertianScatteringBSDF(
     float u0, float u1, float u2,
     BSDFSampleResult* result) {
 
-    // u2 决定反射(0~0.5)还是透射(0.5~1)
+    // u2 decides reflection (0~0.5) or transmission (0.5~1)
     bool sampleReflection = (u2 < 0.5f);
-    Normal3D effectiveNormal = sampleReflection ? geomNormalLocal
-        : Normal3D(-geomNormalLocal.x, -geomNormalLocal.y, -geomNormalLocal.z);
 
-    // 余弦加权半球采样（与 Lambert 相同）
+    // Cosine-weighted hemisphere sampling around z-axis
     float r = safeSqrt(u0);
     float phi = u1 * VLR_M_2PI;
     float x = r * std::cos(phi);
     float y = r * std::sin(phi);
     float z = safeSqrt(1.0f - u0);
 
-    Vector3D tangent = (std::abs(effectiveNormal.z) < 0.999f)
-        ? normalize(cross(Vector3D(0, 1, 0), effectiveNormal))
-        : normalize(cross(Vector3D(1, 0, 0), effectiveNormal));
-    Vector3D bitangent = cross(effectiveNormal, tangent);
-
-    Vector3D dirLocal = normalize(
-        tangent * x + bitangent * y + effectiveNormal * z);
+    // For reflection: sample in +z hemisphere; for transmission: flip to -z
+    Vector3D dirLocal(x, y, sampleReflection ? z : -z);
 
     result->dirLocal = dirLocal;
     result->f = albedo * VLR_M_INV_PI;
     // PDF: 0.5 * cos/π（反射和透射各 50% 选择概率）
-    result->pdf = 0.5f * std::abs(dot(dirLocal, effectiveNormal)) * VLR_M_INV_PI;
+    result->pdf = 0.5f * std::abs(dirLocal.z) * VLR_M_INV_PI;
     result->sampledBSDFType = BSDFType_LambertianScattering;
     result->isDelta = false;
 }
@@ -135,7 +121,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getLambertianScatteringBSDFPDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float cosOut = dot(dirOutLocal, geomNormalLocal);
+    float cosOut = dirOutLocal.z;
     if (cosOut == 0.0f)
         return 0.0f;
     return 0.5f * std::abs(cosOut) * VLR_M_INV_PI;

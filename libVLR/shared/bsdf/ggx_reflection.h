@@ -18,8 +18,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateGGXBSDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
 
     if (NdotL <= 0.0f || NdotV <= 0.0f)
         return SampledSpectrum::Zero();
@@ -29,7 +29,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateGGXBSDF(
     if (halfLenSq < 1e-12f)
         return SampledSpectrum::Zero();  // 掠射角：half 接近零向量
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
 
     if (NdotH <= 0.0f)
         return SampledSpectrum::Zero();
@@ -70,11 +70,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE Vector3D sampleGGXVNDF(
     // 将 V 变换到 GGX 的椭圆空间（alpha 缩放）
     Vector3D Vh = normalize(Vector3D(alpha * V.x, alpha * V.y, ::vlr::vlr_max(V.z, 1e-6f)));
 
-    // 构建 Vh 的正交基
-    float lensq = Vh.y * Vh.y + Vh.z * Vh.z;
+    // 构建 Vh 的正交基（Heitz 2018 标准实现）
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
     Vector3D T1 = (lensq > 1e-10f)
-        ? normalize(Vector3D(0, -Vh.z, Vh.y))
-        : Vector3D(0, 0, 1);
+        ? Vector3D(-Vh.y, Vh.x, 0.0f) * (1.0f / safeSqrt(lensq))
+        : Vector3D(1, 0, 0);
     Vector3D T2 = cross(Vh, T1);
 
     // 在球面上采样
@@ -110,8 +110,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleGGXBSDF(
     float VdotH = dot(dirInLocal, H);
     Vector3D dirOutLocal = 2.0f * VdotH * H - dirInLocal;
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
 
     if (NdotV <= 0.0f) {
         result->pdf = 0.0f;
@@ -119,7 +119,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleGGXBSDF(
         return;
     }
 
-    float NdotH = dot(H, geomNormalLocal);
+    float NdotH = H.z;
 
     float alpha2 = alpha * alpha;
     float D = GGX_D(NdotH, alpha2);
@@ -156,8 +156,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getGGXBSDFPDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
 
     if (NdotL <= 0.0f || NdotV <= 0.0f)
         return 0.0f;
@@ -167,7 +167,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getGGXBSDFPDF(
     if (halfLenSq < 1e-12f)
         return 0.0f;
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     float VdotH = dot(dirOutLocal, halfVec);
 
     if (NdotH <= 0.0f || VdotH <= 0.0f)
@@ -198,8 +198,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
 
 #if defined(__CUDA_ARCH__) && defined(VLR_DEBUG_BSDF_VERBOSE)
     if (threadIdx.x == 0 && blockIdx.x == 0) {
@@ -220,7 +220,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
         return SampledSpectrum::Zero();
     
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     if (NdotH <= 0.0f)
         return SampledSpectrum::Zero();
 
@@ -279,8 +279,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotL = dot(dirInLocal, geomNormalLocal);
-    float NdotV = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirInLocal.z;
+    float NdotV = dirOutLocal.z;
     if (NdotL <= 0.0f || NdotV <= 0.0f)
         return SampledSpectrum::Zero();
 
@@ -290,7 +290,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateMicrofacetReflectionBSD
         return SampledSpectrum::Zero();
     
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     if (NdotH <= 0.0f)
         return SampledSpectrum::Zero();
 
@@ -336,7 +336,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     float u0, float u1,
     BSDFSampleResult* result) {
 
-    float NdotV = dot(dirInLocal, geomNormalLocal);
+    float NdotV = dirInLocal.z;
     if (NdotV <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
@@ -354,14 +354,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF(
     }
 
     Vector3D dirOutLocal = 2.0f * VdotH * H - dirInLocal;
-    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirOutLocal.z;
     if (NdotL <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
     }
 
-    float NdotH = dot(H, geomNormalLocal);
+    float NdotH = H.z;
     float alpha2 = alpha * alpha;
     float D = GGX_D(NdotH, alpha2);
     float G1_V = GGX_G1(NdotV, alpha2);
@@ -407,7 +407,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
     float u0, float u1,
     BSDFSampleResult* result) {
 
-    float NdotV = dot(dirInLocal, geomNormalLocal);
+    float NdotV = dirInLocal.z;
     if (NdotV <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
@@ -424,14 +424,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleMicrofacetReflectionBSDF_Aniso(
     }
 
     Vector3D dirOutLocal = 2.0f * VdotH * H - dirInLocal;
-    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    float NdotL = dirOutLocal.z;
     if (NdotL <= 0.0f) {
         result->pdf = 0.0f;
         result->f = SampledSpectrum::Zero();
         return;
     }
 
-    float NdotH = dot(H, geomNormalLocal);
+    float NdotH = H.z;
     float HdotX = H.x, HdotY = H.y;
     float VdotX = dirInLocal.x, VdotY = dirInLocal.y;
     float LdotX = dirOutLocal.x, LdotY = dirOutLocal.y;
@@ -476,8 +476,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotV = dot(dirInLocal, geomNormalLocal);
-    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    float NdotV = dirInLocal.z;
+    float NdotL = dirOutLocal.z;
     if (NdotV <= 0.0f || NdotL <= 0.0f)
         return 0.0f;
 
@@ -487,7 +487,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF(
         return 0.0f;
 
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
 
     float alpha = roughnessToAlpha(roughness);
     float alpha2 = alpha * alpha;
@@ -507,8 +507,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF_Aniso(
     const Vector3D& dirOutLocal,
     const Normal3D& geomNormalLocal) {
 
-    float NdotV = dot(dirInLocal, geomNormalLocal);
-    float NdotL = dot(dirOutLocal, geomNormalLocal);
+    float NdotV = dirInLocal.z;
+    float NdotL = dirOutLocal.z;
     if (NdotV <= 0.0f || NdotL <= 0.0f)
         return 0.0f;
 
@@ -518,7 +518,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float getMicrofacetReflectionBSDFPDF_Aniso(
         return 0.0f;
 
     Vector3D halfVec = normalize(halfSum);
-    float NdotH = dot(halfVec, geomNormalLocal);
+    float NdotH = halfVec.z;
     float VdotX = dirInLocal.x, VdotY = dirInLocal.y;
     float HdotX = halfVec.x, HdotY = halfVec.y;
 

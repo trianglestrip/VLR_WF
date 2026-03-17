@@ -88,7 +88,7 @@
   <PropertyGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include" /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include/cccl" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -104,17 +104,17 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <SupportJustMyCode></SupportJustMyCode>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;VLR_USE_OPTIX;CMAKE_INTDIR="Debug";VLR_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="Debug";VLR_EXPORTS</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;VLR_USE_OPTIX;CMAKE_INTDIR=\"Debug\";VLR_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR=\"Debug\";VLR_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <CudaCompile>
-      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
-      <Defines>%(Defines);_WINDOWS;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="Debug";VLR_EXPORTS</Defines>
+      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
+      <Defines>%(Defines);_WINDOWS;VLR_Device;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="Debug";VLR_EXPORTS</Defines>
       <AdditionalOptions>%(AdditionalOptions) -std=c++20 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob0 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
@@ -129,7 +129,7 @@
       <UseHostInclude>false</UseHostInclude>
     </CudaCompile>
     <Midl>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -156,7 +156,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include" /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include/cccl" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -171,19 +171,19 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <SupportJustMyCode></SupportJustMyCode>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;CMAKE_INTDIR="Release";VLR_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="Release";VLR_EXPORTS</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <DebugInformationFormat>
       </DebugInformationFormat>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;CMAKE_INTDIR=\"Release\";VLR_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR=\"Release\";VLR_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <CudaCompile>
-      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
-      <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="Release";VLR_EXPORTS</Defines>
+      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
+      <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="Release";VLR_EXPORTS</Defines>
       <AdditionalOptions>%(AdditionalOptions) -std=c++20 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Ob2 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
@@ -197,7 +197,7 @@
       <UseHostInclude>false</UseHostInclude>
     </CudaCompile>
     <Midl>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -224,7 +224,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include" /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include/cccl" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -239,19 +239,19 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <SupportJustMyCode></SupportJustMyCode>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;CMAKE_INTDIR="MinSizeRel";VLR_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="MinSizeRel";VLR_EXPORTS</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <DebugInformationFormat>
       </DebugInformationFormat>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;CMAKE_INTDIR=\"MinSizeRel\";VLR_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR=\"MinSizeRel\";VLR_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <CudaCompile>
-      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
-      <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="MinSizeRel";VLR_EXPORTS</Defines>
+      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
+      <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="MinSizeRel";VLR_EXPORTS</Defines>
       <AdditionalOptions>%(AdditionalOptions) -std=c++20 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Ob1 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
@@ -265,7 +265,7 @@
       <UseHostInclude>false</UseHostInclude>
     </CudaCompile>
     <Midl>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -292,7 +292,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include" /external:I "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1/include/cccl" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -308,17 +308,17 @@
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <SupportJustMyCode></SupportJustMyCode>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;CMAKE_INTDIR="RelWithDebInfo";VLR_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="RelWithDebInfo";VLR_EXPORTS</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;CMAKE_INTDIR=\"RelWithDebInfo\";VLR_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR=\"RelWithDebInfo\";VLR_EXPORTS</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <CudaCompile>
-      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
-      <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;CMAKE_INTDIR="RelWithDebInfo";VLR_EXPORTS</Defines>
+      <Include>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(Include)</Include>
+      <Defines>%(Defines);_WINDOWS;NDEBUG;VLR_Device;VLR_USE_OPTIX;VLR_PROFILE_SCENE_PREPARE;CMAKE_INTDIR="RelWithDebInfo";VLR_EXPORTS</Defines>
       <AdditionalOptions>%(AdditionalOptions) -std=c++20 --generate-code=arch=compute_75,code=[compute_75,sm_75] --expt-relaxed-constexpr -Xcompiler="/EHsc -Zi -Ob1 /utf-8"</AdditionalOptions>
       <CodeGeneration></CodeGeneration>
       <CompileOut>$(IntDir)%(Filename).obj</CompileOut>
@@ -332,7 +332,7 @@
       <UseHostInclude>false</UseHostInclude>
     </CudaCompile>
     <Midl>
-      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\gitProject\VLR_WF\libVLR;D:\gitProject\VLR_WF\libVLR\include;D:\gitProject\VLR_WF\libVLR\shared;D:\gitProject\VLR_WF\external;D:\gitProject\VLR_WF\external\tinyexr;D:\gitProject\VLR_WF\external\tinyexr\deps\miniz;D:\gitProject\VLR_WF\external\taskflow;C:\ProgramData\NVIDIA Corporation\OptiX SDK 8.0.0\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\include\cccl;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -434,6 +434,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     <CudaCompile Include="..\..\libVLR\GPU_kernels\accumulate.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\debug_rendering.cu" />
     <CudaCompile Include="..\..\libVLR\GPU_kernels\kernel_launch.cu" />
+    <CudaCompile Include="..\..\libVLR\GPU_kernels\tonemap.cu" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
