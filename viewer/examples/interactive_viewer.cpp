@@ -42,7 +42,7 @@ static struct AppState {
     float gamma = 2.2f;
     bool paused = false;
     bool needReset = false;
-    bool showGui = true;
+    bool showGui = false;
 
     // OpenGL
     GLuint texture = 0;

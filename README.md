@@ -13,6 +13,14 @@
 
 VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based renderer featuring a high-performance **Wavefront Path Tracing** implementation. The Wavefront architecture significantly improves GPU utilization and rendering performance compared to traditional recursive path tracing.
 
+### Render Gallery
+
+**Cornell Box** — 512×512, 256 spp, OptiX Denoiser, ACES Filmic Tonemapping
+
+![Cornell Box Render](docs/images/cornell_box_render.png)
+
+*Gold conductor box (GGX microfacet + FresnelConductor), glass sphere (specular transmission, IOR 1.5), checkerboard floor, area light. Real-time interactive preview with ImGui/GLFW.*
+
 ### Key Features
 
 - ✅ **Wavefront Path Tracing**: Batch processing for optimal GPU utilization
@@ -26,6 +34,9 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 - ✅ **Assimp Model Loading**: OBJ/PLY/FBX/glTF and other 3D model formats
 - ✅ **TaskFlow Parallel Pipeline**: DAG-based parallel scene preparation (GAS ∥ Bounds ∥ Aggregate → Upload → IAS)
 - ✅ **Built-in Profiling**: `VLR_PROFILE_SCENE_PREPARE` macro for end-to-end timing
+- ✅ **OptiX Denoiser**: AI-powered HDR denoising for clean low-spp output
+- ✅ **Interactive Viewer**: Real-time progressive preview with ImGui/GLFW/OpenGL
+- ✅ **ACES Filmic Tonemapping**: Cinematic HDR-to-LDR tone mapping
 - ✅ **Scalable**: Supports resolutions from 512x512 to 4K
 - ✅ **Configurable**: Fine-grained performance control via `PerformanceConfig`
 
@@ -604,9 +615,10 @@ See `test/cornell_box_test.cpp` for a complete example.
 |----------|-------------|--------|
 | Matte | Lambertian diffuse | ✅ Implemented |
 | Emissive | Area lights | ✅ Implemented |
-| Specular | Mirror reflection | ⏳ Planned |
-| Glass | Refraction/reflection | ⏳ Planned |
-| Microfacet | GGX, Beckmann BRDFs | ⏳ Planned |
+| Specular | Mirror reflection | ✅ Implemented |
+| Glass | Specular transmission (IOR) | ✅ Implemented |
+| Conductor | GGX microfacet + FresnelConductor | ✅ Implemented |
+| Microfacet | GGX reflection/scattering | ✅ Implemented |
 
 ### Optimizations
 
@@ -696,8 +708,7 @@ python ../test/boundary_tests.py
 
 1. **Volumes**: Volumetric rendering not supported
 2. **Cameras**: Only perspective camera implemented
-3. **Interactive Rendering**: No real-time preview / progressive display yet
-4. **Multi-GPU**: Single GPU only
+3. **Multi-GPU**: Single GPU only
 
 These limitations are planned for future releases.
 
