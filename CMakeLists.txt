@@ -296,5 +296,16 @@ else()
     message(STATUS "[VLR] Interactive Viewer skipped (GLFW, GLAD, or ImGui not found)")
 endif()
 
+# Offscreen Renderer（无窗口，纯 CUDA 离屏渲染 + PNG 保存）
+add_executable(offscreen_render viewer/examples/offscreen_render.cpp)
+target_include_directories(offscreen_render PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(offscreen_render PRIVATE VLR CUDA::cudart)
+target_compile_options(offscreen_render PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

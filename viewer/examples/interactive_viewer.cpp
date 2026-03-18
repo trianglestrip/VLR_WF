@@ -38,7 +38,7 @@ static struct AppState {
     uint32_t height = 512;
     uint32_t accumFrames = 0;
     int maxSamples = 256;
-    float exposure = 3.0f;
+    float exposure = 1.5f;
     float gamma = 2.2f;
     bool paused = false;
     bool needReset = false;
@@ -67,15 +67,15 @@ static struct AppState {
 static bool buildCornellBoxScene() {
     VLRResult res;
 
-    float white[]  = { 0.73f, 0.73f, 0.73f };
-    float red[]    = { 0.65f, 0.05f, 0.05f };
-    float blue[]   = { 0.05f, 0.05f, 0.65f };
-    float gold_eta[]   = { 0.18f, 0.47f, 1.46f };
-    float gold_kappa[] = { 3.10f, 2.38f, 1.95f };
-    float lightEmission[] = { 15.0f, 15.0f, 15.0f };
+    float white[]  = { 0.5225f, 0.5225f, 0.5225f };
+    float red[]    = { 0.5225f, 0.0509f, 0.0509f };
+    float blue[]   = { 0.0509f, 0.0509f, 0.5225f };
+    float gold_eta[]   = { 0.12481f, 0.46823f, 1.44476f };
+    float gold_kappa[] = { 3.32107f, 2.23761f, 1.69196f };
+    float lightEmission[] = { 30.0f, 30.0f, 30.0f };
 
     VLRMaterial whiteMat = nullptr, redMat = nullptr, blueMat = nullptr;
-    VLRMaterial goldMat = nullptr, lightMat = nullptr, glassMat = nullptr;
+    VLRMaterial goldMat = nullptr, lightMat = nullptr, diamondMat = nullptr;
     VLRMaterial checkerMat = nullptr;
 
     res = vlrCreateMaterial(g.scene, 0, white, nullptr, &whiteMat);
@@ -84,16 +84,16 @@ static bool buildCornellBoxScene() {
     if (res != VLRResult_Success) return false;
     res = vlrCreateMaterial(g.scene, 0, blue, nullptr, &blueMat);
     if (res != VLRResult_Success) return false;
-    res = vlrCreateMaterialConductor(g.scene, gold_eta, gold_kappa, 0.2f, &goldMat);
+    res = vlrCreateMaterialConductor(g.scene, gold_eta, gold_kappa, 0.01f, &goldMat);
     if (res != VLRResult_Success) return false;
     res = vlrCreateMaterial(g.scene, 0, white, lightEmission, &lightMat);
     if (res != VLRResult_Success) return false;
-    float glassColor[] = { 1.0f, 1.0f, 1.0f };
-    res = vlrCreateMaterialEx(g.scene, 6, glassColor, 0.0f, 0.0f, 1.5f, nullptr, &glassMat);
+    float diamondColor[] = { 0.999f, 0.999f, 0.999f };
+    res = vlrCreateMaterialEx(g.scene, 6, diamondColor, 0.0f, 0.0f, 2.42f, nullptr, &diamondMat);
     if (res != VLRResult_Success) return false;
-    float checkerDark[] = { 0.15f, 0.15f, 0.15f };
-    float checkerLight[] = { 0.65f, 0.65f, 0.65f };
-    res = vlrCreateMaterialCheckerboard(g.scene, checkerDark, checkerLight, 24, 3.0f, &checkerMat);
+    float checkerDark[] = { 0.05f, 0.05f, 0.05f };
+    float checkerLight[] = { 0.50f, 0.50f, 0.50f };
+    res = vlrCreateMaterialCheckerboard(g.scene, checkerDark, checkerLight, 64, 3.0f, &checkerMat);
     if (res != VLRResult_Success) return false;
 
     float pos0[] = {0,0,0}, sc1[] = {1,1,1}, ay[] = {0,1,0};
@@ -130,16 +130,16 @@ static bool buildCornellBoxScene() {
     vlrCreateTriangleMesh(g.scene, rightV, 4, rightI, 2, blueMat, &m);
     vlrCreateInstance(g.scene, m, pos0, sc1, ay, 0, &inst);
 
-    // 光源
-    float lightV[] = { -0.5f,2.99f,-0.5f, 0.5f,2.99f,-0.5f, 0.5f,2.99f,0.5f, -0.5f,2.99f,0.5f };
+    // 光源 (y=2.9 与参考一致)
+    float lightV[] = { -0.5f,2.9f,-0.5f, 0.5f,2.9f,-0.5f, 0.5f,2.9f,0.5f, -0.5f,2.9f,0.5f };
     uint32_t lightI[] = { 0,2,1, 0,3,2 };
     vlrCreateTriangleMesh(g.scene, lightV, 4, lightI, 2, lightMat, &m);
     VLRInstance li = nullptr;
     vlrCreateInstance(g.scene, m, pos0, sc1, ay, 0, &li);
     vlrAddAreaLight(g.scene, li);
 
-    // 金属盒子（左后方）
-    float bx=-0.6f, by=0, bz=-0.4f, bs=0.5f;
+    // 金属盒子（左侧，接近参考图位置）
+    float bx=-0.7f, by=0, bz=-0.25f, bs=0.5f;
     float boxV[] = {
         bx-bs,by,bz-bs, bx+bs,by,bz-bs, bx+bs,by,bz+bs, bx-bs,by,bz+bs,
         bx-bs,by+1,bz-bs, bx+bs,by+1,bz-bs, bx+bs,by+1,bz+bs, bx-bs,by+1,bz+bs,
@@ -148,25 +148,30 @@ static bool buildCornellBoxScene() {
     vlrCreateTriangleMesh(g.scene, boxV, 8, boxI, 12, goldMat, &m);
     vlrCreateInstance(g.scene, m, pos0, sc1, ay, 0, &inst);
 
-    // 玻璃球
-    constexpr int SL = 64, ST = 64;
-    float cx=0.55f, cy=0.6f, cz=0.35f, cr=0.6f;
-    std::vector<float> sv; std::vector<uint32_t> si;
-    for (int j = 0; j <= ST; ++j) {
-        float t = 3.14159265f * j / ST, sn = sinf(t), cs = cosf(t);
-        for (int i = 0; i <= SL; ++i) {
-            float p = 6.28318530f * i / SL;
-            sv.push_back(cx+cr*sn*cosf(p)); sv.push_back(cy+cr*cs); sv.push_back(cz+cr*sn*sinf(p));
+    // 钻石球（右侧，IOR=2.42）
+    auto makeSphere = [&](float cx, float cy, float cz, float cr, VLRMaterial mat) {
+        constexpr int SL = 64, ST = 64;
+        std::vector<float> sv; std::vector<uint32_t> si;
+        for (int j = 0; j <= ST; ++j) {
+            float t = 3.14159265f * j / ST, sn = sinf(t), cs = cosf(t);
+            for (int i = 0; i <= SL; ++i) {
+                float p = 6.28318530f * i / SL;
+                sv.push_back(cx+cr*sn*cosf(p)); sv.push_back(cy+cr*cs); sv.push_back(cz+cr*sn*sinf(p));
+            }
         }
-    }
-    for (int j = 0; j < ST; ++j)
-        for (int i = 0; i < SL; ++i) {
-            uint32_t a = j*(SL+1)+i, b = a+SL+1;
-            si.push_back(a); si.push_back(a+1); si.push_back(b);
-            si.push_back(a+1); si.push_back(b+1); si.push_back(b);
-        }
-    vlrCreateTriangleMesh(g.scene, sv.data(), (uint32_t)(sv.size()/3), si.data(), (uint32_t)(si.size()/3), glassMat, &m);
-    vlrCreateInstance(g.scene, m, pos0, sc1, ay, 0, &inst);
+        for (int j = 0; j < ST; ++j)
+            for (int i = 0; i < SL; ++i) {
+                uint32_t a = j*(SL+1)+i, b = a+SL+1;
+                si.push_back(a); si.push_back(a+1); si.push_back(b);
+                si.push_back(a+1); si.push_back(b+1); si.push_back(b);
+            }
+        VLRTriangleMesh sm = nullptr;
+        vlrCreateTriangleMesh(g.scene, sv.data(), (uint32_t)(sv.size()/3), si.data(), (uint32_t)(si.size()/3), mat, &sm);
+        VLRInstance si2 = nullptr;
+        vlrCreateInstance(g.scene, sm, pos0, sc1, ay, 0, &si2);
+    };
+
+    makeSphere(0.7f, 0.6f, 0.5f, 0.6f, diamondMat);
 
     // 相机
     VLRCameraParams cam = {};
@@ -308,7 +313,7 @@ static void drawImGui() {
         if (ImGui::CollapsingHeader("Tonemap", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::SliderFloat("Exposure", &g.exposure, 0.1f, 10.0f, "%.2f");
             ImGui::SliderFloat("Gamma", &g.gamma, 1.0f, 3.0f, "%.2f");
-            if (ImGui::Button("Reset Tonemap")) { g.exposure = 3.0f; g.gamma = 2.2f; }
+            if (ImGui::Button("Reset Tonemap")) { g.exposure = 1.0f; g.gamma = 2.2f; }
         }
 
         ImGui::Separator();

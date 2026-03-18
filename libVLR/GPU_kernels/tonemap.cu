@@ -9,15 +9,11 @@
 #include <stdint.h>
 #include <cstdio>
 
-// ACES Filmic tonemap (Narkowicz 2015 fit)
-// Better color preservation and highlight rolloff than Reinhard
-__device__ __forceinline__ float ACESFilmic(float x) {
-    const float a = 2.51f;
-    const float b = 0.03f;
-    const float c = 2.43f;
-    const float d = 0.59f;
-    const float e = 0.14f;
-    return fminf(fmaxf((x * (a * x + b)) / (x * (c * x + d) + e), 0.0f), 1.0f);
+__device__ __forceinline__ float sRGB_gamma(float v) {
+    v = fmaxf(v, 0.0f);
+    if (v <= 0.0031308f)
+        return 12.92f * v;
+    return 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
 }
 
 __global__ void tonemapKernel(
@@ -35,15 +31,13 @@ __global__ void tonemapKernel(
     float g = accumBuf[idx * 3 + 1] * invFrames * exposure;
     float b = accumBuf[idx * 3 + 2] * invFrames * exposure;
 
-    // ACES Filmic tonemap
-    r = ACESFilmic(r);
-    g = ACESFilmic(g);
-    b = ACESFilmic(b);
+    r = 1.0f - expf(-r);
+    g = 1.0f - expf(-g);
+    b = 1.0f - expf(-b);
 
-    // Gamma correction
-    r = powf(fmaxf(r, 0.0f), invGamma);
-    g = powf(fmaxf(g, 0.0f), invGamma);
-    b = powf(fmaxf(b, 0.0f), invGamma);
+    r = sRGB_gamma(r);
+    g = sRGB_gamma(g);
+    b = sRGB_gamma(b);
 
     outRGBA8[idx * 4 + 0] = static_cast<uint8_t>(fminf(r * 255.0f + 0.5f, 255.0f));
     outRGBA8[idx * 4 + 1] = static_cast<uint8_t>(fminf(g * 255.0f + 0.5f, 255.0f));

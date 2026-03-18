@@ -215,20 +215,18 @@ extern "C" __global__ void sampleBSDF(
         return;
     }
 
-    SampledSpectrum prevThroughput = pathState.throughput;
     if (result.isDelta) {
         pathState.throughput *= result.f / result.pdf;
     } else {
         pathState.throughput *= result.f * (cosAbs / result.pdf);
     }
 
-    // Firefly suppression: clamp per-bounce throughput multiplier
-    constexpr float maxBounceFactor = 20.0f;
+    // Firefly suppression: clamp per-bounce throughput multiplier (relaxed)
+    constexpr float maxBounceFactor = 100.0f;
     for (int i = 0; i < NumSpectralSamples; ++i) {
-        float prevVal = (prevThroughput.values[i] > 1e-10f) ? prevThroughput.values[i] : 1e-10f;
-        float factor = pathState.throughput.values[i] / prevVal;
-        if (factor > maxBounceFactor)
-            pathState.throughput.values[i] = prevVal * maxBounceFactor;
+        float v = pathState.throughput.values[i];
+        if (v > maxBounceFactor || v < -maxBounceFactor)
+            pathState.throughput.values[i] = (v > 0) ? maxBounceFactor : -maxBounceFactor;
     }
 
 #ifdef VLR_DEBUG_SPECULAR_TRANSMISSION
