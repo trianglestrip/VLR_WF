@@ -307,5 +307,16 @@ target_compile_options(offscreen_render PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
 )
 
+# Offscreen Diamond Renderer（钻石色散渲染 + PNG 保存）
+add_executable(offscreen_diamond viewer/examples/offscreen_diamond.cpp)
+target_include_directories(offscreen_diamond PRIVATE
+    ${CMAKE_SOURCE_DIR}/libVLR/include
+    ${CMAKE_SOURCE_DIR}/test
+)
+target_link_libraries(offscreen_diamond PRIVATE VLR CUDA::cudart)
+target_compile_options(offscreen_diamond PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+)
+
 # PTX 文件已通过 libVLR 的 add_custom_command 直接输出到 bin/GPU_kernels/
 # 无需额外复制

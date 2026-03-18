@@ -343,6 +343,30 @@ VLRResult vlrCreateMaterialEx(
     }
 }
 
+VLRResult vlrCreateMaterialDispersive(
+    VLRScene scene,
+    const float baseColor[3],
+    float ior,
+    float dispersionStrength,
+    VLRMaterial* outMaterial)
+{
+    if (!scene || !baseColor || !outMaterial) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+    *outMaterial = nullptr;
+    try {
+        VLRSceneImpl* sceneImpl = TO_SCENE(scene);
+        if (!sceneImpl->scene) return static_cast<VLRResult>(VLRResult_InvalidArgument);
+        uint32_t materialIndex = sceneImpl->scene->createMaterialDispersive(
+            baseColor[0], baseColor[1], baseColor[2], ior, dispersionStrength);
+        VLRMaterialImpl* matImpl = new VLRMaterialImpl();
+        matImpl->sceneImpl = sceneImpl;
+        matImpl->materialIndex = materialIndex;
+        *outMaterial = FROM_MAT(matImpl);
+        return static_cast<VLRResult>(VLRResult_Success);
+    } catch (...) {
+        return translateException();
+    }
+}
+
 VLRResult vlrCreateMaterialConductor(
     VLRScene scene,
     const float eta[3],

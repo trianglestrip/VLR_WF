@@ -183,6 +183,11 @@ public:
         float ior,
         float emissionR = 0.0f, float emissionG = 0.0f, float emissionB = 0.0f);
 
+    /// 创建色散透射材质（SpecularTransmission + Dispersion）
+    uint32_t createMaterialDispersive(
+        float albedoR, float albedoG, float albedoB,
+        float ior, float dispersionStrength);
+
     /// 创建导体微表面反射材质（MicrofacetReflection）
     uint32_t createMaterialConductor(
         float etaR, float etaG, float etaB,

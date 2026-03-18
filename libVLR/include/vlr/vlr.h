@@ -195,6 +195,20 @@ VLR_API VLRResult vlrCreateMaterialEx(
     const float* emissionColor,
     VLRMaterial* outMaterial);
 
+/// 创建色散透射材质（SpecularTransmission + Dispersion）
+/// 不同波长以不同折射率折射，产生彩虹色火彩效果
+/// @param scene 所属场景
+/// @param baseColor 基础颜色 RGB（通常为 (0.999, 0.999, 0.999)）
+/// @param ior 基准折射率（如钻石 2.42）
+/// @param dispersionStrength 色散强度（钻石 ~0.044，数值越大色散越强）
+/// @param outMaterial 输出材质句柄
+VLR_API VLRResult vlrCreateMaterialDispersive(
+    VLRScene scene,
+    const float baseColor[3],
+    float ior,
+    float dispersionStrength,
+    VLRMaterial* outMaterial);
+
 /// 创建导体微表面反射材质（MicrofacetReflection）
 /// @param scene 所属场景
 /// @param eta 折射率实部 RGB（如铝 [1.28, 0.94, 0.57]）

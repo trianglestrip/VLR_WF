@@ -433,91 +433,86 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleSpecularTransmissionBSDF(
     const SampledSpectrum& transmittance,
     const WavelengthSamples* wls, bool singleWlSelected,
     const Vector3D& dirInLocal, const Normal3D& geomNormalLocal,
+    bool frontFace,
     float u0, float /*u1*/,
     BSDFSampleResult* result) {
 
-    // 单波长选择：使用选定波长的 IOR
+    (void)geomNormalLocal;
+
+    // Undo face-forwarding to get the true geometric orientation
+    Vector3D wo = dirInLocal;
+    if (!frontFace)
+        wo.z = -wo.z;
+
+    float cosThetaO = wo.z;
+    bool entering = (cosThetaO > 0.0f);
+
+    // Wavelength-dependent IOR for dispersion: always use the path's selected
+    // wavelength channel. The external code (sample_bsdf.cu) handles the pdf
+    // compensation for single-wavelength selection.
     float etaT_eff = etaT;
-    if (wls && singleWlSelected && dispersionStrength > 0.0f) {
+    if (wls && dispersionStrength > 0.0f) {
         uint32_t idx = wls->selectedLambdaIndex() % NumSpectralSamples;
         float lambda = wls->lambdas[idx];
         etaT_eff = iorAtWavelength(lambda, etaT, dispersionStrength);
     }
 
-    float cosThetaI = dirInLocal.z;
-    // In shading-local: z-axis is shading normal (0,0,1).
-    // cosThetaI < 0: ray from outside entering surface.
-    // cosThetaI > 0: ray from inside exiting surface.
-    bool entering = (cosThetaI < 0.0f);
-    float etaRatio;
-    Normal3D nEff;
-    float etaIncident, etaTransmitted;
-    if (entering) {
-        nEff = Normal3D(0, 0, 1);
-        etaRatio = etaI / etaT_eff;  // 1/2.4 进入玻璃
-        etaIncident = etaI;
-        etaTransmitted = etaT_eff;
-    } else {
-        nEff = Normal3D(0, 0, -1);
-        etaRatio = etaT_eff / etaI;  // 2.4/1 离开玻璃
-        etaIncident = etaT_eff;
-        etaTransmitted = etaI;
-    }
-    float F = FresnelDielectric(std::abs(cosThetaI), etaIncident, etaTransmitted);
+    float etaILocal = entering ? etaI : etaT_eff;
+    float etaTLocal = entering ? etaT_eff : etaI;
+    float eta = etaILocal / etaTLocal;
 
-    Vector3D wt;
-    // CRITICAL: refractVector's internal formula expects cosThetaI > 0
-    // Since dirInLocal is outgoing and entering ray has cosThetaI < 0,
-    // we must pass -dirInLocal (incident direction) to refractVector
-    bool canRefract = refractVector(-dirInLocal, nEff, etaRatio, &wt);
+    float absCosTheta = std::abs(cosThetaO);
+    float Fr = FresnelDielectric(absCosTheta, etaILocal, etaTLocal);
 
-    // 全内反射：必须反射，能量守恒 f = F/|cos| = 1/|cos|，pdf = 1（反射不经过介质，无透射系数）
-    if (!canRefract) {
-        result->dirLocal = Vector3D(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
-        float cosAbs = std::abs(dirInLocal.z);
-        float fVal = (cosAbs > 1e-6f) ? (1.0f / cosAbs) : 0.0f;
-        for (int i = 0; i < NumSpectralSamples; ++i)
-            result->f.values[i] = fVal;
-        result->pdf = 1.0f;
+    if (u0 < Fr) {
+        // Reflection
+        Vector3D wi = Vector3D(-wo.x, -wo.y, wo.z);
+        if (!frontFace)
+            wi.z = -wi.z;
+
+        result->dirLocal = wi;
+        result->pdf = Fr;
+        result->f = transmittance * Fr;
         result->sampledBSDFType = BSDFType_Specular;
         result->isDelta = true;
-        return;
-    }
+    } else {
+        // Refraction
+        float sin2ThetaI = ::vlr::vlr_max(0.0f, 1.0f - absCosTheta * absCosTheta);
+        float sin2ThetaT = eta * eta * sin2ThetaI;
 
-    // 根据 Fresnel 概率选择反射或透射（离散采样）
-    // 参考libVLR_reference SpecularBSDF::sampleInternal line 1305-1330
-    // 反射: f = coeff*F/|cos|, pdf = F, throughput *= f*cos/pdf = coeff
-    // 透射: f = coeff*(1-F)*(etaI/etaT)^2/|cosT|, pdf = (1-F)*(etaI/etaT)^2, throughput *= f*cosT/pdf = coeff
-    if (u0 < F) {
-        // 反射（应用transmittance系数,参考line 1319）
-        result->dirLocal = Vector3D(-dirInLocal.x, -dirInLocal.y, dirInLocal.z);
-        float cosAbs = std::abs(dirInLocal.z);
-        if (cosAbs < 1e-6f) {
-            result->pdf = 0.0f;
-            result->f = SampledSpectrum::Zero();
+        if (sin2ThetaT >= 1.0f) {
+            // Total internal reflection fallback
+            Vector3D wr = Vector3D(-wo.x, -wo.y, wo.z);
+            if (!frontFace)
+                wr.z = -wr.z;
+            result->dirLocal = wr;
+            result->pdf = 1.0f;
+            result->f = transmittance;
+            result->sampledBSDFType = BSDFType_Specular;
+            result->isDelta = true;
             return;
         }
-        // f = transmittance * F / |cos|
-        result->f = transmittance * (F / cosAbs);
-        result->pdf = F;
-        result->sampledBSDFType = BSDFType_Specular;
-        result->isDelta = true;
-    } else {
-        // 透射：Delta transmission BSDF
-        // CRITICAL FIX: For delta transmission, DO NOT divide by cosThetaT
-        // The integrator uses: throughput *= f / pdf (no cos term)
-        // So f should be the direct energy contribution: transmittance * (1-F) * eta^2
-        // NOT the full BSDF form with /|cosT|
-        
-        float etaRatio2 = (etaIncident * etaIncident) / (etaTransmitted * etaTransmitted);
-        
-        // f = transmittance * (1-F) * eta^2  [NO division by cosThetaT!]
-        for (int i = 0; i < NumSpectralSamples; ++i)
-            result->f.values[i] = transmittance.values[i] * (1.0f - F) * etaRatio2;
-        
-        // Use the refracted direction computed by refract()
-        result->dirLocal = normalize(wt);
-        result->pdf = 1.0f - F;
+
+        float cosThetaT = safeSqrt(1.0f - sin2ThetaT);
+
+        Vector3D wi;
+        wi.x = -eta * wo.x;
+        wi.y = -eta * wo.y;
+        wi.z = entering ? -cosThetaT : cosThetaT;
+
+        float len = safeSqrt(wi.x * wi.x + wi.y * wi.y + wi.z * wi.z);
+        if (len > 1e-7f) {
+            wi.x /= len; wi.y /= len; wi.z /= len;
+        }
+
+        if (!frontFace)
+            wi.z = -wi.z;
+
+        float Ft = 1.0f - Fr;
+
+        result->dirLocal = wi;
+        result->pdf = Ft;
+        result->f = transmittance * Ft;
         result->sampledBSDFType = BSDFType_SpecularTransmission;
         result->isDelta = true;
     }

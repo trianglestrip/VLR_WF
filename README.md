@@ -21,6 +21,12 @@ VLR (Versatile Light-transport Renderer) is a GPU-accelerated physically-based r
 
 *Gold conductor box (GGX microfacet + FresnelConductor), glass sphere (specular transmission, IOR 1.5), checkerboard floor, area light. Real-time interactive preview with ImGui/GLFW.*
 
+**Diamond Dispersion** — 800x800, 512 spp, OptiX Denoiser, Chromatic Dispersion (Fire)
+
+![Diamond Dispersion](docs/images/diamond_dispersion.png)
+
+*Procedurally generated Round Brilliant Cut diamond (IOR 2.42, dispersion 0.12) showing wavelength-dependent refraction. Multiple light sources illuminate the facets to produce chromatic fire — rainbow-colored light patterns caused by spectral dispersion.*
+
 ### Key Features
 
 - ✅ **Wavefront Path Tracing**: Batch processing for optimal GPU utilization
@@ -618,6 +624,7 @@ See `test/cornell_box_test.cpp` for a complete example.
 | Specular | Mirror reflection | ✅ Implemented |
 | Glass | Specular transmission (IOR) | ✅ Implemented |
 | Conductor | GGX microfacet + FresnelConductor | ✅ Implemented |
+| Dispersive | Specular transmission + chromatic dispersion | ✅ Implemented |
 | Microfacet | GGX reflection/scattering | ✅ Implemented |
 
 ### Optimizations

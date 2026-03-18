@@ -108,15 +108,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void computeF0FromMetallic(
         F0->values[i] = baseColor.values[i] * metallic + dielectricF0 * (1.0f - metallic);
 }
 
-/// 波长相关折射率：简化 Cauchy 近似 n(λ) ≈ n_base + 色散项
-/// lambda: 波长(nm), nBase: 基准折射率, dispersionStrength: 色散强度 (0~0.1 典型)
-/// 玻璃：n 在蓝光更高，红光较低
+/// Wavelength-dependent IOR via Cauchy-like approximation.
+/// dispersionStrength = (nF - nC), the difference in IOR between F-line (486nm)
+/// and C-line (656nm). Diamond ≈ 0.044, Crown glass ≈ 0.016, Flint glass ≈ 0.025.
+/// The formula maps dispersionStrength linearly across the visible spectrum
+/// centered at the D-line (589nm).
 CUDA_DEVICE_FUNCTION CUDA_INLINE float iorAtWavelength(
     float lambda, float nBase, float dispersionStrength) {
     if (dispersionStrength <= 0.0f) return nBase;
-    constexpr float lambdaRef = 550.0f;
-    float delta = (lambdaRef - lambda) / 100.0f;  // 每100nm变化
-    return nBase + dispersionStrength * 0.02f * delta;
+    constexpr float lambdaD = 589.3f; // Fraunhofer D-line (reference wavelength)
+    constexpr float fcSpan = 170.2f;  // lambdaC - lambdaF = 656.3 - 486.1
+    return nBase + dispersionStrength * (lambdaD - lambda) / fcSpan;
 }
 
 } // namespace shared

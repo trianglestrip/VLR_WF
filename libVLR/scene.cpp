@@ -316,6 +316,16 @@ uint32_t Scene::createMaterialEx(
     return matIndex;
 }
 
+uint32_t Scene::createMaterialDispersive(
+    float albedoR, float albedoG, float albedoB,
+    float ior, float dispersionStrength)
+{
+    MaterialDescriptorBuilder b(static_cast<uint32_t>(BSDFType_SpecularTransmission));
+    b.setAlbedo(albedoR, albedoG, albedoB).setIOR(ior).setDispersion(dispersionStrength);
+    m_materials.push_back(b.build());
+    return static_cast<uint32_t>(m_materials.size() - 1);
+}
+
 uint32_t Scene::createMaterialConductor(
     float etaR, float etaG, float etaB,
     float kappaR, float kappaG, float kappaB,

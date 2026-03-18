@@ -235,8 +235,14 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleBSDFWithU2(
             transmittance.values[i] = 1.0f;
         }
         
-        sampleDielectricBSDF_PBRT(1.0f, ior, transmittance, dirInLocal, ctx.geomNormalLocal,
-            ctx.surfPt->isFrontFace, u0, result);
+        if (disp > 0.0f) {
+            sampleSpecularTransmissionBSDF(1.0f, ior, disp, transmittance,
+                wls, singleWl, dirInLocal, ctx.geomNormalLocal,
+                ctx.surfPt->isFrontFace, u0, u1, result);
+        } else {
+            sampleDielectricBSDF_PBRT(1.0f, ior, transmittance, dirInLocal, ctx.geomNormalLocal,
+                ctx.surfPt->isFrontFace, u0, result);
+        }
         break;
     }
     case BSDFType_GGXTransmission: {

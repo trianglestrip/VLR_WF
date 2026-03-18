@@ -197,7 +197,12 @@ extern "C" __global__ void sampleBSDF(
     bool isDispersive = isDispersiveBSDFType(result.sampledBSDFType, matDesc);
     
     if (isDispersive && !pathState.singleWlSelected()) {
-        result.pdf /= NumSpectralSamples;
+        uint32_t selIdx = pathState.wls.selectedLambdaIndex() % NumSpectralSamples;
+        for (int i = 0; i < NumSpectralSamples; ++i) {
+            if (i != (int)selIdx)
+                result.f.values[i] = 0.0f;
+        }
+        result.f.values[selIdx] *= (float)NumSpectralSamples;
         pathState.setSingleWlSelected();
     }
 
